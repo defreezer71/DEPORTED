@@ -4,7 +4,7 @@ const LOOT_TYPES = {
   ammo_m4: { label: 'M4 Ammo x30', color: 0xccaa44, height: 0.15 },
   ammo_pistol: { label: '1911 Ammo x15', color: 0xcc8833, height: 0.12 },
   health: { label: 'Health Pack +50', color: 0x44cc66, height: 0.15 },
-  armor: { label: 'Armor +50', color: 0x4488cc, height: 0.15 },
+  armor: { label: 'Armor +100', color: 0x4488cc, height: 0.15 },
 };
 
 function spawnLoot(x, z, type) {
