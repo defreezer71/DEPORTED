@@ -586,12 +586,18 @@ function update() {
     loot.rotation.y += dt * 1.5;
   }
 
-  // Smoke
+  // Smoke — update instanced mesh positions
   for (const s of smokeParticles) {
-    s.position.y = s.userData.baseY + Math.sin(clock.elapsedTime * s.userData.speed + s.userData.phase) * 2;
-    s.position.x = Math.sin(clock.elapsedTime * 0.3 + s.userData.phase) * 2.5;
-    s.position.z = Math.cos(clock.elapsedTime * 0.2 + s.userData.phase) * 2.5;
+    _smokeDummy.position.set(
+      s.ox + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 2.5,
+      s.baseY + Math.sin(clock.elapsedTime * s.speed + s.phase) * 2,
+      s.oz + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 2.5
+    );
+    _smokeDummy.scale.setScalar(s.size);
+    _smokeDummy.updateMatrix();
+    smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
   }
+  smokeInst.instanceMatrix.needsUpdate = true;
 
   // Water vignette
   if (state.waterRising) {
