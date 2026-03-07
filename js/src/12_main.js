@@ -8,26 +8,102 @@ const fwd = new THREE.Vector3();
 const rgt = new THREE.Vector3();
 let minimapTimer = 0;
 let perfFrames = 0, perfLastTime = 0;
-const ashClouds = [];
+
+// ── Instanced Ash Cloud Pool — 1 draw call for ALL ash particles ──
+const ASH_POOL_SIZE = 300;
+const ashGeo = new THREE.SphereGeometry(1, 5, 4); // unit sphere, scaled per instance
+const ashMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.7, color: 0x444444 });
+const ashMesh = new THREE.InstancedMesh(ashGeo, ashMat, ASH_POOL_SIZE);
+ashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(ashMesh);
+
+// Per-instance data arrays
+const ashActive    = new Array(ASH_POOL_SIZE).fill(false);
+const ashPos       = Array.from({ length: ASH_POOL_SIZE }, () => new THREE.Vector3());
+const ashVel       = Array.from({ length: ASH_POOL_SIZE }, () => new THREE.Vector3());
+const ashSize      = new Float32Array(ASH_POOL_SIZE);
+const ashGrowRate  = new Float32Array(ASH_POOL_SIZE);
+const ashLife      = new Float32Array(ASH_POOL_SIZE);
+const ashMaxLife   = new Float32Array(ASH_POOL_SIZE);
+const ashOpacity   = new Float32Array(ASH_POOL_SIZE);
+const ashColors    = [0x333333, 0x444444, 0x555555, 0x3a3020, 0x4a4a4a];
+const ashColorObjs = ashColors.map(c => new THREE.Color(c));
+
+// Set up per-instance color buffer
+ashMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(ASH_POOL_SIZE * 3), 3);
+
+const _ashDummy = new THREE.Object3D();
+
 function spawnAshCloud(size, upVel, life) {
-  const ash = new THREE.Mesh(
-    new THREE.SphereGeometry(size, 6, 5),
-    new THREE.MeshLambertMaterial({
-      color: [0x333333, 0x444444, 0x555555, 0x3a3020, 0x4a4a4a][Math.floor(Math.random() * 5)],
-      transparent: true, opacity: 0.85 + Math.random() * 0.15
-    })
-  );
-  ash.position.set(
-    (Math.random() - 0.5) * 12,
-    CONFIG.volcanoHeight + Math.random() * 3,
-    (Math.random() - 0.5) * 12
-  );
-  ash.userData = {
-    vel: new THREE.Vector3((Math.random() - 0.5) * 2, upVel, (Math.random() - 0.5) * 2), // Mostly vertical
-    life: life, maxLife: life + 5, growRate: 0.3 + Math.random() * 0.8
-  };
-  scene.add(ash);
-  ashClouds.push(ash);
+  // Find a free slot in the pool
+  for (let i = 0; i < ASH_POOL_SIZE; i++) {
+    if (ashActive[i]) continue;
+    ashActive[i]   = true;
+    ashSize[i]     = size;
+    ashGrowRate[i] = 0.3 + Math.random() * 0.8;
+    ashLife[i]     = life;
+    ashMaxLife[i]  = life + 5;
+    ashPos[i].set(
+      (Math.random() - 0.5) * 12,
+      CONFIG.volcanoHeight + Math.random() * 3,
+      (Math.random() - 0.5) * 12
+    );
+    ashVel[i].set(
+      (Math.random() - 0.5) * 2,
+      upVel,
+      (Math.random() - 0.5) * 2
+    );
+    // Random ash color
+    const col = ashColorObjs[Math.floor(Math.random() * ashColorObjs.length)];
+    ashMesh.instanceColor.setXYZ(i, col.r, col.g, col.b);
+    return;
+  }
+  // Pool full — silently skip (no new mesh created)
+}
+
+function updateAshClouds(dt) {
+  for (let i = 0; i < ASH_POOL_SIZE; i++) {
+    if (!ashActive[i]) {
+      // Hide inactive instances by scaling to zero
+      _ashDummy.position.set(0, -9999, 0);
+      _ashDummy.scale.set(0, 0, 0);
+      _ashDummy.updateMatrix();
+      ashMesh.setMatrixAt(i, _ashDummy.matrix);
+      continue;
+    }
+
+    ashVel[i].y *= 0.998;
+    ashVel[i].x *= 0.99;
+    ashVel[i].z *= 0.99;
+    ashPos[i].addScaledVector(ashVel[i], dt);
+    ashSize[i] += ashGrowRate[i] * dt;
+    ashLife[i] -= dt;
+
+    const opacity = Math.max(0, (ashLife[i] / ashMaxLife[i]) * 0.6);
+    ashOpacity[i] = opacity;
+
+    if (ashLife[i] <= 0) {
+      ashActive[i] = false;
+      _ashDummy.position.set(0, -9999, 0);
+      _ashDummy.scale.set(0, 0, 0);
+      _ashDummy.updateMatrix();
+      ashMesh.setMatrixAt(i, _ashDummy.matrix);
+      continue;
+    }
+
+    const s = ashSize[i];
+    _ashDummy.position.copy(ashPos[i]);
+    _ashDummy.scale.set(s, s * 0.6, s);
+    _ashDummy.updateMatrix();
+    ashMesh.setMatrixAt(i, _ashDummy.matrix);
+  }
+
+  ashMesh.instanceMatrix.needsUpdate = true;
+  ashMesh.instanceColor.needsUpdate = true;
+
+  // Drive shared material opacity from average of active particles
+  // (use a fixed mid-value — individual fading is via scale-to-zero for expired ones)
+  ashMat.opacity = 0.65;
 }
 
 function update() {
@@ -210,8 +286,6 @@ function update() {
     if (camera.position.x > objBB.min.x - r && camera.position.x < objBB.max.x + r &&
         camera.position.z > objBB.min.z - r && camera.position.z < objBB.max.z + r) {
       const objTop = objBB.max.y;
-      // Check using both crouched and standing height — so standing up from a crouch
-      // still recognises the object as the floor, not just the current targetHeight
       const feetCrouch  = camera.position.y - CONFIG.crouchHeight;
       const feetStand   = camera.position.y - CONFIG.playerHeight;
       const nearTop = (feetCrouch >= objTop - 0.6 && feetCrouch <= objTop + 1.2) ||
@@ -224,33 +298,30 @@ function update() {
 
   const standY = floorH + state.smoothCameraHeight;
   const hardStandY = floorH + targetHeight;
-  // Snap up only to smoothed height — prevents jerky jump on uncrouching
   if (camera.position.y <= standY) {
     camera.position.y = standY; state.velocityY = 0; state.isGrounded = true;
   } else if (camera.position.y > hardStandY + 0.15) {
     state.isGrounded = false;
   }
 
-  // Float on water — if water reaches upper torso, push player to surface
-  const floatLevel = state.waterLevel + 1.2; // Head stays above water
+  // Float on water
+  const floatLevel = state.waterLevel + 1.2;
   if (state.waterRising && camera.position.y < floatLevel && state.waterLevel > floorH + 0.8) {
     camera.position.y = floatLevel;
     state.velocityY = 0;
     state.isGrounded = true;
   }
 
-  // Smooth crouch camera transition — driven by smoothCameraHeight above
+  // Smooth crouch camera transition
   if (state.isGrounded) {
     camera.position.y += (standY - camera.position.y) * dt * 20;
   }
 
-  // (collision now handled entirely by checkCollisionAndStep)
-
   // Footstep sounds — no steps when swimming
   const isSwimming = state.waterRising && state.waterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
   if (smoothedMove.lengthSq() > 0.01 && state.isGrounded && !isSwimming) {
-    let stepSpeed = state.crouching ? 2.5 : 4.5; // Slower paces (was 4/7)
-    if (state.ads) stepSpeed *= 0.6; // Even slower when aiming
+    let stepSpeed = state.crouching ? 2.5 : 4.5;
+    if (state.ads) stepSpeed *= 0.6;
     footstepTimer += dt * stepSpeed;
     if (footstepTimer >= 1) {
       footstepTimer = 0;
@@ -266,14 +337,14 @@ function update() {
 
   // Animate gate doors swinging open
   if (state.gateOpening && gateOpenProgress < 1) {
-    gateOpenProgress += dt * 0.5; // Takes ~2 seconds to fully open
+    gateOpenProgress += dt * 0.5;
     if (gateOpenProgress > 1) {
       gateOpenProgress = 1;
-      if (state.sprintTimer === 0) state.sprintTimer = 15; // Start 15s sprint
+      if (state.sprintTimer === 0) state.sprintTimer = 15;
     }
-    const angle = gateOpenProgress * Math.PI * 0.45; // Swing ~80 degrees
-    gatePivotL.rotation.y = angle;   // Left door swings outward
-    gatePivotR.rotation.y = -angle;  // Right door swings other way
+    const angle = gateOpenProgress * Math.PI * 0.45;
+    gatePivotL.rotation.y = angle;
+    gatePivotR.rotation.y = -angle;
   }
 
   // Shared updates — run regardless of alive/dead
@@ -300,16 +371,15 @@ function update() {
     waterWarning.style.fontSize = '28px';
     waterWarning.classList.add('show');
     setTimeout(() => waterWarning.classList.remove('show'), 5000);
-    // Initial massive burst — 132 ash (10% more)
+    // Initial massive burst
     for (let i = 0; i < 152; i++) spawnAshCloud(3 + Math.random() * 6, 14 + Math.random() * 28, 12 + Math.random() * 15);
-    // Deep constant bass eruption rumble — no oscillation, pure weight
+    // Deep constant bass eruption rumble
     {
       const ctx = ensureAudio();
       const t0 = ctx.currentTime;
       const fullDur = 15;
       const taperStart = 10;
 
-      // Initial boom — one-shot deep impact
       const boomBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 1.8), ctx.sampleRate);
       const bbd = boomBuf.getChannelData(0);
       for (let i = 0; i < bbd.length; i++) {
@@ -322,7 +392,6 @@ function update() {
       boomSrc.connect(boomLp).connect(boomGain).connect(getMaster());
       boomSrc.start(t0);
 
-      // Three staggered pure noise layers — no sine modulation at all
       for (let layer = 0; layer < 3; layer++) {
         const offset = layer * 0.21;
         const dur = fullDur - offset;
@@ -342,8 +411,6 @@ function update() {
         src.start(t0 + offset);
       }
 
-      // Deep sub layer — use NOISE not oscillators to avoid any tonal oscillation
-      // A 4th staggered noise layer with very deep lowpass for the sub-bass feel
       const subBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * fullDur), ctx.sampleRate);
       const sbd = subBuf.getChannelData(0);
       for (let i = 0; i < sbd.length; i++) {
@@ -353,14 +420,12 @@ function update() {
         sbd[i] = (Math.random() * 2 - 1) * fadeIn * fadeOut;
       }
       const subSrc = ctx.createBufferSource(); subSrc.buffer = subBuf;
-      // Very tight lowpass — only passes true sub-bass rumble, kills all mid/high
       const subLp1 = ctx.createBiquadFilter(); subLp1.type = 'lowpass'; subLp1.frequency.value = 45;
       const subLp2 = ctx.createBiquadFilter(); subLp2.type = 'lowpass'; subLp2.frequency.value = 45;
       const subG = ctx.createGain(); subG.gain.value = 0.92;
       subSrc.connect(subLp1).connect(subLp2).connect(subG).connect(getMaster());
       subSrc.start(t0);
 
-      // Irregular heavy thumps — noise bursts only, no tones
       [950, 2600, 4350, 6100, 7800, 9500].forEach(ms => {
         setTimeout(() => {
           playNoise(0.322, 0.38, 70, 'lowpass');
@@ -376,46 +441,35 @@ function update() {
     scene.add(haze);
     state.hazePlane = haze;
   }
+
   // Continuous ash plume till match end
   if (state.erupted) {
     state.ashTimer = (state.ashTimer || 0) + dt;
-    if (state.ashTimer > 0.07) { // Faster spawn rate
+    if (state.ashTimer > 0.07) {
       state.ashTimer = 0;
       spawnAshCloud(2.5 + Math.random() * 5, 8 + Math.random() * 18, 10 + Math.random() * 14);
     }
   }
-  // Fade in haze — gets darker over time till match end
+
+  // Update all ash via instanced pool — replaces per-mesh loop
+  updateAshClouds(dt);
+
+  // Fade in haze
   if (state.hazePlane) {
     const timeSinceEruption = Math.max(0, state.matchTime - eruptionTime);
-    const targetOpacity = Math.min(0.35, timeSinceEruption * 0.003); // Gradually darkens to 35%
+    const targetOpacity = Math.min(0.35, timeSinceEruption * 0.003);
     state.hazePlane.material.opacity += (targetOpacity - state.hazePlane.material.opacity) * dt * 0.5;
-    // Dim sun progressively — ash blocks sunlight
     const dimFactor = Math.max(0.35, 1 - timeSinceEruption * 0.004);
     sun.intensity = 1.6 * dimFactor;
     sunMesh.material.color.setHex(dimFactor > 0.6 ? 0xFFEE00 : 0xCC8800);
   }
+
   // Screen shake — 5 seconds on eruption
   if (state.erupted && state.matchTime < eruptionTime + 5 && !state.playerDead) {
     const shakeIntensity = 0.12 * (1 - (state.matchTime - eruptionTime) / 5);
     camera.position.x += (Math.random() - 0.5) * shakeIntensity;
     camera.position.y += (Math.random() - 0.5) * shakeIntensity * 0.5;
     camera.position.z += (Math.random() - 0.5) * shakeIntensity * 0.25;
-  }
-
-  // Update ash clouds
-  for (let i = ashClouds.length - 1; i >= 0; i--) {
-    const ash = ashClouds[i];
-    ash.userData.vel.y *= 0.998; // Slight decel, never falls
-    ash.position.addScaledVector(ash.userData.vel, dt);
-    ash.userData.vel.x *= 0.99; ash.userData.vel.z *= 0.99;
-    const s = ash.scale.x + ash.userData.growRate * dt;
-    ash.scale.set(s, s * 0.6, s);
-    ash.userData.life -= dt;
-    ash.material.opacity = Math.max(0, (ash.userData.life / ash.userData.maxLife) * 0.6);
-    if (ash.userData.life <= 0) {
-      scene.remove(ash); ash.geometry.dispose(); ash.material.dispose();
-      ashClouds.splice(i, 1);
-    }
   }
 
   // Water starts rising after waterRiseStart seconds
@@ -425,18 +479,16 @@ function update() {
       water.visible = true;
     }
 
-    // Water rises gradually — reaches volcano peak by end of match
     const rawProgress = (state.matchTime - state.waterRiseStart) / (state.matchDuration - state.waterRiseStart);
     const timeSinceRise = state.matchTime - state.waterRiseStart;
-    // Slow ooze for first 10 seconds, then normal pace
     let riseProgress;
     if (timeSinceRise < 10) {
-      riseProgress = (timeSinceRise / 10) * 0.02; // Very slow — barely rises
+      riseProgress = (timeSinceRise / 10) * 0.02;
     } else {
       const normalProgress = (timeSinceRise - 10) / (state.matchDuration - state.waterRiseStart - 10);
       riseProgress = 0.02 + Math.pow(normalProgress, 0.70) * 0.98;
     }
-    state.waterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3); // Starts at stream bed level (-0.3), fills stream first
+    state.waterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3);
     water.position.y = state.waterLevel;
 
     // Water wave effect
@@ -449,13 +501,13 @@ function update() {
     }
     waterPosAttr.needsUpdate = true;
 
-    // Water damage to player — starts at knee level (water 0.5 below player feet)
+    // Water damage to player
     const playerCurrentH = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
     const playerFeetY = camera.position.y - playerCurrentH;
     const kneeY = playerFeetY + 0.4;
     if (state.waterLevel > kneeY) {
       state.waterDmgTimer += dt;
-      if (state.waterDmgTimer >= 1) { // 5hp per second
+      if (state.waterDmgTimer >= 1) {
         state.waterDmgTimer -= 1;
         if (state.armor > 0) {
           state.armor = Math.max(0, state.armor - 5);
@@ -464,7 +516,6 @@ function update() {
         }
         updateHUD();
         SFX.water_damage();
-        // Show damage vignette (same as bullet damage)
         const dv = document.getElementById('damage-vignette');
         dv.classList.add('show');
         setTimeout(() => dv.classList.remove('show'), 350);
@@ -473,12 +524,12 @@ function update() {
       state.waterDmgTimer = 0;
     }
 
-    // Water damage to bots too
+    // Water damage to bots
     for (const bot of bots) {
       if (!bot.alive) continue;
       const botFeetY = bot.group.position.y;
       if (state.waterLevel > botFeetY + 0.4) {
-        bot.hp -= dt * 5; // 5hp/sec
+        bot.hp -= dt * 5;
         if (bot.hp <= 0) {
           bot.alive = false;
           bot.group.rotation.x = Math.PI / 2;
@@ -492,8 +543,6 @@ function update() {
         }
       }
     }
-
-    // (periodic warning removed — eruption is sufficient)
   }
 
   // Ambient jungle sounds
@@ -503,10 +552,10 @@ function update() {
     if (roll < 0.4) SFX.bird();
     else if (roll < 0.7) SFX.insect();
     else SFX.wind();
-    ambientTimer = 4 + Math.random() * 8; // 4-12 seconds between sounds
+    ambientTimer = 4 + Math.random() * 8;
   }
 
-  // Loot proximity — floor loot and depot crates
+  // Loot proximity
   state.nearbyLoot = null;
   let closestDist = 2.5;
   const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -516,7 +565,6 @@ function update() {
     const dz = loot.position.z - camera.position.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist > closestDist) continue;
-    // Depot crates: player must be physically inside the shed
     if (loot.userData.depot) {
       const { shedX, shedZ, shedHW, shedHD } = loot.userData;
       if (Math.abs(camera.position.x - shedX) > shedHW ||
@@ -532,13 +580,11 @@ function update() {
   // Loot bob + float with water
   for (const loot of lootItems) {
     const groundY = loot.userData.baseY;
-    const floatY = state.waterLevel + 0.1; // Sits just above water surface
+    const floatY = state.waterLevel + 0.1;
     const effectiveY = Math.max(groundY, floatY);
     loot.position.y = effectiveY + Math.sin(clock.elapsedTime * 2 + loot.position.x) * 0.08;
     loot.rotation.y += dt * 1.5;
   }
-
-  // Depot crates are idle (no bob or spin)
 
   // Smoke
   for (const s of smokeParticles) {
@@ -547,7 +593,7 @@ function update() {
     s.position.z = Math.cos(clock.elapsedTime * 0.2 + s.userData.phase) * 2.5;
   }
 
-  // Water vignette intensifies as island sinks
+  // Water vignette
   if (state.waterRising) {
     const maxWater = CONFIG.volcanoHeight * 0.85;
     const progress = Math.min(1, Math.max(0, state.waterLevel / maxWater));
@@ -556,7 +602,7 @@ function update() {
     waterVignette.style.opacity = 0;
   }
 
-  // Bubble rising animation — stop once water starts rising
+  // Bubble animation
   if (!state.waterRising) {
     bubbleGroup.visible = true;
     bubbleGroup.children.forEach(b => {
@@ -575,13 +621,11 @@ function update() {
   let targetPos;
 
   if (state.reloadPhase === 'down' || state.switchPhase === 'down') {
-    // Weapon drops below view
     targetPos = restPos.clone();
     targetPos.y = -0.7;
     targetPos.x += 0.05;
     weaponGroup.rotation.x = -0.3;
   } else if (state.reloadPhase === 'up' || state.switchPhase === 'up') {
-    // Weapon comes back up
     targetPos = restPos.clone();
   } else if (state.ads) {
     targetPos = new THREE.Vector3(0, -0.15, restPos.z - 0.05);
@@ -616,8 +660,6 @@ function update() {
     p.userData.life -= dt;
     if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); impactParticles.splice(i, 1); }
   }
-
-  // Minimap removed
 
   // Performance stats
   perfFrames++;
