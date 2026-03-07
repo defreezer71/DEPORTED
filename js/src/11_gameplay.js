@@ -191,7 +191,7 @@ function pickupLoot() {
   if (loot.userData.depot) {
     if (type === 'depot_ammo_m4')    { state.reserveAmmo.m4     += 10; SFX.pickup(); }
     if (type === 'depot_ammo_pistol'){ state.reserveAmmo.pistol  += 10; SFX.pickup(); }
-    if (type === 'depot_armor')      { state.armor = 50;                SFX.pickup(); }
+    if (type === 'depot_armor')      { state.armor = 100;               SFX.pickup(); }
     if (type === 'depot_health')     { state.health = Math.min(100, state.health + 50); updateHUD(); SFX.pickup(); }
     updateHUD();
     return;
@@ -199,12 +199,12 @@ function pickupLoot() {
 
   SFX.pickup();
   if (type === 'health' && state.hp >= 100) return;
-  if (type === 'armor'  && state.armor >= 50) return;
+  if (type === 'armor'  && state.armor >= 100) return;
   switch (type) {
     case 'ammo_m4':     state.reserveAmmo.m4     += 30; break;
     case 'ammo_pistol': state.reserveAmmo.pistol  += 15; break;
     case 'health':      state.hp = 100; break;
-    case 'armor':       state.armor = 50; break;
+    case 'armor':       state.armor = 100; break;
   }
   // Remove floor loot from scene
   if (loot.isGroup) {
@@ -235,7 +235,7 @@ function updateHUD() {
   document.getElementById('hp-val').textContent = state.hp;
   document.getElementById('hp-bar').style.width = state.hp + '%';
   document.getElementById('armor-val').textContent = state.armor;
-  document.getElementById('armor-bar').style.width = (state.armor / 50 * 100) + '%';
+  document.getElementById('armor-bar').style.width = state.armor + '%';
   document.getElementById('reserve-m4').textContent = state.reserveAmmo.m4;
   document.getElementById('reserve-pistol').textContent = state.reserveAmmo.pistol;
 }
@@ -266,8 +266,6 @@ function drawMinimap() {
 
   // Water flood level — show as blue fill covering submerged areas
   if (state.waterRising && state.waterLevel > 0.5) {
-    // Approximate: water covers everything below a certain volcano radius
-    // Find radius where volcano height = water level
     let floodRadius = CONFIG.volcanoRadius;
     for (let testR = CONFIG.volcanoRadius; testR > 0; testR -= 1) {
       const t = 1 - testR / CONFIG.volcanoRadius;
@@ -277,10 +275,8 @@ function drawMinimap() {
         break;
       }
     }
-    // Draw flood as semi-transparent blue over everything outside the safe radius
     mCtx.fillStyle = 'rgba(15, 100, 180, 0.5)';
     mCtx.fillRect(cx - iSize / 2, cy - iSize / 2, iSize, iSize);
-    // Clear the safe zone (above water)
     mCtx.save();
     mCtx.beginPath();
     mCtx.arc(cx, cy, floodRadius * scale, 0, Math.PI * 2);
@@ -319,4 +315,3 @@ function drawMinimap() {
   mCtx.beginPath(); mCtx.moveTo(0, -5); mCtx.lineTo(-3, 3); mCtx.lineTo(3, 3); mCtx.closePath();
   mCtx.fillStyle = '#fff'; mCtx.fill(); mCtx.restore();
 }
-
