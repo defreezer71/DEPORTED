@@ -32,14 +32,14 @@ const CONFIG = {
   weapons: {
     m4: {
       name: 'M4', magSize: 30, fireRate: 100,
-      bodyDmg: 15, headDmg: 100,
+      bodyDmg: 15, headDmg: 150,
       recoilHip: 0.025, recoilAds: 0.012,
       reloadTime: 2200, spread: 0.015, adsSpread: 0.0,
       range: 500,
     },
     pistol: {
       name: '1911', magSize: 15, fireRate: 180,
-      bodyDmg: 15, headDmg: 100,
+      bodyDmg: 15, headDmg: 150,
       recoilHip: 0.035, recoilAds: 0.018,
       reloadTime: 1500, spread: 0.025, adsSpread: 0.0,
       range: 400,
@@ -77,4 +77,3 @@ const state = {
   spectateIndex: 0,
   erupted: false,
 };
-
