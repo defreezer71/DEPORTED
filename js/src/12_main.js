@@ -102,7 +102,6 @@ function updateAshClouds(dt) {
   ashMesh.instanceColor.needsUpdate = true;
 
   // Drive shared material opacity from average of active particles
-  // (use a fixed mid-value — individual fading is via scale-to-zero for expired ones)
   ashMat.opacity = 0.65;
 }
 
@@ -188,7 +187,15 @@ function update() {
       const m = Math.floor(state.matchTime / 60);
       const s = Math.floor(state.matchTime % 60);
       document.getElementById('win-time').textContent = m + ':' + String(s).padStart(2, '0');
-      setTimeout(() => winScreen.classList.add('show'), 500);
+      setTimeout(() => {
+        winScreen.classList.add('show');
+        const music = document.getElementById('menu-music');
+        if (music) {
+          music.currentTime = 0;
+          music.volume = 0.75;
+          music.play();
+        }
+      }, 500);
     }
   }
 
