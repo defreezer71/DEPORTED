@@ -100,7 +100,7 @@ function canPlaceAt(x, z) {
     collidables.push(trunkCol);
     targets.push(trunkCol);
 
-    // Canopy collider — large enough to block player from entering foliage
+    // Canopy collider
     const canopyCol = new THREE.Mesh(
       new THREE.BoxGeometry(canopyR * 2.0, canopyR * scaleY * 1.6, canopyR * 2.0),
       new THREE.MeshBasicMaterial({ visible: false })
@@ -155,7 +155,7 @@ function canPlaceAt(x, z) {
   const dummy = new THREE.Object3D();
   bushPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const bushR  = (0.5 + Math.random() * 1.0) * 3.5;
+    const bushR  = (0.5 + Math.random() * 1.0) * 2.2; // narrower than before
     const scaleY = 0.42 + Math.random() * 0.28;
 
     dummy.position.set(x, h + bushR * 0.35, z);
@@ -178,9 +178,9 @@ function canPlaceAt(x, z) {
     dummy.updateMatrix();
     bush3Inst.setMatrixAt(i, dummy.matrix);
 
-    // Collider — wide and tall enough to fully block player entry
+    // Collider — matched to new narrower bush size
     const bushCol = new THREE.Mesh(
-      new THREE.BoxGeometry(bushR * 1.8, bushR * 2.0, bushR * 1.8),
+      new THREE.BoxGeometry(bushR * 1.4, bushR * 2.0, bushR * 1.4),
       new THREE.MeshBasicMaterial({ visible: false })
     );
     bushCol.position.set(x, h + bushR * 0.9, z);
