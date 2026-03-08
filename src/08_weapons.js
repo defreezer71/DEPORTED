@@ -214,22 +214,45 @@ function checkCollisionAndStep(newPos) {
   const currentH = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
   const feetY = newPos.y - currentH;
 
-  playerBB.min.set(newPos.x - r, feetY, newPos.z - r);
-  playerBB.max.set(newPos.x + r, newPos.y + 0.1, newPos.z + r);
+  // Test player as a full vertical column — feet, knee, waist, chest, head.
+  // This prevents the camera (eye level only) from entering objects
+  // whose bottom edge is below eye height but above feet.
+  const testHeights = [
+    feetY + 0.05,        // feet
+    feetY + currentH * 0.3,  // knee
+    feetY + currentH * 0.6,  // waist
+    feetY + currentH * 0.85, // chest
+    newPos.y,            // head/camera
+  ];
 
   let blocked = false;
   let stepUpY = 0;
 
   for (const entry of collidableCache) {
     const bb = entry.bb;
-    if (!playerBB.intersectsBox(bb)) continue;
+
+    // Quick XZ rejection before checking heights
+    if (newPos.x + r <= bb.min.x || newPos.x - r >= bb.max.x) continue;
+    if (newPos.z + r <= bb.min.z || newPos.z - r >= bb.max.z) continue;
 
     const objTop = bb.max.y;
+    const objBottom = bb.min.y;
+
+    // Check if any of the player's body points are inside this collider's Y range
+    let bodyIntersects = false;
+    for (const testY of testHeights) {
+      if (testY > objBottom && testY < objTop) {
+        bodyIntersects = true;
+        break;
+      }
+    }
+    if (!bodyIntersects) continue;
+
+    // How far above feet is the top of this object?
     const heightAboveFeet = objTop - feetY;
 
-    if (objTop <= feetY + 0.05) continue;
-
-    if (heightAboveFeet > 0 && heightAboveFeet <= 1.2) {
+    // Allow stepping over very small ledges only (curbs, small lips)
+    if (heightAboveFeet > 0 && heightAboveFeet <= 0.4) {
       stepUpY = Math.max(stepUpY, objTop + currentH + 0.01);
     } else {
       blocked = true;
