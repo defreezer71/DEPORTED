@@ -200,6 +200,8 @@ function buildCollisionCache() {
     const isDynamic = (obj === gateDoorL || obj === gateDoorR);
     const bb = new THREE.Box3().setFromObject(obj);
     collidableCache.push({ bb, dynamic: isDynamic, obj });
+    const helper = new THREE.Box3Helper(bb, 0xff0000);
+    scene.add(helper);
   }
 }
 
