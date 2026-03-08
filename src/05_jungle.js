@@ -10,9 +10,8 @@ function canPlaceAt(x, z) {
 
 // ── Instanced Trees — 2 draw calls for all trunks + all canopies ──
 {
-  // Collect tree placement data first
   const treePlacements = [];
-  const treeGridSize = 18; // tighter grid for 15% bigger map + more coverage
+  const treeGridSize = 18;
   for (let gx = -half + 15; gx < half - 15; gx += treeGridSize) {
     for (let gz = -half + 15; gz < half - 15; gz += treeGridSize) {
       const x = gx + (Math.random() - 0.5) * treeGridSize * 0.7;
@@ -23,31 +22,26 @@ function canPlaceAt(x, z) {
 
   const treeCount = treePlacements.length;
 
-  // ── Trunk — tapered cylinder, 8-sided, warm dark bark ──
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.62, 1, 8);
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x2e1e0f });
   const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
   trunkInst.castShadow = true;
 
-  // ── Lower trunk flare — wide base buttress for tropical look ──
   const flareGeo = new THREE.CylinderGeometry(0.55, 0.90, 1, 8);
   const flareMat = new THREE.MeshLambertMaterial({ color: 0x271808 });
   const flareInst = new THREE.InstancedMesh(flareGeo, flareMat, treeCount);
   flareInst.castShadow = false;
 
-  // ── Canopy layer 1 — large base cloud, deep jungle green ──
   const canopyGeo = new THREE.SphereGeometry(1, 10, 8);
   const canopyMat = new THREE.MeshLambertMaterial({ color: 0x1e4d0f });
   const canopyInst = new THREE.InstancedMesh(canopyGeo, canopyMat, treeCount);
   canopyInst.castShadow = true;
 
-  // ── Canopy layer 2 — mid highlight, offset, medium green ──
   const canopy2Geo = new THREE.SphereGeometry(1, 9, 7);
   const canopy2Mat = new THREE.MeshLambertMaterial({ color: 0x2e6b18 });
   const canopy2Inst = new THREE.InstancedMesh(canopy2Geo, canopy2Mat, treeCount);
   canopy2Inst.castShadow = false;
 
-  // ── Canopy layer 3 — small bright top cluster, sunlit tips ──
   const canopy3Geo = new THREE.SphereGeometry(1, 8, 6);
   const canopy3Mat = new THREE.MeshLambertMaterial({ color: 0x3d8220 });
   const canopy3Inst = new THREE.InstancedMesh(canopy3Geo, canopy3Mat, treeCount);
@@ -61,23 +55,20 @@ function canPlaceAt(x, z) {
     const trunkR   = 0.42 + Math.random() * 0.32;
     const canopyR  = (2.2 + Math.random() * 2.8) * 1.5;
     const scaleY   = 0.55 + Math.random() * 0.28;
-    const lean     = (Math.random() - 0.5) * 0.06; // subtle lean
+    const lean     = (Math.random() - 0.5) * 0.06;
 
-    // Trunk
     dummy.position.set(x, h + trunkH / 2, z);
     dummy.scale.set(trunkR / 0.44, trunkH, trunkR / 0.44);
     dummy.rotation.set(lean, Math.random() * 6.28, lean * 0.5);
     dummy.updateMatrix();
     trunkInst.setMatrixAt(i, dummy.matrix);
 
-    // Base flare — short, wide, at ground level
     dummy.position.set(x, h + 0.55, z);
     dummy.scale.set(trunkR / 0.44 * 1.1, 1.1, trunkR / 0.44 * 1.1);
     dummy.rotation.set(0, Math.random() * 6.28, 0);
     dummy.updateMatrix();
     flareInst.setMatrixAt(i, dummy.matrix);
 
-    // Canopy 1 — large base blob
     const jx = (Math.random()-0.5)*0.6, jz = (Math.random()-0.5)*0.6;
     dummy.position.set(x + jx, h + trunkH + canopyR * 0.25, z + jz);
     dummy.scale.set(canopyR, canopyR * scaleY, canopyR);
@@ -85,7 +76,6 @@ function canPlaceAt(x, z) {
     dummy.updateMatrix();
     canopyInst.setMatrixAt(i, dummy.matrix);
 
-    // Canopy 2 — offset mid cluster
     const c2r = canopyR * (0.60 + Math.random() * 0.18);
     dummy.position.set(x + jx + (Math.random()-0.5)*1.2, h + trunkH + canopyR * 0.52 + c2r * 0.1, z + jz + (Math.random()-0.5)*1.2);
     dummy.scale.set(c2r, c2r * (scaleY * 0.88 + 0.08), c2r);
@@ -93,7 +83,6 @@ function canPlaceAt(x, z) {
     dummy.updateMatrix();
     canopy2Inst.setMatrixAt(i, dummy.matrix);
 
-    // Canopy 3 — small bright top tip
     const c3r = canopyR * (0.35 + Math.random() * 0.15);
     dummy.position.set(x + jx * 0.3, h + trunkH + canopyR * 0.8 + c3r * 0.3, z + jz * 0.3);
     dummy.scale.set(c3r, c3r * (scaleY * 0.75 + 0.15), c3r);
@@ -111,12 +100,12 @@ function canPlaceAt(x, z) {
     collidables.push(trunkCol);
     targets.push(trunkCol);
 
-    // Canopy collider
+    // Canopy collider — large enough to block player from entering foliage
     const canopyCol = new THREE.Mesh(
-      new THREE.BoxGeometry(canopyR * 1.6, canopyR * scaleY * 1.2, canopyR * 1.6),
+      new THREE.BoxGeometry(canopyR * 2.0, canopyR * scaleY * 1.6, canopyR * 2.0),
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    canopyCol.position.set(x, h + trunkH + canopyR * 0.25, z);
+    canopyCol.position.set(x, h + trunkH + canopyR * 0.35, z);
     scene.add(canopyCol);
     collidables.push(canopyCol);
     targets.push(canopyCol);
@@ -136,10 +125,10 @@ function canPlaceAt(x, z) {
   targets.push(canopyInst);
 }
 
-// ── Instanced Bushes — 1 draw call for all bushes ──
+// ── Instanced Bushes ──
 {
   const bushPlacements = [];
-  const bushGridSize = 14; // tighter for bigger map + more coverage
+  const bushGridSize = 14;
   for (let gx = -half + 20; gx < half - 20; gx += bushGridSize) {
     for (let gz = -half + 20; gz < half - 20; gz += bushGridSize) {
       const x = gx + (Math.random() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
@@ -148,21 +137,18 @@ function canPlaceAt(x, z) {
     }
   }
 
-  // ── Bush layer 1 — large base mound, dark undergrowth green ──
   const bushGeo  = new THREE.SphereGeometry(1, 8, 6);
-  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1e4210 });
+  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1e4210, side: THREE.DoubleSide });
   const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushPlacements.length);
   bushInst.castShadow = true;
 
-  // ── Bush layer 2 — mid cluster, medium forest green ──
   const bush2Geo  = new THREE.SphereGeometry(1, 7, 5);
-  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x2d5c18 });
+  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x2d5c18, side: THREE.DoubleSide });
   const bush2Inst = new THREE.InstancedMesh(bush2Geo, bush2Mat, bushPlacements.length);
   bush2Inst.castShadow = false;
 
-  // ── Bush layer 3 — bright top highlight, lighter lime-green tips ──
   const bush3Geo  = new THREE.SphereGeometry(1, 7, 5);
-  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x3e7222 });
+  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x3e7222, side: THREE.DoubleSide });
   const bush3Inst = new THREE.InstancedMesh(bush3Geo, bush3Mat, bushPlacements.length);
   bush3Inst.castShadow = false;
 
@@ -172,14 +158,12 @@ function canPlaceAt(x, z) {
     const bushR  = (0.5 + Math.random() * 1.0) * 3.5;
     const scaleY = 0.42 + Math.random() * 0.28;
 
-    // Base mound — wide, slightly flattened
     dummy.position.set(x, h + bushR * 0.35, z);
     dummy.scale.set(bushR, bushR * scaleY, bushR);
     dummy.rotation.set(0, Math.random() * 6.28, 0);
     dummy.updateMatrix();
     bushInst.setMatrixAt(i, dummy.matrix);
 
-    // Mid cluster — smaller, offset, a bit higher
     const b2r = bushR * (0.62 + Math.random() * 0.2);
     dummy.position.set(x + (Math.random()-0.5)*0.8, h + bushR * 0.52, z + (Math.random()-0.5)*0.8);
     dummy.scale.set(b2r, b2r * (scaleY * 0.88 + 0.06), b2r);
@@ -187,7 +171,6 @@ function canPlaceAt(x, z) {
     dummy.updateMatrix();
     bush2Inst.setMatrixAt(i, dummy.matrix);
 
-    // Top bright tip — small, sits on top
     const b3r = bushR * (0.32 + Math.random() * 0.14);
     dummy.position.set(x + (Math.random()-0.5)*0.4, h + bushR * 0.75 + b3r * 0.3, z + (Math.random()-0.5)*0.4);
     dummy.scale.set(b3r, b3r * (scaleY * 0.7 + 0.1), b3r);
@@ -195,12 +178,12 @@ function canPlaceAt(x, z) {
     dummy.updateMatrix();
     bush3Inst.setMatrixAt(i, dummy.matrix);
 
-    // Collider
+    // Collider — wide and tall enough to fully block player entry
     const bushCol = new THREE.Mesh(
-      new THREE.BoxGeometry(bushR * 1.2, bushR * 1.4, bushR * 1.2),
+      new THREE.BoxGeometry(bushR * 1.8, bushR * 2.0, bushR * 1.8),
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    bushCol.position.set(x, h + bushR * 0.7, z);
+    bushCol.position.set(x, h + bushR * 0.9, z);
     scene.add(bushCol);
     collidables.push(bushCol);
     targets.push(bushCol);
@@ -215,13 +198,11 @@ function canPlaceAt(x, z) {
   targets.push(bushInst);
 }
 
-// (Ferns removed — terrain uses vertex noise for grass texture)
-
-// ── Instanced Rocks — 1 draw call for all map rocks ──
+// ── Instanced Rocks ──
 const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 0xa09888, 0x706860];
 {
   const rockPlacements = [];
-  const rockGridSize = 21; // tighter for bigger map
+  const rockGridSize = 21;
   for (let gx = -half + 25; gx < half - 25; gx += rockGridSize) {
     for (let gz = -half + 25; gz < half - 25; gz += rockGridSize) {
       const x = gx + (Math.random() - 0.5) * rockGridSize * 0.6;
@@ -235,7 +216,6 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
   const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rockPlacements.length);
   rockInst.castShadow = true;
 
-  // Rock color variation via per-instance color
   const dummy = new THREE.Object3D();
   const col = new THREE.Color();
 
@@ -253,12 +233,12 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     rockInst.setMatrixAt(i, dummy.matrix);
     rockInst.setColorAt(i, col.set(rockColors[Math.floor(Math.random() * rockColors.length)]));
 
-    // Invisible collider per rock
+    // Collider — wider to block player from clipping into rock sides
     const collider = new THREE.Mesh(
-      new THREE.BoxGeometry(rw * 0.8, rh + 2, rd * 0.8),
+      new THREE.BoxGeometry(rw * 1.2, rh + 2, rd * 1.2),
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    collider.position.set(x, h + rh * 0.5 - 0.5, z);
+    collider.position.set(x, h + rh * 0.5, z);
     scene.add(collider);
     collidables.push(collider);
     targets.push(collider);
@@ -269,13 +249,9 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
   scene.add(rockInst);
 }
 
-// (Small scatter rocks removed — only cover-sized rocks remain)
-
-// Rocks on volcano slopes
-// Volcano LOS/bullet blocker — layered invisible cylinders to match volcano cone shape
+// Volcano LOS/bullet blocker
 const bulletBlockers = [];
 
-// Wide base cylinder — catches shots through the lower slopes
 const vBase = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 1.05, CONFIG.volcanoRadius * 1.05, CONFIG.volcanoHeight * 0.55, 16),
   new THREE.MeshBasicMaterial({ visible: false })
@@ -284,7 +260,6 @@ vBase.position.set(0, CONFIG.volcanoHeight * 0.275, 0);
 scene.add(vBase);
 bulletBlockers.push(vBase);
 
-// Mid-section — narrows with the cone
 const vMid = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.65, CONFIG.volcanoRadius * 1.0, CONFIG.volcanoHeight * 0.45, 16),
   new THREE.MeshBasicMaterial({ visible: false })
@@ -293,7 +268,6 @@ vMid.position.set(0, CONFIG.volcanoHeight * 0.60, 0);
 scene.add(vMid);
 bulletBlockers.push(vMid);
 
-// Upper cone cap
 const vTop = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.22, CONFIG.volcanoRadius * 0.60, CONFIG.volcanoHeight * 0.35, 12),
   new THREE.MeshBasicMaterial({ visible: false })
