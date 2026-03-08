@@ -7,18 +7,18 @@
 
 OUTPUT="js/game.js"
 
-cat src/01_config.js \
-    src/02_setup.js \
-    src/03_terrain.js \
-    src/04_world.js \
-    src/05_jungle.js \
-    src/06_bots.js \
-    src/07_loot.js \
-    src/08_weapons.js \
-    src/09_audio.js \
-    src/10_input.js \
-    src/11_gameplay.js \
-    src/12_main.js \
+cat js/src/01_config.js \
+    js/src/02_setup.js \
+    js/src/03_terrain.js \
+    js/src/04_world.js \
+    js/src/05_jungle.js \
+    js/src/06_bots.js \
+    js/src/07_loot.js \
+    js/src/08_weapons.js \
+    js/src/09_audio.js \
+    js/src/10_input.js \
+    js/src/11_gameplay.js \
+    js/src/12_main.js \
     > "$OUTPUT"
 
 echo "✅ Built $OUTPUT ($(wc -l < $OUTPUT) lines)"

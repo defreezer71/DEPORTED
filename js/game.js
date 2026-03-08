@@ -32,14 +32,14 @@ const CONFIG = {
   weapons: {
     m4: {
       name: 'M4', magSize: 30, fireRate: 100,
-      bodyDmg: 15, headDmg: 100,
+      bodyDmg: 15, headDmg: 150,
       recoilHip: 0.025, recoilAds: 0.012,
       reloadTime: 2200, spread: 0.015, adsSpread: 0.0,
       range: 500,
     },
     pistol: {
       name: '1911', magSize: 15, fireRate: 180,
-      bodyDmg: 15, headDmg: 100,
+      bodyDmg: 15, headDmg: 150,
       recoilHip: 0.035, recoilAds: 0.018,
       reloadTime: 1500, spread: 0.025, adsSpread: 0.0,
       range: 400,
@@ -77,7 +77,6 @@ const state = {
   spectateIndex: 0,
   erupted: false,
 };
-
 // ═══════════════════════════════════════════════════════════
 // THREE.JS SETUP
 // ═══════════════════════════════════════════════════════════
@@ -132,9 +131,6 @@ scene.add(new THREE.HemisphereLight(0x4488ff, 0x2d7a0a, 0.7));
 const half = CONFIG.islandSize / 2;
 
 // ── STREAM: circular ring with NO north bulge. Waterfall connects via explicit channel. ──
-// The waterfall is always placed at x=0, z=-half (north wall center).
-// A straight terrain channel is carved from z=-half to the stream ring at x=0.
-
 const streamHalfWidth = 5;
 const streamBaseRadius = 82;
 const streamSegments = 80;
@@ -146,12 +142,10 @@ for (let i = 0; i <= streamSegments; i++) {
   streamPoints.push({ x: Math.cos(angle) * r, z: Math.sin(angle) * r });
 }
 
-// Waterfall is always at x=0 on the north wall
 const wfTargetX = 0;
-const wfWallZ = -half; // z=-110
+const wfWallZ = -half;
 
-// Find where the stream ring crosses x=0 on the north side (most negative z near x=0)
-let wfChannelEndZ = -streamBaseRadius; // fallback
+let wfChannelEndZ = -streamBaseRadius;
 {
   let bestDist = Infinity;
   for (let i = 0; i < streamPoints.length; i++) {
@@ -161,7 +155,6 @@ let wfChannelEndZ = -streamBaseRadius; // fallback
       if (dz < -20 && dx < bestDist) { bestDist = dx; wfChannelEndZ = dz; }
     }
   }
-  // Make sure channel end overlaps the stream ring
   wfChannelEndZ += streamHalfWidth;
 }
 
@@ -185,7 +178,6 @@ function isInStream(x, z) {
 function getStreamDepth(x, z) {
   const d = distToStream(x, z);
   if (d > streamHalfWidth) return 0;
-  // Very shallow depression — purely visual, bots/players don't sink
   return (1 - (d / streamHalfWidth) ** 2) * 0.06;
 }
 
@@ -207,7 +199,6 @@ function getTerrainHeight(x, z) {
   const vh = getVolcanoHeight(x, z);
   if (vh > 0.5) return vh;
   const streamDep = getStreamDepth(x, z);
-  // Suppress terrain noise inside stream — prevents green grass poking above water
   const noiseFactor = streamDep > 0 ? Math.max(0, 1 - streamDep * 2) : 1;
   const baseH = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3 * noiseFactor;
   return baseH - streamDep;
@@ -216,7 +207,7 @@ function getTerrainHeight(x, z) {
 // ═══════════════════════════════════════════════════════════
 // BUILD GROUND MESH
 // ═══════════════════════════════════════════════════════════
-const groundSeg = 180; // up from 140 — ~65% more vertices, smoother terrain
+const groundSeg = 180;
 const groundGeo = new THREE.PlaneGeometry(CONFIG.islandSize, CONFIG.islandSize, groundSeg, groundSeg);
 const gPosAttr = groundGeo.attributes.position;
 
@@ -238,54 +229,43 @@ for (let i = 0; i < gPosAttr.count; i++) {
   let r, g, b;
   if (h > 2) {
     const t = Math.min(h / CONFIG.volcanoHeight, 1);
-    // Rich multi-octave noise — 5 layers for detailed rocky surface
     const vN1 = Math.sin(x * 3.1 + y * 2.0) * 0.040 + Math.sin(x * 7.3) * 0.025;
     const vN2 = Math.cos(x * 5.2 - y * 3.1) * 0.032 + Math.sin(y * 8.4) * 0.020;
     const vN3 = Math.sin(x * 12.7 + y * 9.3) * 0.015 + Math.cos(x * 18.1 - y * 14.6) * 0.010;
-    const vN4 = Math.sin(x * 0.8 + y * 1.1) * 0.055; // large-scale rock variation
-    const vN5 = Math.cos(x * 24.3 - y * 19.7) * 0.006; // micro grain
-    // Horizontal banding — layered geological strata
+    const vN4 = Math.sin(x * 0.8 + y * 1.1) * 0.055;
+    const vN5 = Math.cos(x * 24.3 - y * 19.7) * 0.006;
     const strata = Math.sin(h * 2.8) * 0.035 + Math.sin(h * 0.9) * 0.022;
-    // Zone blends: lower slope (dark basalt) → mid (warm oxidised rock) → upper (grey ash)
-    const midBlend  = Math.max(0, Math.min(1, (t - 0.25) / 0.35)); // warm orange-brown zone
-    const ashBlend  = Math.max(0, (t - 0.68) / 0.32);              // ash grey near peak
-    const lavaBlend = Math.max(0, (t - 0.88) / 0.12);              // glowing red-orange at very top
-    // Base dark basalt — near-black with slight blue tint
+    const midBlend  = Math.max(0, Math.min(1, (t - 0.25) / 0.35));
+    const ashBlend  = Math.max(0, (t - 0.68) / 0.32);
+    const lavaBlend = Math.max(0, (t - 0.88) / 0.12);
     const baseR = 0.14 + vN4 * 0.5;
     const baseG = 0.11 + vN4 * 0.4;
     const baseB = 0.10 + vN4 * 0.3;
-    // Oxidised rock — warm rusty brown-orange
     const oxR = 0.38 + vN1 * 0.8;
     const oxG = 0.22 + vN2 * 0.5;
     const oxB = 0.10;
-    // Ash grey
     const ashR = 0.52 + vN3 + strata;
     const ashG = 0.50 + vN3 + strata * 0.8;
     const ashB = 0.48 + vN2 * 0.5 + strata * 0.6;
-    // Lava glow — hot orange-red at crater rim
     const lavaR = 0.85 + vN5;
     const lavaG = 0.28 + vN5;
     const lavaB = 0.04;
-    // Blend zones
     r = baseR + (oxR - baseR) * midBlend + (ashR - oxR) * ashBlend * midBlend + (lavaR - ashR) * lavaBlend + vN5 * 0.5;
     g = baseG + (oxG - baseG) * midBlend + (ashG - oxG) * ashBlend * midBlend + (lavaG - ashG) * lavaBlend + vN5 * 0.2;
     b = baseB + (oxB - baseB) * midBlend + (ashB - oxB) * ashBlend * midBlend + (lavaB - ashB) * lavaBlend;
   } else if (inStream) {
     const d = distToStream(x, y);
-    const t = d / streamHalfWidth; // 0=center, 1=edge
-    // Deep teal-blue at center fading to muddy green-blue at banks
+    const t = d / streamHalfWidth;
     r = 0.04 + t * 0.14;
     g = 0.18 + t * 0.20;
     b = 0.55 - t * 0.22;
   } else {
-    // Rich grass — 5 noise octaves for natural meadow variation
-    const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.09;  // large patches
-    const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.045;                         // medium variation
-    const n3 = Math.sin(x * 0.11 - 0.2) * Math.cos(y * 0.094 + 0.5) * 0.07;  // wide swaths
-    const n4 = Math.sin(x * 5.7 + y * 4.3) * 0.02;                            // fine speckle
-    const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.012;                           // micro detail
+    const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.09;
+    const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.045;
+    const n3 = Math.sin(x * 0.11 - 0.2) * Math.cos(y * 0.094 + 0.5) * 0.07;
+    const n4 = Math.sin(x * 5.7 + y * 4.3) * 0.02;
+    const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.012;
     const grass = n1 + n2 + n3 + n4 + n5;
-    // Subtle warm/cool variation — some patches slightly yellower, some darker
     const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.025;
     r = (0.13 + grass + warmth + Math.random() * 0.025) * 0.8;
     g = (0.36 + grass + Math.random() * 0.045) * 0.8;
@@ -302,9 +282,7 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// NO separate volcano cone mesh — terrain handles it all
-
-// Crater marking at the center of the plateau
+// Crater marking
 const crater = new THREE.Mesh(
   new THREE.CircleGeometry(8, 20),
   new THREE.MeshLambertMaterial({ color: 0x3a2a1a })
@@ -313,18 +291,36 @@ crater.rotation.x = -Math.PI / 2;
 crater.position.set(0, CONFIG.volcanoHeight - 0.8, 0);
 scene.add(crater);
 
-// Smoke
+// ── Instanced Smoke — 1 draw call for all volcano smoke puffs ──
+const SMOKE_COUNT = 18;
+const smokeGeo = new THREE.SphereGeometry(1, 7, 6); // unit sphere, scaled per instance
+const smokeMat = new THREE.MeshBasicMaterial({ color: 0x999999, transparent: true, opacity: 0.22 });
+const smokeInst = new THREE.InstancedMesh(smokeGeo, smokeMat, SMOKE_COUNT);
+smokeInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(smokeInst);
+
+// Store per-instance smoke data (replaces smokeParticles array of meshes)
 const smokeParticles = [];
-for (let i = 0; i < 18; i++) {
-  const smoke = new THREE.Mesh(
-    new THREE.SphereGeometry(1.0 + Math.random() * 2.5, 7, 6),
-    new THREE.MeshBasicMaterial({ color: i % 3 === 0 ? 0x888888 : 0xaaaaaa, transparent: true, opacity: 0.18 + Math.random() * 0.14 })
-  );
-  smoke.position.set((Math.random() - 0.5) * 6, CONFIG.volcanoHeight + 1 + Math.random() * 16, (Math.random() - 0.5) * 6);
-  smoke.userData = { baseY: smoke.position.y, phase: Math.random() * 6.28, speed: 0.4 + Math.random() * 0.8 };
-  scene.add(smoke);
-  smokeParticles.push(smoke);
+const _smokeDummy = new THREE.Object3D();
+for (let i = 0; i < SMOKE_COUNT; i++) {
+  const size = 1.0 + Math.random() * 2.5;
+  const baseY = CONFIG.volcanoHeight + 1 + Math.random() * 16;
+  smokeParticles.push({
+    baseY,
+    phase: Math.random() * 6.28,
+    speed: 0.4 + Math.random() * 0.8,
+    size,
+    ox: (Math.random() - 0.5) * 6,
+    oz: (Math.random() - 0.5) * 6,
+    index: i
+  });
+  // Set initial matrix so nothing is at origin on frame 0
+  _smokeDummy.position.set((Math.random() - 0.5) * 6, baseY, (Math.random() - 0.5) * 6);
+  _smokeDummy.scale.setScalar(size);
+  _smokeDummy.updateMatrix();
+  smokeInst.setMatrixAt(i, _smokeDummy.matrix);
 }
+smokeInst.instanceMatrix.needsUpdate = true;
 
 // ═══════════════════════════════════════════════════════════
 // WATER PLANE — Hidden until water starts rising
@@ -334,15 +330,11 @@ const water = new THREE.Mesh(
   new THREE.MeshLambertMaterial({ color: 0x0c4878, transparent: true, opacity: 0.6 })
 );
 water.rotation.x = -Math.PI / 2;
-water.position.y = -5; // Hidden below ground until water rises
+water.position.y = -5;
 water.visible = false;
 scene.add(water);
 
-// Stream is rendered purely via vertex colors on the ground mesh.
-// The depression is carved by getStreamDepth() in getTerrainHeight().
-// No separate water mesh — eliminates all alignment issues permanently.
-
-// ── Rising bubble particles along perimeter — sinking island effect ──
+// ── Rising bubble particles along perimeter ──
 const bubbleGroup = new THREE.Group();
 const bubbleMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
 for (let i = 0; i < 40; i++) {
@@ -350,7 +342,6 @@ for (let i = 0; i < 40; i++) {
   const dist = half - 4 - Math.random() * 12;
   const bx = Math.cos(angle) * dist;
   const bz = Math.sin(angle) * dist;
-  // Skip bubbles inside prison compound
   if (Math.abs(bx - CONFIG.prisonPos.x) < CONFIG.prisonSize / 2 + 5 &&
       Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) continue;
   const bubble = new THREE.Mesh(
@@ -366,11 +357,9 @@ scene.add(bubbleGroup);
 // ═══════════════════════════════════════════════════════════
 // CLIFF WALLS — Single color, smooth height variation
 // ═══════════════════════════════════════════════════════════
-// Perimeter wall — vertex-colored for strata/rock texture
 function createCliffSection(x, z, w, d, h) {
   const cliffH = h || CONFIG.cliffHeight;
   const extendedH = cliffH + 3;
-  // Use segments so we have vertices to color
   const segsW = Math.max(1, Math.round(w / 8));
   const segsH = 4;
   const segsD = Math.max(1, Math.round(d / 8));
@@ -380,16 +369,13 @@ function createCliffSection(x, z, w, d, h) {
   for (let i = 0; i < pos.count; i++) {
     const vx = pos.getX(i) + x;
     const vy = pos.getY(i) + (extendedH / 2 - 3);
-    // Strata bands by height
     const t = (vy + 5) / (extendedH + 5);
     const band = Math.sin(vy * 1.8) * 0.06 + Math.sin(vy * 4.3) * 0.03;
-    // Noise from world position
     const nx = Math.sin(vx * 0.41 + z * 0.17) * 0.05 + Math.cos(vx * 1.2) * 0.03;
-    // Base: warm sandy-tan, darker at bottom, lighter strata
     const base = 0.36 + t * 0.12 + band + nx;
-    colors[i*3]   = Math.min(1, base + 0.08);          // R — slightly warm
-    colors[i*3+1] = Math.min(1, base * 0.88);          // G — slightly cooler
-    colors[i*3+2] = Math.min(1, base * 0.72);          // B — brown tint
+    colors[i*3]   = Math.min(1, base + 0.08);
+    colors[i*3+1] = Math.min(1, base * 0.88);
+    colors[i*3+2] = Math.min(1, base * 0.72);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
@@ -402,20 +388,17 @@ function createCliffSection(x, z, w, d, h) {
   return mesh;
 }
 
-// Main cliff walls — 4 draw calls total (one mesh per side)
-// Each side is a single continuous box with height variation baked via vertex displacement
 const ct = CONFIG.cliffThickness;
 const segCount = 20;
 const segLen = (CONFIG.islandSize + ct * 2) / segCount;
 const wallLen = CONFIG.islandSize + ct * 2;
 const avgH = CONFIG.cliffHeight + 4;
 
-// One mesh per side — 4 draw calls instead of 80
 [
-  { px: 0, pz: -half - ct/2, w: wallLen, d: ct }, // north
-  { px: 0, pz:  half + ct/2, w: wallLen, d: ct }, // south
-  { px:  half + ct/2, pz: 0, w: ct, d: wallLen }, // east
-  { px: -half - ct/2, pz: 0, w: ct, d: wallLen }, // west
+  { px: 0, pz: -half - ct/2, w: wallLen, d: ct },
+  { px: 0, pz:  half + ct/2, w: wallLen, d: ct },
+  { px:  half + ct/2, pz: 0, w: ct, d: wallLen },
+  { px: -half - ct/2, pz: 0, w: ct, d: wallLen },
 ].forEach(({ px, pz, w, d }) => {
   const geo = new THREE.BoxGeometry(w, avgH, d, Math.max(1,Math.round(w/8)), 4, Math.max(1,Math.round(d/8)));
   const pos2 = geo.attributes.position;
@@ -439,9 +422,6 @@ const avgH = CONFIG.cliffHeight + 4;
   scene.add(mesh);
   collidables.push(mesh);
 });
-
-// (Perimeter wall protrusion rocks removed for cleaner look)
-
 // ═══════════════════════════════════════════════════════════
 // PRISON COMPOUND — Taller walls
 // ═══════════════════════════════════════════════════════════
@@ -659,26 +639,21 @@ let gateOpenProgress = 0;
 
 // Guard towers — upgraded with more detail
 const towerH = pwh + 3.5;
-// Each tower has an inward-facing direction for the guard house opening
-// fX, fZ = unit direction from corner toward prison center (dominant axis)
 const towerCorners = [
-  { x: prison.x + pw / 2 - 1.5, z: prison.z - pw / 2 + 1.5, fX: -1, fZ:  1 }, // NE → faces SW (inward)
-  { x: prison.x - pw / 2 + 1.5, z: prison.z - pw / 2 + 1.5, fX:  1, fZ:  1 }, // NW → faces SE (inward)
-  { x: prison.x + pw / 2 - 1.5, z: prison.z + pw / 2 - 1.5, fX: -1, fZ: -1 }, // SE → faces NW (inward)
-  { x: prison.x - pw / 2 + 1.5, z: prison.z + pw / 2 - 1.5, fX:  1, fZ: -1 }, // SW → faces NE (inward)
+  { x: prison.x + pw / 2 - 1.5, z: prison.z - pw / 2 + 1.5, fX: -1, fZ:  1 },
+  { x: prison.x - pw / 2 + 1.5, z: prison.z - pw / 2 + 1.5, fX:  1, fZ:  1 },
+  { x: prison.x + pw / 2 - 1.5, z: prison.z + pw / 2 - 1.5, fX: -1, fZ: -1 },
+  { x: prison.x - pw / 2 + 1.5, z: prison.z + pw / 2 - 1.5, fX:  1, fZ: -1 },
 ];
 
 towerCorners.forEach(tc => {
-  // Derived facing helpers — front is the inward-open side
   const fX = tc.fX, fZ = tc.fZ;
-  // Main tower shaft — slightly wider
   const base = new THREE.Mesh(new THREE.BoxGeometry(3.4, towerH, 3.4), prisonWallMat);
   base.position.set(tc.x, towerH / 2, tc.z);
   base.castShadow = true; base.receiveShadow = true;
   scene.add(base);
   collidables.push(base);
 
-  // Vertical corner strips — structural columns
   for (const cx of [-1, 1]) for (const cz of [-1, 1]) {
     const col = new THREE.Mesh(new THREE.BoxGeometry(0.32, towerH, 0.32), prisonAccent);
     col.position.set(tc.x + cx * 1.55, towerH / 2, tc.z + cz * 1.55);
@@ -686,18 +661,15 @@ towerCorners.forEach(tc => {
     scene.add(col);
   }
 
-  // Tower mid band
   const midBand = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.2, 3.6), prisonWallDark);
   midBand.position.set(tc.x, towerH * 0.5, tc.z);
   scene.add(midBand);
 
-  // Overhang platform — wider than tower
   const platform = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.35, 5.2), prisonWallDark);
   platform.position.set(tc.x, towerH + 0.18, tc.z);
   platform.castShadow = true;
   scene.add(platform);
 
-  // Platform edge rail
   for (const side of [-1, 1]) {
     const railX = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.5, 0.15), prisonMetal);
     railX.position.set(tc.x, towerH + 0.6, tc.z + side * 2.55);
@@ -707,67 +679,49 @@ towerCorners.forEach(tc => {
     scene.add(railZ);
   }
 
-  // Guard house — faces inward toward prison center using fX, fZ
   const ghH = 2.4;
   const ghW = 4.8;
   const wt = 0.22;
   const ghY = towerH + 0.35 + ghH / 2;
 
-  // Back wall is on the OUTER side (away from center)
-  // fZ dominates: if |fZ|=1 the house is oriented along Z axis (back/front along Z, sides along X)
-  // if |fX|=1 and fZ=0 it would be along X — but all our corners have both fX and fZ = ±1 diagonal
-  // We pick the Z-dominant layout and rotate by fZ/fX sign
-  // Actually: build in local space, back = -fZ direction, front(opening) = +fZ direction
-  // For diagonal corners pick fZ as the primary open axis (players see it from inside)
-
-  // Back wall — outer face (opposite of inward direction)
   const backWall = new THREE.Mesh(new THREE.BoxGeometry(ghW, ghH, wt), prisonWallMat);
   backWall.position.set(tc.x, ghY, tc.z - fZ * (ghW / 2 - wt));
   scene.add(backWall);
 
-  // Front wall: two pillars with opening — faces inward (+fZ side)
   for (const side of [-1, 1]) {
     const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.1, ghH, wt), prisonWallMat);
     pillar.position.set(tc.x + side * 1.85, ghY, tc.z + fZ * (ghW / 2 - wt));
     scene.add(pillar);
   }
-  // Window header
   const header = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.25, wt), prisonWallDark);
   header.position.set(tc.x, towerH + 0.35 + ghH - 0.3, tc.z + fZ * (ghW / 2 - wt));
   scene.add(header);
-  // Window sill
   const sill = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.2, wt + 0.1), prisonWallDark);
   sill.position.set(tc.x, towerH + 0.35 + ghH * 0.35, tc.z + fZ * (ghW / 2 - wt));
   scene.add(sill);
-  // Window bars
   for (let wb = -1; wb <= 1; wb++) {
     const wbar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, ghH * 0.52, 5), prisonMetal);
     wbar.position.set(tc.x + wb * 0.65, towerH + 0.35 + ghH * 0.6, tc.z + fZ * (ghW / 2 - wt) + fZ * 0.05);
     scene.add(wbar);
   }
 
-  // Side walls — along X axis
   for (const side of [-1, 1]) {
     const sideWall = new THREE.Mesh(new THREE.BoxGeometry(wt, ghH, ghW), prisonWallMat);
     sideWall.position.set(tc.x + side * (ghW / 2 - wt), ghY, tc.z);
     scene.add(sideWall);
-    // Side window sill
     const swSill = new THREE.Mesh(new THREE.BoxGeometry(wt + 0.1, 0.15, 1.4), prisonWallDark);
     swSill.position.set(tc.x + side * (ghW / 2 - wt), towerH + 0.35 + ghH * 0.38, tc.z);
     scene.add(swSill);
   }
 
-  // Roof — slightly pitched appearance with overhang
   const roof = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.28, 5.5), prisonCap);
   roof.position.set(tc.x, towerH + 0.35 + ghH + 0.14, tc.z);
   roof.castShadow = true;
   scene.add(roof);
-  // Roof lip
   const roofLip = new THREE.Mesh(new THREE.BoxGeometry(5.7, 0.1, 5.7), prisonMetal);
   roofLip.position.set(tc.x, towerH + 0.35 + ghH + 0.0, tc.z);
   scene.add(roofLip);
 
-  // Searchlight on roof
   const lightBase = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.3, 8), prisonMetal);
   lightBase.position.set(tc.x, towerH + 0.35 + ghH + 0.43, tc.z);
   scene.add(lightBase);
@@ -779,72 +733,14 @@ towerCorners.forEach(tc => {
   scene.add(lightDome);
 });
 
-// ── Prison stone floor — cobblestone yard ──
+// ── Prison floor — single solid concrete slab ──
 {
-  // Base yard slab — slightly raised above terrain
-  const yardMat = new THREE.MeshLambertMaterial({ color: 0x7a7870 }); // worn stone
+  const yardMat = new THREE.MeshLambertMaterial({ color: 0x6b6b63 }); // solid concrete
   const yardSlab = new THREE.Mesh(new THREE.BoxGeometry(pw - pwt * 2, 0.18, pw - pwt * 2), yardMat);
   yardSlab.position.set(prison.x, 0.09, prison.z);
   yardSlab.receiveShadow = true;
   scene.add(yardSlab);
-  collidables.push(yardSlab); // solid floor — prevents feet sinking through
-
-  // Cobblestone grid — rows of slightly varied stone blocks
-  const stoneMats = [
-    new THREE.MeshLambertMaterial({ color: 0x6e6c64 }),
-    new THREE.MeshLambertMaterial({ color: 0x7c7a72 }),
-    new THREE.MeshLambertMaterial({ color: 0x686660 }),
-    new THREE.MeshLambertMaterial({ color: 0x74726a }),
-  ];
-  const stoneW = 1.4, stoneD = 1.0, stoneH = 0.12;
-  const gapX = 0.12, gapZ = 0.10;
-  const startX = prison.x - pw / 2 + pwt + stoneW / 2 + 0.2;
-  const startZ = prison.z - pw / 2 + pwt + stoneD / 2 + 0.2;
-  const endX   = prison.x + pw / 2 - pwt - 0.2;
-  const endZ   = prison.z + pw / 2 - pwt - 0.2;
-  let rowIdx = 0;
-  for (let sz = startZ; sz < endZ; sz += stoneD + gapZ, rowIdx++) {
-    // Offset every other row for brick-bond pattern
-    const offsetX = (rowIdx % 2) * (stoneW + gapX) * 0.5;
-    for (let sx = startX - offsetX; sx < endX; sx += stoneW + gapX) {
-      // Slight random size variation
-      const sw = stoneW * (0.88 + Math.random() * 0.18);
-      const sd = stoneD * (0.88 + Math.random() * 0.16);
-      const sy = stoneH * (0.85 + Math.random() * 0.22);
-      const mat = stoneMats[Math.floor(Math.random() * stoneMats.length)];
-      const stone = new THREE.Mesh(new THREE.BoxGeometry(sw, sy, sd), mat);
-      stone.position.set(sx, 0.18 + sy / 2, sz);
-      stone.receiveShadow = true;
-      scene.add(stone);
-    }
-  }
-
-  // Perimeter stone border — slightly darker edging strip
-  const borderMat = new THREE.MeshLambertMaterial({ color: 0x5e5c56 });
-  const borders = [
-    { x: prison.x,            z: prison.z - pw/2 + pwt + 0.35, w: pw - pwt*2, d: 0.55 },
-    { x: prison.x,            z: prison.z + pw/2 - pwt - 0.35, w: pw - pwt*2, d: 0.55 },
-    { x: prison.x - pw/2 + pwt + 0.35, z: prison.z, w: 0.55, d: pw - pwt*2 },
-    { x: prison.x + pw/2 - pwt - 0.35, z: prison.z, w: 0.55, d: pw - pwt*2 },
-  ];
-  borders.forEach(({ x, z, w, d }) => {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, 0.14, d), borderMat);
-    b.position.set(x, 0.14, z);
-    b.receiveShadow = true;
-    scene.add(b);
-  });
-
-  // Central drain / manhole detail
-  const drainMat = new THREE.MeshLambertMaterial({ color: 0x3a3836 });
-  const drain = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.1, 10), drainMat);
-  drain.position.set(prison.x - 3, 0.23, prison.z);
-  scene.add(drain);
-  // Grate lines on drain
-  for (let g = -1; g <= 1; g++) {
-    const grate = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 1.0), drainMat);
-    grate.position.set(prison.x - 3 + g * 0.3, 0.28, prison.z);
-    scene.add(grate);
-  }
+  collidables.push(yardSlab);
 }
 
 // Internal prison yard features — adds depth when viewed from inside
@@ -859,7 +755,6 @@ towerCorners.forEach(tc => {
   const boothRoof = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.2, 2.6), prisonCap);
   boothRoof.position.set(boothX, 3.3, boothZ);
   scene.add(boothRoof);
-  // Booth window strips
   for (const side of [-1, 1]) {
     const bwin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 1.0), new THREE.MeshLambertMaterial({ color: 0x334455, emissive: 0x112233, emissiveIntensity: 0.4 }));
     bwin.position.set(boothX + side * 1.1, 2.0, boothZ);
@@ -882,9 +777,6 @@ towerCorners.forEach(tc => {
     scene.add(flood);
   });
 }
-
-// Spikes along top of prison walls — larger, more menacing
-// Wall spikes removed
 
 // ═══════════════════════════════════════════════════════════
 // JUNGLE — Trees and Bushes
@@ -1557,7 +1449,7 @@ const LOOT_TYPES = {
   ammo_m4: { label: 'M4 Ammo x30', color: 0xccaa44, height: 0.15 },
   ammo_pistol: { label: '1911 Ammo x15', color: 0xcc8833, height: 0.12 },
   health: { label: 'Health Pack +50', color: 0x44cc66, height: 0.15 },
-  armor: { label: 'Armor +50', color: 0x4488cc, height: 0.15 },
+  armor: { label: 'Armor +100', color: 0x4488cc, height: 0.15 },
 };
 
 function spawnLoot(x, z, type) {
@@ -2875,7 +2767,7 @@ function pickupLoot() {
   if (loot.userData.depot) {
     if (type === 'depot_ammo_m4')    { state.reserveAmmo.m4     += 10; SFX.pickup(); }
     if (type === 'depot_ammo_pistol'){ state.reserveAmmo.pistol  += 10; SFX.pickup(); }
-    if (type === 'depot_armor')      { state.armor = 50;                SFX.pickup(); }
+    if (type === 'depot_armor')      { state.armor = 100;               SFX.pickup(); }
     if (type === 'depot_health')     { state.health = Math.min(100, state.health + 50); updateHUD(); SFX.pickup(); }
     updateHUD();
     return;
@@ -2883,12 +2775,12 @@ function pickupLoot() {
 
   SFX.pickup();
   if (type === 'health' && state.hp >= 100) return;
-  if (type === 'armor'  && state.armor >= 50) return;
+  if (type === 'armor'  && state.armor >= 100) return;
   switch (type) {
     case 'ammo_m4':     state.reserveAmmo.m4     += 30; break;
     case 'ammo_pistol': state.reserveAmmo.pistol  += 15; break;
     case 'health':      state.hp = 100; break;
-    case 'armor':       state.armor = 50; break;
+    case 'armor':       state.armor = 100; break;
   }
   // Remove floor loot from scene
   if (loot.isGroup) {
@@ -2919,7 +2811,7 @@ function updateHUD() {
   document.getElementById('hp-val').textContent = state.hp;
   document.getElementById('hp-bar').style.width = state.hp + '%';
   document.getElementById('armor-val').textContent = state.armor;
-  document.getElementById('armor-bar').style.width = (state.armor / 50 * 100) + '%';
+  document.getElementById('armor-bar').style.width = state.armor + '%';
   document.getElementById('reserve-m4').textContent = state.reserveAmmo.m4;
   document.getElementById('reserve-pistol').textContent = state.reserveAmmo.pistol;
 }
@@ -2950,8 +2842,6 @@ function drawMinimap() {
 
   // Water flood level — show as blue fill covering submerged areas
   if (state.waterRising && state.waterLevel > 0.5) {
-    // Approximate: water covers everything below a certain volcano radius
-    // Find radius where volcano height = water level
     let floodRadius = CONFIG.volcanoRadius;
     for (let testR = CONFIG.volcanoRadius; testR > 0; testR -= 1) {
       const t = 1 - testR / CONFIG.volcanoRadius;
@@ -2961,10 +2851,8 @@ function drawMinimap() {
         break;
       }
     }
-    // Draw flood as semi-transparent blue over everything outside the safe radius
     mCtx.fillStyle = 'rgba(15, 100, 180, 0.5)';
     mCtx.fillRect(cx - iSize / 2, cy - iSize / 2, iSize, iSize);
-    // Clear the safe zone (above water)
     mCtx.save();
     mCtx.beginPath();
     mCtx.arc(cx, cy, floodRadius * scale, 0, Math.PI * 2);
@@ -3003,7 +2891,6 @@ function drawMinimap() {
   mCtx.beginPath(); mCtx.moveTo(0, -5); mCtx.lineTo(-3, 3); mCtx.lineTo(3, 3); mCtx.closePath();
   mCtx.fillStyle = '#fff'; mCtx.fill(); mCtx.restore();
 }
-
 // ═══════════════════════════════════════════════════════════
 // GAME LOOP
 // ═══════════════════════════════════════════════════════════
@@ -3014,26 +2901,101 @@ const fwd = new THREE.Vector3();
 const rgt = new THREE.Vector3();
 let minimapTimer = 0;
 let perfFrames = 0, perfLastTime = 0;
-const ashClouds = [];
+
+// ── Instanced Ash Cloud Pool — 1 draw call for ALL ash particles ──
+const ASH_POOL_SIZE = 300;
+const ashGeo = new THREE.SphereGeometry(1, 5, 4); // unit sphere, scaled per instance
+const ashMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.7, color: 0x444444 });
+const ashMesh = new THREE.InstancedMesh(ashGeo, ashMat, ASH_POOL_SIZE);
+ashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(ashMesh);
+
+// Per-instance data arrays
+const ashActive    = new Array(ASH_POOL_SIZE).fill(false);
+const ashPos       = Array.from({ length: ASH_POOL_SIZE }, () => new THREE.Vector3());
+const ashVel       = Array.from({ length: ASH_POOL_SIZE }, () => new THREE.Vector3());
+const ashSize      = new Float32Array(ASH_POOL_SIZE);
+const ashGrowRate  = new Float32Array(ASH_POOL_SIZE);
+const ashLife      = new Float32Array(ASH_POOL_SIZE);
+const ashMaxLife   = new Float32Array(ASH_POOL_SIZE);
+const ashOpacity   = new Float32Array(ASH_POOL_SIZE);
+const ashColors    = [0x333333, 0x444444, 0x555555, 0x3a3020, 0x4a4a4a];
+const ashColorObjs = ashColors.map(c => new THREE.Color(c));
+
+// Set up per-instance color buffer
+ashMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(ASH_POOL_SIZE * 3), 3);
+
+const _ashDummy = new THREE.Object3D();
+
 function spawnAshCloud(size, upVel, life) {
-  const ash = new THREE.Mesh(
-    new THREE.SphereGeometry(size, 6, 5),
-    new THREE.MeshLambertMaterial({
-      color: [0x333333, 0x444444, 0x555555, 0x3a3020, 0x4a4a4a][Math.floor(Math.random() * 5)],
-      transparent: true, opacity: 0.85 + Math.random() * 0.15
-    })
-  );
-  ash.position.set(
-    (Math.random() - 0.5) * 12,
-    CONFIG.volcanoHeight + Math.random() * 3,
-    (Math.random() - 0.5) * 12
-  );
-  ash.userData = {
-    vel: new THREE.Vector3((Math.random() - 0.5) * 2, upVel, (Math.random() - 0.5) * 2), // Mostly vertical
-    life: life, maxLife: life + 5, growRate: 0.3 + Math.random() * 0.8
-  };
-  scene.add(ash);
-  ashClouds.push(ash);
+  // Find a free slot in the pool
+  for (let i = 0; i < ASH_POOL_SIZE; i++) {
+    if (ashActive[i]) continue;
+    ashActive[i]   = true;
+    ashSize[i]     = size;
+    ashGrowRate[i] = 0.3 + Math.random() * 0.8;
+    ashLife[i]     = life;
+    ashMaxLife[i]  = life + 5;
+    ashPos[i].set(
+      (Math.random() - 0.5) * 12,
+      CONFIG.volcanoHeight + Math.random() * 3,
+      (Math.random() - 0.5) * 12
+    );
+    ashVel[i].set(
+      (Math.random() - 0.5) * 2,
+      upVel,
+      (Math.random() - 0.5) * 2
+    );
+    // Random ash color
+    const col = ashColorObjs[Math.floor(Math.random() * ashColorObjs.length)];
+    ashMesh.instanceColor.setXYZ(i, col.r, col.g, col.b);
+    return;
+  }
+  // Pool full — silently skip (no new mesh created)
+}
+
+function updateAshClouds(dt) {
+  for (let i = 0; i < ASH_POOL_SIZE; i++) {
+    if (!ashActive[i]) {
+      // Hide inactive instances by scaling to zero
+      _ashDummy.position.set(0, -9999, 0);
+      _ashDummy.scale.set(0, 0, 0);
+      _ashDummy.updateMatrix();
+      ashMesh.setMatrixAt(i, _ashDummy.matrix);
+      continue;
+    }
+
+    ashVel[i].y *= 0.998;
+    ashVel[i].x *= 0.99;
+    ashVel[i].z *= 0.99;
+    ashPos[i].addScaledVector(ashVel[i], dt);
+    ashSize[i] += ashGrowRate[i] * dt;
+    ashLife[i] -= dt;
+
+    const opacity = Math.max(0, (ashLife[i] / ashMaxLife[i]) * 0.6);
+    ashOpacity[i] = opacity;
+
+    if (ashLife[i] <= 0) {
+      ashActive[i] = false;
+      _ashDummy.position.set(0, -9999, 0);
+      _ashDummy.scale.set(0, 0, 0);
+      _ashDummy.updateMatrix();
+      ashMesh.setMatrixAt(i, _ashDummy.matrix);
+      continue;
+    }
+
+    const s = ashSize[i];
+    _ashDummy.position.copy(ashPos[i]);
+    _ashDummy.scale.set(s, s * 0.6, s);
+    _ashDummy.updateMatrix();
+    ashMesh.setMatrixAt(i, _ashDummy.matrix);
+  }
+
+  ashMesh.instanceMatrix.needsUpdate = true;
+  ashMesh.instanceColor.needsUpdate = true;
+
+  // Drive shared material opacity from average of active particles
+  ashMat.opacity = 0.65;
 }
 
 function update() {
@@ -3118,7 +3080,15 @@ function update() {
       const m = Math.floor(state.matchTime / 60);
       const s = Math.floor(state.matchTime % 60);
       document.getElementById('win-time').textContent = m + ':' + String(s).padStart(2, '0');
-      setTimeout(() => winScreen.classList.add('show'), 500);
+      setTimeout(() => {
+        winScreen.classList.add('show');
+        const music = document.getElementById('menu-music');
+        if (music) {
+          music.currentTime = 0;
+          music.volume = 0.75;
+          music.play();
+        }
+      }, 500);
     }
   }
 
@@ -3216,8 +3186,6 @@ function update() {
     if (camera.position.x > objBB.min.x - r && camera.position.x < objBB.max.x + r &&
         camera.position.z > objBB.min.z - r && camera.position.z < objBB.max.z + r) {
       const objTop = objBB.max.y;
-      // Check using both crouched and standing height — so standing up from a crouch
-      // still recognises the object as the floor, not just the current targetHeight
       const feetCrouch  = camera.position.y - CONFIG.crouchHeight;
       const feetStand   = camera.position.y - CONFIG.playerHeight;
       const nearTop = (feetCrouch >= objTop - 0.6 && feetCrouch <= objTop + 1.2) ||
@@ -3230,33 +3198,30 @@ function update() {
 
   const standY = floorH + state.smoothCameraHeight;
   const hardStandY = floorH + targetHeight;
-  // Snap up only to smoothed height — prevents jerky jump on uncrouching
   if (camera.position.y <= standY) {
     camera.position.y = standY; state.velocityY = 0; state.isGrounded = true;
   } else if (camera.position.y > hardStandY + 0.15) {
     state.isGrounded = false;
   }
 
-  // Float on water — if water reaches upper torso, push player to surface
-  const floatLevel = state.waterLevel + 1.2; // Head stays above water
+  // Float on water
+  const floatLevel = state.waterLevel + 1.2;
   if (state.waterRising && camera.position.y < floatLevel && state.waterLevel > floorH + 0.8) {
     camera.position.y = floatLevel;
     state.velocityY = 0;
     state.isGrounded = true;
   }
 
-  // Smooth crouch camera transition — driven by smoothCameraHeight above
+  // Smooth crouch camera transition
   if (state.isGrounded) {
     camera.position.y += (standY - camera.position.y) * dt * 20;
   }
 
-  // (collision now handled entirely by checkCollisionAndStep)
-
   // Footstep sounds — no steps when swimming
   const isSwimming = state.waterRising && state.waterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
   if (smoothedMove.lengthSq() > 0.01 && state.isGrounded && !isSwimming) {
-    let stepSpeed = state.crouching ? 2.5 : 4.5; // Slower paces (was 4/7)
-    if (state.ads) stepSpeed *= 0.6; // Even slower when aiming
+    let stepSpeed = state.crouching ? 2.5 : 4.5;
+    if (state.ads) stepSpeed *= 0.6;
     footstepTimer += dt * stepSpeed;
     if (footstepTimer >= 1) {
       footstepTimer = 0;
@@ -3272,14 +3237,14 @@ function update() {
 
   // Animate gate doors swinging open
   if (state.gateOpening && gateOpenProgress < 1) {
-    gateOpenProgress += dt * 0.5; // Takes ~2 seconds to fully open
+    gateOpenProgress += dt * 0.5;
     if (gateOpenProgress > 1) {
       gateOpenProgress = 1;
-      if (state.sprintTimer === 0) state.sprintTimer = 15; // Start 15s sprint
+      if (state.sprintTimer === 0) state.sprintTimer = 15;
     }
-    const angle = gateOpenProgress * Math.PI * 0.45; // Swing ~80 degrees
-    gatePivotL.rotation.y = angle;   // Left door swings outward
-    gatePivotR.rotation.y = -angle;  // Right door swings other way
+    const angle = gateOpenProgress * Math.PI * 0.45;
+    gatePivotL.rotation.y = angle;
+    gatePivotR.rotation.y = -angle;
   }
 
   // Shared updates — run regardless of alive/dead
@@ -3306,16 +3271,15 @@ function update() {
     waterWarning.style.fontSize = '28px';
     waterWarning.classList.add('show');
     setTimeout(() => waterWarning.classList.remove('show'), 5000);
-    // Initial massive burst — 132 ash (10% more)
+    // Initial massive burst
     for (let i = 0; i < 152; i++) spawnAshCloud(3 + Math.random() * 6, 14 + Math.random() * 28, 12 + Math.random() * 15);
-    // Deep constant bass eruption rumble — no oscillation, pure weight
+    // Deep constant bass eruption rumble
     {
       const ctx = ensureAudio();
       const t0 = ctx.currentTime;
       const fullDur = 15;
       const taperStart = 10;
 
-      // Initial boom — one-shot deep impact
       const boomBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 1.8), ctx.sampleRate);
       const bbd = boomBuf.getChannelData(0);
       for (let i = 0; i < bbd.length; i++) {
@@ -3328,7 +3292,6 @@ function update() {
       boomSrc.connect(boomLp).connect(boomGain).connect(getMaster());
       boomSrc.start(t0);
 
-      // Three staggered pure noise layers — no sine modulation at all
       for (let layer = 0; layer < 3; layer++) {
         const offset = layer * 0.21;
         const dur = fullDur - offset;
@@ -3348,8 +3311,6 @@ function update() {
         src.start(t0 + offset);
       }
 
-      // Deep sub layer — use NOISE not oscillators to avoid any tonal oscillation
-      // A 4th staggered noise layer with very deep lowpass for the sub-bass feel
       const subBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * fullDur), ctx.sampleRate);
       const sbd = subBuf.getChannelData(0);
       for (let i = 0; i < sbd.length; i++) {
@@ -3359,14 +3320,12 @@ function update() {
         sbd[i] = (Math.random() * 2 - 1) * fadeIn * fadeOut;
       }
       const subSrc = ctx.createBufferSource(); subSrc.buffer = subBuf;
-      // Very tight lowpass — only passes true sub-bass rumble, kills all mid/high
       const subLp1 = ctx.createBiquadFilter(); subLp1.type = 'lowpass'; subLp1.frequency.value = 45;
       const subLp2 = ctx.createBiquadFilter(); subLp2.type = 'lowpass'; subLp2.frequency.value = 45;
       const subG = ctx.createGain(); subG.gain.value = 0.92;
       subSrc.connect(subLp1).connect(subLp2).connect(subG).connect(getMaster());
       subSrc.start(t0);
 
-      // Irregular heavy thumps — noise bursts only, no tones
       [950, 2600, 4350, 6100, 7800, 9500].forEach(ms => {
         setTimeout(() => {
           playNoise(0.322, 0.38, 70, 'lowpass');
@@ -3382,46 +3341,35 @@ function update() {
     scene.add(haze);
     state.hazePlane = haze;
   }
+
   // Continuous ash plume till match end
   if (state.erupted) {
     state.ashTimer = (state.ashTimer || 0) + dt;
-    if (state.ashTimer > 0.07) { // Faster spawn rate
+    if (state.ashTimer > 0.07) {
       state.ashTimer = 0;
       spawnAshCloud(2.5 + Math.random() * 5, 8 + Math.random() * 18, 10 + Math.random() * 14);
     }
   }
-  // Fade in haze — gets darker over time till match end
+
+  // Update all ash via instanced pool — replaces per-mesh loop
+  updateAshClouds(dt);
+
+  // Fade in haze
   if (state.hazePlane) {
     const timeSinceEruption = Math.max(0, state.matchTime - eruptionTime);
-    const targetOpacity = Math.min(0.35, timeSinceEruption * 0.003); // Gradually darkens to 35%
+    const targetOpacity = Math.min(0.35, timeSinceEruption * 0.003);
     state.hazePlane.material.opacity += (targetOpacity - state.hazePlane.material.opacity) * dt * 0.5;
-    // Dim sun progressively — ash blocks sunlight
     const dimFactor = Math.max(0.35, 1 - timeSinceEruption * 0.004);
     sun.intensity = 1.6 * dimFactor;
     sunMesh.material.color.setHex(dimFactor > 0.6 ? 0xFFEE00 : 0xCC8800);
   }
+
   // Screen shake — 5 seconds on eruption
   if (state.erupted && state.matchTime < eruptionTime + 5 && !state.playerDead) {
     const shakeIntensity = 0.12 * (1 - (state.matchTime - eruptionTime) / 5);
     camera.position.x += (Math.random() - 0.5) * shakeIntensity;
     camera.position.y += (Math.random() - 0.5) * shakeIntensity * 0.5;
     camera.position.z += (Math.random() - 0.5) * shakeIntensity * 0.25;
-  }
-
-  // Update ash clouds
-  for (let i = ashClouds.length - 1; i >= 0; i--) {
-    const ash = ashClouds[i];
-    ash.userData.vel.y *= 0.998; // Slight decel, never falls
-    ash.position.addScaledVector(ash.userData.vel, dt);
-    ash.userData.vel.x *= 0.99; ash.userData.vel.z *= 0.99;
-    const s = ash.scale.x + ash.userData.growRate * dt;
-    ash.scale.set(s, s * 0.6, s);
-    ash.userData.life -= dt;
-    ash.material.opacity = Math.max(0, (ash.userData.life / ash.userData.maxLife) * 0.6);
-    if (ash.userData.life <= 0) {
-      scene.remove(ash); ash.geometry.dispose(); ash.material.dispose();
-      ashClouds.splice(i, 1);
-    }
   }
 
   // Water starts rising after waterRiseStart seconds
@@ -3431,18 +3379,16 @@ function update() {
       water.visible = true;
     }
 
-    // Water rises gradually — reaches volcano peak by end of match
     const rawProgress = (state.matchTime - state.waterRiseStart) / (state.matchDuration - state.waterRiseStart);
     const timeSinceRise = state.matchTime - state.waterRiseStart;
-    // Slow ooze for first 10 seconds, then normal pace
     let riseProgress;
     if (timeSinceRise < 10) {
-      riseProgress = (timeSinceRise / 10) * 0.02; // Very slow — barely rises
+      riseProgress = (timeSinceRise / 10) * 0.02;
     } else {
       const normalProgress = (timeSinceRise - 10) / (state.matchDuration - state.waterRiseStart - 10);
       riseProgress = 0.02 + Math.pow(normalProgress, 0.70) * 0.98;
     }
-    state.waterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3); // Starts at stream bed level (-0.3), fills stream first
+    state.waterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3);
     water.position.y = state.waterLevel;
 
     // Water wave effect
@@ -3455,13 +3401,13 @@ function update() {
     }
     waterPosAttr.needsUpdate = true;
 
-    // Water damage to player — starts at knee level (water 0.5 below player feet)
+    // Water damage to player
     const playerCurrentH = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
     const playerFeetY = camera.position.y - playerCurrentH;
     const kneeY = playerFeetY + 0.4;
     if (state.waterLevel > kneeY) {
       state.waterDmgTimer += dt;
-      if (state.waterDmgTimer >= 1) { // 5hp per second
+      if (state.waterDmgTimer >= 1) {
         state.waterDmgTimer -= 1;
         if (state.armor > 0) {
           state.armor = Math.max(0, state.armor - 5);
@@ -3470,7 +3416,6 @@ function update() {
         }
         updateHUD();
         SFX.water_damage();
-        // Show damage vignette (same as bullet damage)
         const dv = document.getElementById('damage-vignette');
         dv.classList.add('show');
         setTimeout(() => dv.classList.remove('show'), 350);
@@ -3479,12 +3424,12 @@ function update() {
       state.waterDmgTimer = 0;
     }
 
-    // Water damage to bots too
+    // Water damage to bots
     for (const bot of bots) {
       if (!bot.alive) continue;
       const botFeetY = bot.group.position.y;
       if (state.waterLevel > botFeetY + 0.4) {
-        bot.hp -= dt * 5; // 5hp/sec
+        bot.hp -= dt * 5;
         if (bot.hp <= 0) {
           bot.alive = false;
           bot.group.rotation.x = Math.PI / 2;
@@ -3498,8 +3443,6 @@ function update() {
         }
       }
     }
-
-    // (periodic warning removed — eruption is sufficient)
   }
 
   // Ambient jungle sounds
@@ -3509,10 +3452,10 @@ function update() {
     if (roll < 0.4) SFX.bird();
     else if (roll < 0.7) SFX.insect();
     else SFX.wind();
-    ambientTimer = 4 + Math.random() * 8; // 4-12 seconds between sounds
+    ambientTimer = 4 + Math.random() * 8;
   }
 
-  // Loot proximity — floor loot and depot crates
+  // Loot proximity
   state.nearbyLoot = null;
   let closestDist = 2.5;
   const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -3522,7 +3465,6 @@ function update() {
     const dz = loot.position.z - camera.position.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist > closestDist) continue;
-    // Depot crates: player must be physically inside the shed
     if (loot.userData.depot) {
       const { shedX, shedZ, shedHW, shedHD } = loot.userData;
       if (Math.abs(camera.position.x - shedX) > shedHW ||
@@ -3538,22 +3480,26 @@ function update() {
   // Loot bob + float with water
   for (const loot of lootItems) {
     const groundY = loot.userData.baseY;
-    const floatY = state.waterLevel + 0.1; // Sits just above water surface
+    const floatY = state.waterLevel + 0.1;
     const effectiveY = Math.max(groundY, floatY);
     loot.position.y = effectiveY + Math.sin(clock.elapsedTime * 2 + loot.position.x) * 0.08;
     loot.rotation.y += dt * 1.5;
   }
 
-  // Depot crates are idle (no bob or spin)
-
-  // Smoke
+  // Smoke — update instanced mesh positions
   for (const s of smokeParticles) {
-    s.position.y = s.userData.baseY + Math.sin(clock.elapsedTime * s.userData.speed + s.userData.phase) * 2;
-    s.position.x = Math.sin(clock.elapsedTime * 0.3 + s.userData.phase) * 2.5;
-    s.position.z = Math.cos(clock.elapsedTime * 0.2 + s.userData.phase) * 2.5;
+    _smokeDummy.position.set(
+      s.ox + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 2.5,
+      s.baseY + Math.sin(clock.elapsedTime * s.speed + s.phase) * 2,
+      s.oz + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 2.5
+    );
+    _smokeDummy.scale.setScalar(s.size);
+    _smokeDummy.updateMatrix();
+    smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
   }
+  smokeInst.instanceMatrix.needsUpdate = true;
 
-  // Water vignette intensifies as island sinks
+  // Water vignette
   if (state.waterRising) {
     const maxWater = CONFIG.volcanoHeight * 0.85;
     const progress = Math.min(1, Math.max(0, state.waterLevel / maxWater));
@@ -3562,7 +3508,7 @@ function update() {
     waterVignette.style.opacity = 0;
   }
 
-  // Bubble rising animation — stop once water starts rising
+  // Bubble animation
   if (!state.waterRising) {
     bubbleGroup.visible = true;
     bubbleGroup.children.forEach(b => {
@@ -3581,13 +3527,11 @@ function update() {
   let targetPos;
 
   if (state.reloadPhase === 'down' || state.switchPhase === 'down') {
-    // Weapon drops below view
     targetPos = restPos.clone();
     targetPos.y = -0.7;
     targetPos.x += 0.05;
     weaponGroup.rotation.x = -0.3;
   } else if (state.reloadPhase === 'up' || state.switchPhase === 'up') {
-    // Weapon comes back up
     targetPos = restPos.clone();
   } else if (state.ads) {
     targetPos = new THREE.Vector3(0, -0.15, restPos.z - 0.05);
@@ -3622,8 +3566,6 @@ function update() {
     p.userData.life -= dt;
     if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); impactParticles.splice(i, 1); }
   }
-
-  // Minimap removed
 
   // Performance stats
   perfFrames++;
