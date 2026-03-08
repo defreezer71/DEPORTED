@@ -200,7 +200,7 @@ function canPlaceAt(x, z) {
       new THREE.BoxGeometry(bushR * 1.2, bushR * 1.4, bushR * 1.2),
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    bushCol.position.set(x, h + bushR * 0.3, z);
+    bushCol.position.set(x, h + bushR * 0.7, z);
     scene.add(bushCol);
     collidables.push(bushCol);
     targets.push(bushCol);
