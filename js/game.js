@@ -894,7 +894,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     dummy.updateMatrix();
     canopy3Inst.setMatrixAt(i, dummy.matrix);
 
-    // Trunk collider — uses invisibleColliderMat so Box3.setFromObject works
+    // Trunk PLAYER collider — generous, prevents walking through
     const trunkCol = new THREE.Mesh(
       new THREE.BoxGeometry(trunkR * 2.4, trunkH, trunkR * 2.4),
       invisibleColliderMat
@@ -902,18 +902,24 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     trunkCol.position.set(x, h + trunkH / 2, z);
     scene.add(trunkCol);
     collidables.push(trunkCol);
-    targets.push(trunkCol);
 
-    // Canopy collider — only used for bullet hits, NOT player collision
-    // (players should walk under tree canopies, not collide with them overhead)
-    const canopyCol = new THREE.Mesh(
-      new THREE.BoxGeometry(canopyR * 2.0, canopyR * scaleY * 1.6, canopyR * 2.0),
+    // Trunk BULLET hitbox — tight to visual trunk cylinder
+    const trunkHit = new THREE.Mesh(
+      new THREE.BoxGeometry(trunkR * 1.8, trunkH, trunkR * 1.8),
       invisibleColliderMat
     );
-    canopyCol.position.set(x, h + trunkH + canopyR * 0.35, z);
-    scene.add(canopyCol);
-    // Only add to targets (bullet hit), NOT collidables (player collision)
-    targets.push(canopyCol);
+    trunkHit.position.set(x, h + trunkH / 2, z);
+    scene.add(trunkHit);
+    targets.push(trunkHit);
+
+    // Canopy BULLET hitbox — tight to visual squashed sphere
+    const canopyHit = new THREE.Mesh(
+      new THREE.BoxGeometry(canopyR * 1.3, canopyR * scaleY * 1.4, canopyR * 1.3),
+      invisibleColliderMat
+    );
+    canopyHit.position.set(x, h + trunkH + canopyR * 0.35, z);
+    scene.add(canopyHit);
+    targets.push(canopyHit);
   });
 
   trunkInst.instanceMatrix.needsUpdate = true;
@@ -926,8 +932,6 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   scene.add(canopyInst);
   scene.add(canopy2Inst);
   scene.add(canopy3Inst);
-  targets.push(trunkInst);
-  targets.push(canopyInst);
 }
 
 // ── Instanced Bushes ──
@@ -983,8 +987,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     dummy.updateMatrix();
     bush3Inst.setMatrixAt(i, dummy.matrix);
 
-    // Bush collider — matches visual sphere diameter (2 * bushR)
-    // FIX: was bushR * 1.4 which only covered 70% of the visual bush
+    // Bush PLAYER collider — generous box, prevents walking through
     const bushCol = new THREE.Mesh(
       new THREE.BoxGeometry(bushR * 2.0, bushR * 2.0, bushR * 2.0),
       invisibleColliderMat
@@ -992,7 +995,18 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     bushCol.position.set(x, h + bushR * 0.9, z);
     scene.add(bushCol);
     collidables.push(bushCol);
-    targets.push(bushCol);
+
+    // Bush BULLET hitbox — tight to visual squashed sphere
+    // Visual is a sphere of radius bushR squashed to bushR*scaleY tall
+    const hitH = bushR * scaleY * 1.8;
+    const hitW = bushR * 1.2;
+    const bushHit = new THREE.Mesh(
+      new THREE.BoxGeometry(hitW, hitH, hitW),
+      invisibleColliderMat
+    );
+    bushHit.position.set(x, h + bushR * scaleY * 0.5, z);
+    scene.add(bushHit);
+    targets.push(bushHit);
   });
 
   bushInst.instanceMatrix.needsUpdate = true;
@@ -1001,7 +1015,6 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   scene.add(bushInst);
   scene.add(bush2Inst);
   scene.add(bush3Inst);
-  targets.push(bushInst);
 }
 
 // ── Instanced Rocks ──
@@ -1039,7 +1052,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     rockInst.setMatrixAt(i, dummy.matrix);
     rockInst.setColorAt(i, col.set(rockColors[Math.floor(Math.random() * rockColors.length)]));
 
-    // Rock collider — uses invisibleColliderMat so Box3.setFromObject works
+    // Rock PLAYER collider — generous, prevents walking through
     const collider = new THREE.Mesh(
       new THREE.BoxGeometry(rw * 1.2, rh + 2, rd * 1.2),
       invisibleColliderMat
@@ -1047,7 +1060,15 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     collider.position.set(x, h + rh * 0.5, z);
     scene.add(collider);
     collidables.push(collider);
-    targets.push(collider);
+
+    // Rock BULLET hitbox — tight to visual rock shape
+    const rockHit = new THREE.Mesh(
+      new THREE.BoxGeometry(rw * 0.8, rh * 1.0, rd * 0.8),
+      invisibleColliderMat
+    );
+    rockHit.position.set(x, h + rh * 0.5, z);
+    scene.add(rockHit);
+    targets.push(rockHit);
   });
 
   rockInst.instanceMatrix.needsUpdate = true;
