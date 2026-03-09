@@ -92,7 +92,7 @@ function canPlaceAt(x, z) {
 
     const trunkCol = new THREE.Mesh(
       new THREE.BoxGeometry(trunkR * 2, trunkH, trunkR * 2),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+      new THREE.MeshBasicMaterial({ visible: false })
     );
     trunkCol.position.set(x, h + trunkH / 2, z);
     scene.add(trunkCol);
@@ -101,7 +101,7 @@ function canPlaceAt(x, z) {
 
     const canopyCol = new THREE.Mesh(
       new THREE.BoxGeometry(canopyR * 1.6, canopyR * scaleY * 1.2, canopyR * 1.6),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+      new THREE.MeshBasicMaterial({ visible: false })
     );
     canopyCol.position.set(x, h + trunkH + canopyR * 0.25, z);
     scene.add(canopyCol);
@@ -155,7 +155,7 @@ function canPlaceAt(x, z) {
   const dummy = new THREE.Object3D();
   bushPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const bushR  = (0.5 + Math.random() * 1.0) * 2.2;
+    const bushR  = (0.5 + Math.random() * 1.0) * 3.5;
     const scaleY = 0.42 + Math.random() * 0.28;
 
     dummy.position.set(x, h + bushR * 0.35, z);
@@ -179,10 +179,10 @@ function canPlaceAt(x, z) {
     bush3Inst.setMatrixAt(i, dummy.matrix);
 
     const bushCol = new THREE.Mesh(
-      new THREE.BoxGeometry(bushR * 1.6, bushR * 2.0, bushR * 1.6),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+      new THREE.BoxGeometry(bushR * 1.2, bushR * 1.4, bushR * 1.2),
+      new THREE.MeshBasicMaterial({ visible: false })
     );
-    bushCol.position.set(x, h + bushR * 0.9, z);
+    bushCol.position.set(x, h + bushR * 0.3, z);
     scene.add(bushCol);
     collidables.push(bushCol);
     targets.push(bushCol);
@@ -234,7 +234,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
     const collider = new THREE.Mesh(
       new THREE.BoxGeometry(rw * 0.8, rh + 2, rd * 0.8),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+      new THREE.MeshBasicMaterial({ visible: false })
     );
     collider.position.set(x, h + rh * 0.5 - 0.5, z);
     scene.add(collider);
@@ -252,7 +252,7 @@ const bulletBlockers = [];
 
 const vBase = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 1.05, CONFIG.volcanoRadius * 1.05, CONFIG.volcanoHeight * 0.55, 16),
-  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+  new THREE.MeshBasicMaterial({ visible: false })
 );
 vBase.position.set(0, CONFIG.volcanoHeight * 0.275, 0);
 scene.add(vBase);
@@ -260,7 +260,7 @@ bulletBlockers.push(vBase);
 
 const vMid = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.65, CONFIG.volcanoRadius * 1.0, CONFIG.volcanoHeight * 0.45, 16),
-  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+  new THREE.MeshBasicMaterial({ visible: false })
 );
 vMid.position.set(0, CONFIG.volcanoHeight * 0.60, 0);
 scene.add(vMid);
@@ -268,7 +268,7 @@ bulletBlockers.push(vMid);
 
 const vTop = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.22, CONFIG.volcanoRadius * 0.60, CONFIG.volcanoHeight * 0.35, 12),
-  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+  new THREE.MeshBasicMaterial({ visible: false })
 );
 vTop.position.set(0, CONFIG.volcanoHeight * 0.875, 0);
 scene.add(vTop);
@@ -297,7 +297,7 @@ for (let i = 0; i < 25; i++) {
 
   const collider = new THREE.Mesh(
     new THREE.BoxGeometry(rw * 0.75, rh + 2, rd * 0.75),
-    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+    new THREE.MeshBasicMaterial({ visible: false })
   );
   collider.position.set(x, h + rh * 0.5 - 0.5, z);
   scene.add(collider);
