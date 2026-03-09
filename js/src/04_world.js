@@ -7,23 +7,29 @@ const pwh = CONFIG.prisonWallHeight;
 const pwt = 0.6;
 
 // ── Prison materials — layered concrete tones ──
-const prisonWallMat   = new THREE.MeshLambertMaterial({ color: 0x6a6a62 }); // weathered concrete
-const prisonWallDark  = new THREE.MeshLambertMaterial({ color: 0x4e4e48 }); // deep shadow tone
-const prisonAccent    = new THREE.MeshLambertMaterial({ color: 0x58524a }); // warm grey-brown
-const prisonMetal     = new THREE.MeshLambertMaterial({ color: 0x38383a }); // dark iron
-const prisonRust      = new THREE.MeshLambertMaterial({ color: 0x6b4030 }); // rust/oxide
-const prisonCap       = new THREE.MeshLambertMaterial({ color: 0x505048 }); // wall cap
+const prisonWallMat   = new THREE.MeshLambertMaterial({ color: 0x6a6a62 });
+const prisonWallDark  = new THREE.MeshLambertMaterial({ color: 0x4e4e48 });
+const prisonAccent    = new THREE.MeshLambertMaterial({ color: 0x58524a });
+const prisonMetal     = new THREE.MeshLambertMaterial({ color: 0x38383a });
+const prisonRust      = new THREE.MeshLambertMaterial({ color: 0x6b4030 });
+const prisonCap       = new THREE.MeshLambertMaterial({ color: 0x505048 });
+
+// Invisible collider material — colorWrite: false keeps it hidden
+// but lets Box3.setFromObject() measure it correctly
+const colliderMat = new THREE.MeshBasicMaterial({
+  transparent: true, opacity: 0,
+  depthWrite: false, colorWrite: false
+});
 
 function createPrisonWall(x, z, w, h, d) {
-  // Main wall body
+  // Main wall body — visual only
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), prisonWallMat);
   mesh.position.set(x, h / 2, z);
   mesh.castShadow = true; mesh.receiveShadow = true;
   scene.add(mesh);
-  collidables.push(mesh);
   targets.push(mesh);
 
-  // Wall cap (darker top strip)
+  // Wall cap
   const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, 0.22, d + 0.05), prisonCap);
   cap.position.set(x, h + 0.11, z);
   cap.castShadow = true;
@@ -34,28 +40,36 @@ function createPrisonWall(x, z, w, h, d) {
   band.position.set(x, h * 0.45, z);
   scene.add(band);
 
-  // Lower base strip — slightly wider, darker
+  // Lower base strip
   const base = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.35, d + 0.1), prisonAccent);
   base.position.set(x, 0.175, z);
   base.receiveShadow = true;
   scene.add(base);
+
+  // Invisible collider — padded +0.5 on the thin axis to prevent clipping
+  const cw = w < d ? w + 0.5 : w;
+  const cd = d < w ? d + 0.5 : d;
+  const collider = new THREE.Mesh(new THREE.BoxGeometry(cw, h, cd), colliderMat);
+  collider.position.set(x, h / 2, z);
+  scene.add(collider);
+  collidables.push(collider);
 
   return mesh;
 }
 
 // North wall (z-)
 createPrisonWall(prison.x, prison.z - pw / 2, pw, pwh, pwt);
-// South wall (z+) — full wall
+// South wall (z+)
 createPrisonWall(prison.x, prison.z + pw / 2, pw, pwh, pwt);
-// East wall (x+) — GATE OPENING facing volcano (split with gap)
+// East wall (x+) — split with gate gap
 const gateWidth = 6;
 const eastWallLen = (pw - gateWidth) / 2;
 createPrisonWall(prison.x + pw / 2, prison.z - pw / 2 + eastWallLen / 2, pwt, pwh, eastWallLen);
 createPrisonWall(prison.x + pw / 2, prison.z + pw / 2 - eastWallLen / 2, pwt, pwh, eastWallLen);
-// West wall — full
+// West wall
 createPrisonWall(prison.x - pw / 2, prison.z, pwt, pwh, pw);
 
-// Vertical pilasters along each wall face — break up flat surfaces
+// Vertical pilasters
 {
   const pilasterMat = new THREE.MeshLambertMaterial({ color: 0x5c5c54 });
   const wallDefs = [
@@ -78,41 +92,40 @@ createPrisonWall(prison.x - pw / 2, prison.z, pwt, pwh, pw);
   });
 }
 
-// Gate posts on east wall — beefier, with light fixtures
+// Gate posts
 for (const side of [-1, 1]) {
-  // Main post — wider and taller
   const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, pwh + 2.2, 0.8), prisonAccent);
   post.position.set(prison.x + pw / 2, (pwh + 2.2) / 2, prison.z + side * (gateWidth / 2));
   post.castShadow = true;
   scene.add(post);
-  // Post cap
   const postCap = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.25, 1.1), prisonMetal);
   postCap.position.set(prison.x + pw / 2, pwh + 2.2 + 0.12, prison.z + side * (gateWidth / 2));
   scene.add(postCap);
-  // Light box on post
   const lightBox = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4), new THREE.MeshLambertMaterial({ color: 0x888860, emissive: 0x444420, emissiveIntensity: 0.6 }));
   lightBox.position.set(prison.x + pw / 2 - 0.3, pwh + 1.6, prison.z + side * (gateWidth / 2));
   scene.add(lightBox);
 }
 
-// Gate sign above entrance — "DEPORTED" lettering beam
+// Gate sign
 const signBeam = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.5, gateWidth + 1.8), prisonMetal);
 signBeam.position.set(prison.x + pw / 2, pwh + 1.8, prison.z);
 scene.add(signBeam);
-// Sign face plate
 const signFace = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.38, gateWidth + 1.4), new THREE.MeshLambertMaterial({ color: 0x1a1a1a, emissive: 0x0a0a08, emissiveIntensity: 0.3 }));
 signFace.position.set(prison.x + pw / 2 - 0.2, pwh + 1.8, prison.z);
 scene.add(signFace);
 
-// Gate doors — heavier metal look with cross-bracing
+// Gate doors
 const gateHalfW = gateWidth / 2;
 const gateDoorMat = new THREE.MeshLambertMaterial({ color: 0x3a3028 });
+
 const gateDoorL = new THREE.Mesh(new THREE.BoxGeometry(pwt + 0.25, pwh, gateHalfW), gateDoorMat);
 const gatePivotL = new THREE.Group();
 gatePivotL.position.set(prison.x + pw / 2, 0, prison.z - gateWidth / 2);
 gateDoorL.position.set(0, pwh / 2, gateHalfW / 2);
 gatePivotL.add(gateDoorL);
 scene.add(gatePivotL);
+// Push the actual door mesh — refreshDynamicColliders updates its world BB each frame
+// so collision follows the door as it swings open
 collidables.push(gateDoorL);
 
 const gateDoorR = new THREE.Mesh(new THREE.BoxGeometry(pwt + 0.25, pwh, gateHalfW), gateDoorMat);
@@ -125,7 +138,6 @@ collidables.push(gateDoorR);
 
 // Iron bars + cross bracing on each door
 for (const door of [gateDoorL, gateDoorR]) {
-  // Vertical bars
   for (let b = 0; b < 4; b++) {
     const bar = new THREE.Mesh(
       new THREE.CylinderGeometry(0.035, 0.035, pwh * 0.85, 5),
@@ -134,14 +146,12 @@ for (const door of [gateDoorL, gateDoorR]) {
     bar.position.set(0.18, 0, (b / 3 - 0.5) * gateHalfW * 0.72);
     door.add(bar);
   }
-  // Horizontal cross-bar
   const hBar = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.12, gateHalfW * 0.9), prisonMetal);
   hBar.position.set(0.18, pwh * 0.15, 0);
   door.add(hBar);
   const hBar2 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.12, gateHalfW * 0.9), prisonMetal);
   hBar2.position.set(0.18, -pwh * 0.2, 0);
   door.add(hBar2);
-  // Rust streaks on door face
   for (let r = 0; r < 3; r++) {
     const rust = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.18), prisonRust);
     rust.position.set(0.22, pwh * 0.1 - r * pwh * 0.15, (Math.random() - 0.5) * gateHalfW * 0.6);
@@ -150,7 +160,7 @@ for (const door of [gateDoorL, gateDoorR]) {
 }
 let gateOpenProgress = 0;
 
-// Battlements (merlons) along all wall tops — crenellated parapet
+// Battlements
 {
   const merlon = new THREE.MeshLambertMaterial({ color: 0x606058 });
   const wallEdges = [
@@ -164,7 +174,6 @@ let gateOpenProgress = 0;
     for (let i = 0; i < count; i++) {
       const t = (i + 0.5) / count;
       const pos = from + (to - from) * t;
-      // Skip gate area on east wall
       if (wallIdx === 3 && Math.abs((from + (to-from)*t) - prison.z) < gateWidth / 2 + 0.3) continue;
       const mx = axis === 'x' ? pos : fixed;
       const mz = axis === 'x' ? fixed : pos;
@@ -180,7 +189,7 @@ let gateOpenProgress = 0;
   });
 }
 
-// Barbed wire coils along wall tops between merlons
+// Barbed wire
 {
   const wireMat = new THREE.MeshLambertMaterial({ color: 0x555548 });
   const wireEdges = [
@@ -199,7 +208,6 @@ let gateOpenProgress = 0;
     ), wireMat);
     wire.position.set(wx, pwh + 0.12, wz);
     scene.add(wire);
-    // Barb spikes along wire
     const barbCount = Math.floor(wireLen / 1.5);
     for (let b = 0; b < barbCount; b++) {
       const bt = (b + 0.5) / barbCount;
@@ -213,7 +221,7 @@ let gateOpenProgress = 0;
   });
 }
 
-// Guard towers — upgraded with more detail
+// Guard towers
 const towerH = pwh + 3.5;
 const towerCorners = [
   { x: prison.x + pw / 2 - 1.5, z: prison.z - pw / 2 + 1.5, fX: -1, fZ:  1 },
@@ -224,11 +232,17 @@ const towerCorners = [
 
 towerCorners.forEach(tc => {
   const fX = tc.fX, fZ = tc.fZ;
+
   const base = new THREE.Mesh(new THREE.BoxGeometry(3.4, towerH, 3.4), prisonWallMat);
   base.position.set(tc.x, towerH / 2, tc.z);
   base.castShadow = true; base.receiveShadow = true;
   scene.add(base);
-  collidables.push(base);
+
+  // Invisible collider for tower
+  const towerCollider = new THREE.Mesh(new THREE.BoxGeometry(3.9, towerH, 3.9), colliderMat);
+  towerCollider.position.set(tc.x, towerH / 2, tc.z);
+  scene.add(towerCollider);
+  collidables.push(towerCollider);
 
   for (const cx of [-1, 1]) for (const cz of [-1, 1]) {
     const col = new THREE.Mesh(new THREE.BoxGeometry(0.32, towerH, 0.32), prisonAccent);
@@ -309,9 +323,9 @@ towerCorners.forEach(tc => {
   scene.add(lightDome);
 });
 
-// ── Prison floor — single solid concrete slab ──
+// ── Prison floor ──
 {
-  const yardMat = new THREE.MeshLambertMaterial({ color: 0x6b6b63 }); // solid concrete
+  const yardMat = new THREE.MeshLambertMaterial({ color: 0x6b6b63 });
   const yardSlab = new THREE.Mesh(new THREE.BoxGeometry(pw - pwt * 2, 0.18, pw - pwt * 2), yardMat);
   yardSlab.position.set(prison.x, 0.09, prison.z);
   yardSlab.receiveShadow = true;
@@ -319,7 +333,6 @@ towerCorners.forEach(tc => {
   collidables.push(yardSlab);
 }
 
-// Internal prison yard features — adds depth when viewed from inside
 // Central guard booth
 {
   const boothMat = new THREE.MeshLambertMaterial({ color: 0x5a5a52 });
@@ -338,7 +351,7 @@ towerCorners.forEach(tc => {
   }
 }
 
-// Flood lights on wall faces — emissive fixtures
+// Flood lights
 {
   const floodMat = new THREE.MeshLambertMaterial({ color: 0x999966, emissive: 0x555533, emissiveIntensity: 0.7 });
   const floodPositions = [
