@@ -161,6 +161,20 @@ function createWeaponModel(type) {
   const wp = type === 'm4' ? {x:0.25,y:-0.22,z:-0.38} : {x:0.2,y:-0.2,z:-0.3};
   weaponGroup.position.set(wp.x, wp.y, wp.z);
   weaponGroup.rotation.set(0, 0, 0);
+
+  // ── Krunker-style weapon always-on-top ──
+  // depthTest:false + renderOrder:999 renders weapon over all world geometry.
+  // frustumCulled:false prevents Three.js from hiding weapon parts when their
+  // bounding sphere drifts outside the camera frustum (FIX for weapon vanishing).
+  weaponGroup.traverse(child => {
+    if (child.isMesh) {
+      child.renderOrder = 999;
+      child.frustumCulled = false;
+      // Clone the material so we don't mutate the shared material objects
+      child.material = child.material.clone();
+      child.material.depthTest = false;
+    }
+  });
 }
 createWeaponModel('m4');
 let weaponBobPhase = 0;

@@ -798,9 +798,19 @@ function canPlaceAt(x, z) {
   if (getVolcanoHeight(x, z) > 1) return false;
   if (Math.abs(x - prison.x) < pw / 2 + 10 && Math.abs(z - prison.z) < pw / 2 + 10) return false;
   if (Math.abs(x) > half - 12 || Math.abs(z) > half - 12) return false;
-  if (isInStream(x, z)) return false;
+  if (isInStream(x, z)) return false; // No trees/bushes in stream
   return true;
 }
+
+// Shared invisible collider material — colorWrite:false is required so that
+// THREE.Box3().setFromObject() can still compute a real bounding box.
+// Using visible:false breaks setFromObject and returns an empty/zero-size box.
+const invisibleColliderMat = new THREE.MeshBasicMaterial({
+  transparent: true,
+  opacity: 0,
+  depthWrite: false,
+  colorWrite: false
+});
 
 // ── Instanced Trees — 2 draw calls for all trunks + all canopies ──
 {
@@ -884,22 +894,25 @@ function canPlaceAt(x, z) {
     dummy.updateMatrix();
     canopy3Inst.setMatrixAt(i, dummy.matrix);
 
+    // Trunk collider — uses invisibleColliderMat so Box3.setFromObject works
     const trunkCol = new THREE.Mesh(
-      new THREE.BoxGeometry(trunkR * 2, trunkH, trunkR * 2),
-      new THREE.MeshBasicMaterial({ visible: false })
+      new THREE.BoxGeometry(trunkR * 2.4, trunkH, trunkR * 2.4),
+      invisibleColliderMat
     );
     trunkCol.position.set(x, h + trunkH / 2, z);
     scene.add(trunkCol);
     collidables.push(trunkCol);
     targets.push(trunkCol);
 
+    // Canopy collider — only used for bullet hits, NOT player collision
+    // (players should walk under tree canopies, not collide with them overhead)
     const canopyCol = new THREE.Mesh(
-      new THREE.BoxGeometry(canopyR * 1.6, canopyR * scaleY * 1.2, canopyR * 1.6),
-      new THREE.MeshBasicMaterial({ visible: false })
+      new THREE.BoxGeometry(canopyR * 2.0, canopyR * scaleY * 1.6, canopyR * 2.0),
+      invisibleColliderMat
     );
-    canopyCol.position.set(x, h + trunkH + canopyR * 0.25, z);
+    canopyCol.position.set(x, h + trunkH + canopyR * 0.35, z);
     scene.add(canopyCol);
-    collidables.push(canopyCol);
+    // Only add to targets (bullet hit), NOT collidables (player collision)
     targets.push(canopyCol);
   });
 
@@ -917,20 +930,18 @@ function canPlaceAt(x, z) {
   targets.push(canopyInst);
 }
 
-// ── Instanced Bushes — DoubleSide materials + fixed grid offset ──
+// ── Instanced Bushes ──
 {
   const bushPlacements = [];
   const bushGridSize = 14;
   for (let gx = -half + 20; gx < half - 20; gx += bushGridSize) {
     for (let gz = -half + 20; gz < half - 20; gz += bushGridSize) {
-      // FIX: removed + bushGridSize / 2 offset that caused bushes to overlap into neighboring cells
-      const x = gx + (Math.random() - 0.5) * bushGridSize * 0.8;
-      const z = gz + (Math.random() - 0.5) * bushGridSize * 0.8;
+      const x = gx + (Math.random() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
+      const z = gz + (Math.random() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
       if (canPlaceAt(x, z)) bushPlacements.push({ x, z });
     }
   }
 
-  // FIX: DoubleSide on all bush materials so faces render from inside and outside
   const bushGeo  = new THREE.SphereGeometry(1, 8, 6);
   const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1e4210, side: THREE.DoubleSide });
   const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushPlacements.length);
@@ -949,7 +960,7 @@ function canPlaceAt(x, z) {
   const dummy = new THREE.Object3D();
   bushPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const bushR  = (0.5 + Math.random() * 1.0) * 3.5;
+    const bushR  = (0.5 + Math.random() * 1.0) * 2.2;
     const scaleY = 0.42 + Math.random() * 0.28;
 
     dummy.position.set(x, h + bushR * 0.35, z);
@@ -972,11 +983,13 @@ function canPlaceAt(x, z) {
     dummy.updateMatrix();
     bush3Inst.setMatrixAt(i, dummy.matrix);
 
+    // Bush collider — matches visual sphere diameter (2 * bushR)
+    // FIX: was bushR * 1.4 which only covered 70% of the visual bush
     const bushCol = new THREE.Mesh(
-      new THREE.BoxGeometry(bushR * 1.2, bushR * 1.4, bushR * 1.2),
-      new THREE.MeshBasicMaterial({ visible: false })
+      new THREE.BoxGeometry(bushR * 2.0, bushR * 2.0, bushR * 2.0),
+      invisibleColliderMat
     );
-    bushCol.position.set(x, h + bushR * 0.3, z);
+    bushCol.position.set(x, h + bushR * 0.9, z);
     scene.add(bushCol);
     collidables.push(bushCol);
     targets.push(bushCol);
@@ -991,7 +1004,7 @@ function canPlaceAt(x, z) {
   targets.push(bushInst);
 }
 
-// ── Instanced Rocks — 1 draw call for all map rocks ──
+// ── Instanced Rocks ──
 const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 0xa09888, 0x706860];
 {
   const rockPlacements = [];
@@ -1026,11 +1039,12 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     rockInst.setMatrixAt(i, dummy.matrix);
     rockInst.setColorAt(i, col.set(rockColors[Math.floor(Math.random() * rockColors.length)]));
 
+    // Rock collider — uses invisibleColliderMat so Box3.setFromObject works
     const collider = new THREE.Mesh(
-      new THREE.BoxGeometry(rw * 0.8, rh + 2, rd * 0.8),
-      new THREE.MeshBasicMaterial({ visible: false })
+      new THREE.BoxGeometry(rw * 1.2, rh + 2, rd * 1.2),
+      invisibleColliderMat
     );
-    collider.position.set(x, h + rh * 0.5 - 0.5, z);
+    collider.position.set(x, h + rh * 0.5, z);
     scene.add(collider);
     collidables.push(collider);
     targets.push(collider);
@@ -1041,12 +1055,12 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
   scene.add(rockInst);
 }
 
-// Volcano rocks and bullet blockers
+// Volcano LOS/bullet blocker
 const bulletBlockers = [];
 
 const vBase = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 1.05, CONFIG.volcanoRadius * 1.05, CONFIG.volcanoHeight * 0.55, 16),
-  new THREE.MeshBasicMaterial({ visible: false })
+  invisibleColliderMat
 );
 vBase.position.set(0, CONFIG.volcanoHeight * 0.275, 0);
 scene.add(vBase);
@@ -1054,7 +1068,7 @@ bulletBlockers.push(vBase);
 
 const vMid = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.65, CONFIG.volcanoRadius * 1.0, CONFIG.volcanoHeight * 0.45, 16),
-  new THREE.MeshBasicMaterial({ visible: false })
+  invisibleColliderMat
 );
 vMid.position.set(0, CONFIG.volcanoHeight * 0.60, 0);
 scene.add(vMid);
@@ -1062,7 +1076,7 @@ bulletBlockers.push(vMid);
 
 const vTop = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.22, CONFIG.volcanoRadius * 0.60, CONFIG.volcanoHeight * 0.35, 12),
-  new THREE.MeshBasicMaterial({ visible: false })
+  invisibleColliderMat
 );
 vTop.position.set(0, CONFIG.volcanoHeight * 0.875, 0);
 scene.add(vTop);
@@ -1091,7 +1105,7 @@ for (let i = 0; i < 25; i++) {
 
   const collider = new THREE.Mesh(
     new THREE.BoxGeometry(rw * 0.75, rh + 2, rd * 0.75),
-    new THREE.MeshBasicMaterial({ visible: false })
+    invisibleColliderMat
   );
   collider.position.set(x, h + rh * 0.5 - 0.5, z);
   scene.add(collider);
@@ -1886,6 +1900,20 @@ function createWeaponModel(type) {
   const wp = type === 'm4' ? {x:0.25,y:-0.22,z:-0.38} : {x:0.2,y:-0.2,z:-0.3};
   weaponGroup.position.set(wp.x, wp.y, wp.z);
   weaponGroup.rotation.set(0, 0, 0);
+
+  // ── Krunker-style weapon always-on-top ──
+  // depthTest:false + renderOrder:999 renders weapon over all world geometry.
+  // frustumCulled:false prevents Three.js from hiding weapon parts when their
+  // bounding sphere drifts outside the camera frustum (FIX for weapon vanishing).
+  weaponGroup.traverse(child => {
+    if (child.isMesh) {
+      child.renderOrder = 999;
+      child.frustumCulled = false;
+      // Clone the material so we don't mutate the shared material objects
+      child.material = child.material.clone();
+      child.material.depthTest = false;
+    }
+  });
 }
 createWeaponModel('m4');
 let weaponBobPhase = 0;
