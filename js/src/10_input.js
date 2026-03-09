@@ -52,7 +52,7 @@ window.toggleMenuMusic = function toggleMenuMusic() {
     btn.classList.add('playing');
   } else {
     music.pause();
-    music.currentTime = 0;
+    // Removed: music.currentTime = 0  — so resume picks up where it left off
     btn.textContent = '♪  Play Theme Song';
     btn.classList.remove('playing');
   }
