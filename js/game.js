@@ -3141,7 +3141,7 @@ function update() {
         winScreen.classList.add('show');
         const music = document.getElementById('menu-music');
         if (music) {
-          music.currentTime = 14; // Start 14 seconds into the song
+          music.currentTime = 48; // Start 14 seconds into the song
           music.volume = 0.75;
           music.play();
         }

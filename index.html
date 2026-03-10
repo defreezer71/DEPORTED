@@ -342,16 +342,17 @@
   <canvas id="overlay-canvas"></canvas>
   <div id="overlay-content">
     <h1>DEPORTED</h1>
-    <p class="tagline">Battle Royale &nbsp;·&nbsp; Last One Standing</p>
+    <p class="tagline">Last One Standing</p>
     <div class="controls-hint">
       <span>WASD</span> Move &nbsp;|&nbsp; <span>Mouse</span> Look &nbsp;|&nbsp; <span>Left Click</span> Shoot<br>
       <span>Right Click</span> ADS &nbsp;|&nbsp; <span>R</span> Reload &nbsp;|&nbsp;
       <span>1 / 2</span> Switch Weapon &nbsp;|&nbsp; <span>Space</span> Jump<br>
       <span>F</span> Pick up loot &nbsp;|&nbsp; <span>Shift</span> Crouch (hold)
     </div>
-    <div class="tips">
-      <div class="tip">💡 Ammo depots are in the 4 corners of the map</div>
-      <div class="tip">💡 Get to high ground when the volcano erupts</div>
+    <div class="tips" style="font-size:1.15em">
+      <div class="tip">💡 Find ammo and armor in each corner of the map.</div>
+      <div class="tip">💡 When the volcano erupts, get to high ground.</div>
+      <div class="tip">💡 Sprint ability for first 15 seconds of match.</div>
     </div>
     <div class="music-btn" id="music-toggle-btn" onclick="toggleMenuMusic()">♪ &nbsp; Play Theme Song</div>
     <div class="click-start">▶ &nbsp; Click to Play</div>
@@ -384,16 +385,18 @@
 <div id="perf-stats"></div>
 
 <div id="game-over-screen">
-  <h1>Game Over</h1>
-  <p>You were eliminated</p>
+  <h1 style="font-size:2.7em">YOU'VE BEEN TERMINATED</h1>
+  
+  
   <div class="stats">Kills: <span id="go-kills">0</span> &nbsp;|&nbsp; Survived: <span id="go-time">0:00</span></div>
   <button class="btn" id="go-restart">Play Again</button>
 </div>
 
 <div id="victory-screen">
-  <h1>REPATRIATED</h1>
+  <h1 style="font-size:2.7em">REPATRIATED!</h1>
   <p>Last one standing</p>
   <div class="stats">Kills: <span id="win-kills">0</span> &nbsp;|&nbsp; Time: <span id="win-time">0:00</span></div>
+  <div class="stats" style="margin-top:8px">Winnings: <span id="win-btc">—</span> BTC</div>
   <button class="btn" id="win-restart">Play Again</button>
 </div>
 
