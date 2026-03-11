@@ -195,7 +195,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
 
     // Bush PLAYER collider — generous box, prevents walking through
     const bushCol = new THREE.Mesh(
-      new THREE.BoxGeometry(bushR * 2.0, bushR * 2.0, bushR * 2.0),
+      new THREE.BoxGeometry(bushR * 1.4, bushR * 2.0, bushR * 1.4),
       invisibleColliderMat
     );
     bushCol.position.set(x, h + bushR * 0.9, z);
@@ -260,7 +260,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
     // Rock PLAYER collider — generous, prevents walking through
     const collider = new THREE.Mesh(
-      new THREE.BoxGeometry(rw * 1.2, rh + 2, rd * 1.2),
+      new THREE.BoxGeometry(rw * 1.0, rh + 2, rd * 1.0),
       invisibleColliderMat
     );
     collider.position.set(x, h + rh * 0.5, z);
@@ -331,7 +331,7 @@ for (let i = 0; i < 25; i++) {
   targets.push(rock);
 
   const collider = new THREE.Mesh(
-    new THREE.BoxGeometry(rw * 0.75, rh + 2, rd * 0.75),
+    new THREE.BoxGeometry(rw * 0.65, rh + 2, rd * 0.65),
     invisibleColliderMat
   );
   collider.position.set(x, h + rh * 0.5 - 0.5, z);
