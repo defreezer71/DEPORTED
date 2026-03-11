@@ -925,7 +925,6 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   scene.add(bush2Inst);
   scene.add(bush3Inst);
 }
-}
 
 // ── Instanced Rocks ──
 const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 0xa09888, 0x706860];
