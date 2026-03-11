@@ -374,6 +374,9 @@ function update() {
   const eruptionTime = state.waterRiseStart - 15;
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
+
+    // Stop the pre-eruption slow smoke immediately
+    smokeInst.visible = false;
     waterWarning.textContent = '⚠ VOLCANO ERUPTING — WATER RISING IN 15 SECONDS ⚠';
     waterWarning.style.fontSize = '28px';
     waterWarning.classList.add('show');
@@ -593,7 +596,8 @@ function update() {
     loot.rotation.y += dt * 1.5;
   }
 
-  // Smoke — update instanced mesh positions
+  // Smoke — only animate pre-eruption slow smoke while volcano has not erupted yet
+  if (!state.erupted) {
   for (const s of smokeParticles) {
     _smokeDummy.position.set(
       s.ox + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 2.5,
@@ -605,6 +609,7 @@ function update() {
     smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
   }
   smokeInst.instanceMatrix.needsUpdate = true;
+  }
 
   // Water vignette
   if (state.waterRising) {

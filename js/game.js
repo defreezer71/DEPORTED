@@ -67,7 +67,7 @@ const state = {
   sprintTimer: 0,         // Counts down from 15 once gate fully opens
   waterRising: false,
   waterLevel: 0.05,
-  waterRiseStart: 150,    // Water starts rising at 2:30
+  waterRiseStart: 120,    // Water starts rising at 2:30
   matchDuration: 600,     // 10 minute match
   waterDmgTimer: 0,
   // Game phase: 'lobby' → 'countdown' → 'playing' → 'gameover' | 'victory'
@@ -3324,6 +3324,9 @@ function update() {
   const eruptionTime = state.waterRiseStart - 15;
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
+
+    // Stop the pre-eruption slow smoke immediately
+    smokeInst.visible = false;
     waterWarning.textContent = '⚠ VOLCANO ERUPTING — WATER RISING IN 15 SECONDS ⚠';
     waterWarning.style.fontSize = '28px';
     waterWarning.classList.add('show');
@@ -3543,7 +3546,8 @@ function update() {
     loot.rotation.y += dt * 1.5;
   }
 
-  // Smoke — update instanced mesh positions
+  // Smoke — only animate pre-eruption slow smoke while volcano has not erupted yet
+  if (!state.erupted) {
   for (const s of smokeParticles) {
     _smokeDummy.position.set(
       s.ox + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 2.5,
@@ -3555,6 +3559,7 @@ function update() {
     smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
   }
   smokeInst.instanceMatrix.needsUpdate = true;
+  }
 
   // Water vignette
   if (state.waterRising) {

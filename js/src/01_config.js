@@ -67,7 +67,7 @@ const state = {
   sprintTimer: 0,         // Counts down from 15 once gate fully opens
   waterRising: false,
   waterLevel: 0.05,
-  waterRiseStart: 150,    // Water starts rising at 2:30
+  waterRiseStart: 120,    // Water starts rising at 2:30
   matchDuration: 600,     // 10 minute match
   waterDmgTimer: 0,
   // Game phase: 'lobby' → 'countdown' → 'playing' → 'gameover' | 'victory'
