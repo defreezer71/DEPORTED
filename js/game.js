@@ -584,39 +584,6 @@ for (const door of [gateDoorL, gateDoorR]) {
 }
 let gateOpenProgress = 0;
 
-// Barbed wire
-{
-  const wireMat = new THREE.MeshLambertMaterial({ color: 0x555548 });
-  const wireEdges = [
-    { axis: 'x', fixed: prison.z - pw/2, from: prison.x - pw/2, to: prison.x + pw/2 },
-    { axis: 'x', fixed: prison.z + pw/2, from: prison.x - pw/2, to: prison.x + pw/2 },
-    { axis: 'z', fixed: prison.x - pw/2, from: prison.z - pw/2, to: prison.z + pw/2 },
-  ];
-  wireEdges.forEach(({ axis, fixed, from, to }) => {
-    const wireLen = to - from;
-    const wx = axis === 'x' ? (from + to) / 2 : fixed;
-    const wz = axis === 'x' ? fixed : (from + to) / 2;
-    const wire = new THREE.Mesh(new THREE.BoxGeometry(
-      axis === 'x' ? wireLen : 0.08,
-      0.08,
-      axis === 'x' ? 0.08 : wireLen
-    ), wireMat);
-    wire.position.set(wx, pwh + 0.55, wz);
-    scene.add(wire);
-    const barbCount = Math.floor(wireLen / 1.5);
-    for (let b = 0; b < barbCount; b++) {
-      const bt = (b + 0.5) / barbCount;
-      const bx = axis === 'x' ? from + wireLen * bt : fixed;
-      const bz = axis === 'x' ? fixed : from + wireLen * bt;
-      const barb = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.5, 4), wireMat);
-      barb.rotation.z = Math.PI / 2;
-      barb.position.set(bx, pwh + 0.6, bz);
-      scene.add(barb);
-    }
-  });
-}
-
-// Guard towers
 const towerH = pwh + 3.5;
 const towerCorners = [
   { x: prison.x + pw / 2 - 1.5, z: prison.z - pw / 2 + 1.5, fX: -1, fZ:  1 },
