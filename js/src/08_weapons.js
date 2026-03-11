@@ -206,7 +206,7 @@ const objBB = new THREE.Box3();
 
 // Cache: static objects get their BB computed once at startup.
 // Dynamic objects (gate doors) are flagged and recomputed each frame.
-const collidableCache = []; // { bb: Box3, dynamic: bool, obj: mesh }
+const collidableCache = []; window._collidableCache = collidableCache; // { bb: Box3, dynamic: bool, obj: mesh }
 
 function buildCollisionCache() {
   collidableCache.length = 0;
