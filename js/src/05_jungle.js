@@ -395,14 +395,8 @@ for (let i = 0; i < 25; i++) {
   scene.add(crateHit);
   targets.push(crateHit);
 
-  // Player collider — matched to visual
-  const collider = new THREE.Mesh(
-    new THREE.BoxGeometry(sz, sz, sz),
-    invisibleColliderMat
-  );
-  collider.position.set(x, h + sz * 0.3, z);
-  scene.add(collider);
-  collidables.push(collider);
+  // Use visible crate mesh as player collider — invisible colliders can have BB issues
+  collidables.push(crate);
 }
 
 
