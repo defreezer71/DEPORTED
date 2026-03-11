@@ -1042,7 +1042,6 @@ const vTop = new THREE.Mesh(
 vTop.position.set(0, CONFIG.volcanoHeight * 0.875, 0);
 scene.add(vTop);
 bulletBlockers.push(vTop);
-collidables.push(vBase, vMid, vTop);
 
 for (let i = 0; i < 25; i++) {
   const angle = Math.random() * Math.PI * 2;
