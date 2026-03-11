@@ -881,7 +881,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       const w  = (0.4 + Math.random() * 0.35) * 4.4;
       const ht = w * (2.6 + Math.random() * 1.0);
       dummy.position.set(x, h + ht * 0.5, z);
-      dummy.scale.set(w, ht, w);
+      dummy.scale.set(w * 1.25, ht, w * 1.25);
       dummy.rotation.set(0, Math.random() * 6.28, 0);
       dummy.updateMatrix();
       bushInst.setMatrixAt(i, dummy.matrix);
@@ -892,14 +892,14 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       bush2Inst.setMatrixAt(i, dummy.matrix);
       bush3Inst.setMatrixAt(i, zeroMatrix);
       const bushCol = new THREE.Mesh(
-        new THREE.BoxGeometry(w * 1.1, ht * 1.05, w * 1.1),
+        new THREE.BoxGeometry(w * 1.35, ht * 1.05, w * 1.35),
         invisibleColliderMat
       );
       bushCol.position.set(x, h + ht * 0.5, z);
       scene.add(bushCol);
       collidables.push(bushCol);
       const bushHit = new THREE.Mesh(
-        new THREE.BoxGeometry(w, ht, w),
+        new THREE.BoxGeometry(w * 0.85, ht, w * 0.85),
         invisibleColliderMat
       );
       bushHit.position.set(x, h + ht * 0.5, z);
@@ -907,7 +907,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       targets.push(bushHit);
     } else {
       // Decorative small bush — no collider, walkthrough
-      const dr     = 0.455 + Math.random() * 0.715;
+      const dr     = 0.546 + Math.random() * 0.858;
       const dScaleY = 0.28 + Math.random() * 0.22;
       dummy.position.set(x, h + dr * dScaleY * 0.5, z);
       dummy.scale.set(dr, dr * dScaleY, dr);
