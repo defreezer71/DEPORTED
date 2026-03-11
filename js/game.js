@@ -1047,7 +1047,6 @@ for (let i = 0; i < 25; i++) {
   const angle = Math.random() * Math.PI * 2;
   const r = 10 + Math.random() * (CONFIG.volcanoRadius - 14);
   const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
-  if (!canPlaceAt(x, z)) continue;
   const h = getTerrainHeight(x, z);
   const sz = 1.2 + Math.random() * 1.4;
   const yRot = Math.random() * 6.28;
