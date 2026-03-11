@@ -56,7 +56,6 @@ function createWeaponModel(type) {
     add(B(0.012,0.058,0.370), mMetal,  0.029, 0.000,-0.500);
     add(B(0.012,0.058,0.370), mMetal, -0.029, 0.000,-0.500);
     add(Cy(0.032,0.032,0.022,12), mEdge, 0,0.000,-0.316, PI2,0,0);    // barrel nut ring
-    for (let r=0;r<10;r++) add(B(0.064,0.005,0.004), mEdge, 0, 0.035,-0.330+r*0.038); // rail teeth
     for (let s=0;s<6;s++) {
       add(B(0.004,0.014,0.022), mBlack,  0.031, 0.000,-0.360+s*0.056); // M-LOK R
       add(B(0.004,0.014,0.022), mBlack, -0.031, 0.000,-0.360+s*0.056); // M-LOK L
@@ -65,7 +64,6 @@ function createWeaponModel(type) {
     // ── UPPER RECEIVER ──
     add(B(0.062,0.074,0.245), mDark,   0,-0.012,-0.234);
     add(B(0.064,0.012,0.245), mMetal,  0, 0.031,-0.234);  // top rail
-    for (let r=0;r<5;r++) add(B(0.066,0.005,0.004), mEdge, 0, 0.037,-0.148+r*0.046);
     add(B(0.018,0.014,0.040), mMetal,  0, 0.030,-0.160);  // charging handle body
     add(B(0.034,0.012,0.010), mEdge,   0, 0.028,-0.180);  // T latch
     add(Cy(0.009,0.009,0.010,8), mMetal, 0.034,-0.006,-0.230, 0,0,PI2); // forward assist
