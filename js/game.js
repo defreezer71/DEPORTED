@@ -963,10 +963,10 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
     // Rock PLAYER collider — generous, prevents walking through
     const collider = new THREE.Mesh(
-      new THREE.BoxGeometry(rw * 1.0, rh + 2, rd * 1.0),
+      new THREE.BoxGeometry(rw * 1.2, rh + 3, rd * 1.2),
       invisibleColliderMat
     );
-    collider.position.set(x, h + rh * 0.5, z);
+    collider.position.set(x, h + rh * 0.5 - 0.5, z);
     scene.add(collider);
     collidables.push(collider);
 
@@ -1034,7 +1034,7 @@ for (let i = 0; i < 25; i++) {
   targets.push(rock);
 
   const collider = new THREE.Mesh(
-    new THREE.BoxGeometry(rw * 0.65, rh + 2, rd * 0.65),
+    new THREE.BoxGeometry(rw * 0.85, rh + 3, rd * 0.85),
     invisibleColliderMat
   );
   collider.position.set(x, h + rh * 0.5 - 0.5, z);
