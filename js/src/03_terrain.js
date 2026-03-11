@@ -139,9 +139,9 @@ for (let i = 0; i < gPosAttr.count; i++) {
     const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.012;
     const grass = n1 + n2 + n3 + n4 + n5;
     const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.025;
-    r = (0.13 + grass + warmth + Math.random() * 0.025) * 0.8;
-    g = (0.36 + grass + Math.random() * 0.045) * 0.8;
-    b = (0.07 + grass * 0.4 - warmth * 0.5) * 0.8;
+    r = (0.05 + grass + warmth + Math.random() * 0.025) * 0.5;
+    g = (0.22 + grass + Math.random() * 0.045) * 0.5;
+    b = (0.04 + grass * 0.4 - warmth * 0.5) * 0.5;
   }
   groundColors[i * 3] = r;
   groundColors[i * 3 + 1] = g;
