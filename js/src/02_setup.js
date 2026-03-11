@@ -37,7 +37,7 @@ const bots = [];
 // ═══════════════════════════════════════════════════════════
 scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 const sun = new THREE.DirectionalLight(0xfffbe8, 2.2);
-sun.position.set(80, 200, 60);
+sun.position.set(80, 200, -60);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1; sun.shadow.camera.far = 600;
