@@ -173,7 +173,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     const h = getTerrainHeight(x, z);
     if (i % 2 === 0) {
       // Arborvitae
-      const w  = (0.4 + Math.random() * 0.35) * 2.2;
+      const w  = (0.4 + Math.random() * 0.35) * 4.4;
       const ht = w * (2.6 + Math.random() * 1.0);
       dummy.position.set(x, h + ht * 0.5, z);
       dummy.scale.set(w, ht, w);
@@ -202,7 +202,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       targets.push(bushHit);
     } else {
       // Decorative small bush — no collider, walkthrough
-      const dr     = 0.35 + Math.random() * 0.55;
+      const dr     = 0.455 + Math.random() * 0.715;
       const dScaleY = 0.28 + Math.random() * 0.22;
       dummy.position.set(x, h + dr * dScaleY * 0.5, z);
       dummy.scale.set(dr, dr * dScaleY, dr);
