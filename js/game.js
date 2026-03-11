@@ -601,16 +601,16 @@ let gateOpenProgress = 0;
       0.08,
       axis === 'x' ? 0.08 : wireLen
     ), wireMat);
-    wire.position.set(wx, pwh + 0.12, wz);
+    wire.position.set(wx, pwh + 0.55, wz);
     scene.add(wire);
     const barbCount = Math.floor(wireLen / 1.5);
     for (let b = 0; b < barbCount; b++) {
       const bt = (b + 0.5) / barbCount;
       const bx = axis === 'x' ? from + wireLen * bt : fixed;
       const bz = axis === 'x' ? fixed : from + wireLen * bt;
-      const barb = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.28, 4), wireMat);
+      const barb = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.5, 4), wireMat);
       barb.rotation.z = Math.PI / 2;
-      barb.position.set(bx, pwh + 0.14, bz);
+      barb.position.set(bx, pwh + 0.6, bz);
       scene.add(barb);
     }
   });
