@@ -160,35 +160,6 @@ for (const door of [gateDoorL, gateDoorR]) {
 }
 let gateOpenProgress = 0;
 
-// Battlements
-{
-  const merlon = new THREE.MeshLambertMaterial({ color: 0x606058 });
-  const wallEdges = [
-    { axis: 'x', fixed: prison.z - pw/2, from: prison.x - pw/2, to: prison.x + pw/2 },
-    { axis: 'x', fixed: prison.z + pw/2, from: prison.x - pw/2, to: prison.x + pw/2 },
-    { axis: 'z', fixed: prison.x - pw/2, from: prison.z - pw/2, to: prison.z + pw/2 },
-    { axis: 'z', fixed: prison.x + pw/2, from: prison.z - pw/2, to: prison.z + pw/2 },
-  ];
-  wallEdges.forEach(({ axis, fixed, from, to }, wallIdx) => {
-    const count = 12;
-    for (let i = 0; i < count; i++) {
-      const t = (i + 0.5) / count;
-      const pos = from + (to - from) * t;
-      if (wallIdx === 3 && Math.abs((from + (to-from)*t) - prison.z) < gateWidth / 2 + 0.3) continue;
-      const mx = axis === 'x' ? pos : fixed;
-      const mz = axis === 'x' ? fixed : pos;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(
-        axis === 'x' ? 1.1 : pwt + 0.15,
-        0.9,
-        axis === 'x' ? pwt + 0.15 : 1.1
-      ), merlon);
-      m.position.set(mx, pwh + 0.45, mz);
-      m.castShadow = true;
-      scene.add(m);
-    }
-  });
-}
-
 // Barbed wire
 {
   const wireMat = new THREE.MeshLambertMaterial({ color: 0x555548 });
@@ -323,33 +294,6 @@ towerCorners.forEach(tc => {
   scene.add(lightDome);
 });
 
-// ── Prison floor ──
-{
-  const yardMat = new THREE.MeshLambertMaterial({ color: 0x6b6b63 });
-  const yardSlab = new THREE.Mesh(new THREE.BoxGeometry(pw - pwt * 2, 0.18, pw - pwt * 2), yardMat);
-  yardSlab.position.set(prison.x, 0.09, prison.z);
-  yardSlab.receiveShadow = true;
-  scene.add(yardSlab);
-  collidables.push(yardSlab);
-}
-
-// Central guard booth
-{
-  const boothMat = new THREE.MeshLambertMaterial({ color: 0x5a5a52 });
-  const boothX = prison.x - 3, boothZ = prison.z;
-  const booth = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3.2, 2.2), boothMat);
-  booth.position.set(boothX, 1.6, boothZ);
-  booth.castShadow = true; booth.receiveShadow = true;
-  scene.add(booth); collidables.push(booth);
-  const boothRoof = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.2, 2.6), prisonCap);
-  boothRoof.position.set(boothX, 3.3, boothZ);
-  scene.add(boothRoof);
-  for (const side of [-1, 1]) {
-    const bwin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.5, 1.0), new THREE.MeshLambertMaterial({ color: 0x334455, emissive: 0x112233, emissiveIntensity: 0.4 }));
-    bwin.position.set(boothX + side * 1.1, 2.0, boothZ);
-    scene.add(bwin);
-  }
-}
 
 // Flood lights
 {
