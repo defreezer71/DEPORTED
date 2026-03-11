@@ -343,29 +343,60 @@ for (let i = 0; i < 25; i++) {
   const r = 10 + Math.random() * (CONFIG.volcanoRadius - 14);
   const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
   const h = getTerrainHeight(x, z);
-  const rockSize = 0.8 + Math.random() * 1.8;
-  const rw = rockSize * (0.9 + Math.random() * 0.3);
-  const rh = rockSize * (0.4 + Math.random() * 0.5);
-  const rd = rockSize * (0.9 + Math.random() * 0.3);
+  const sz = 1.2 + Math.random() * 1.4;
+  const yRot = Math.random() * 6.28;
 
-  const rock = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(rockSize * 0.65, 1),
-    new THREE.MeshPhongMaterial({ color: rockColors[Math.floor(Math.random() * rockColors.length)], flatShading: true })
+  // Crate body
+  const crate = new THREE.Mesh(
+    new THREE.BoxGeometry(sz, sz, sz),
+    new THREE.MeshLambertMaterial({ color: 0x8B6914 })
   );
-  rock.position.set(x, h + rh * 0.45, z);
-  rock.rotation.set(Math.random() * 0.3, Math.random() * 6.28, Math.random() * 0.2);
-  rock.scale.set(rw / rockSize, rh / rockSize, rd / rockSize);
-  rock.castShadow = true;
-  scene.add(rock);
-  targets.push(rock);
+  crate.position.set(x, h + sz * 0.5, z);
+  crate.rotation.y = yRot;
+  crate.castShadow = true;
+  scene.add(crate);
 
-  const collider = new THREE.Mesh(
-    new THREE.BoxGeometry(rw * 0.85, rh + 3, rd * 0.85),
+  // Dark wood slats — horizontal band
+  [-0.3, 0.3].forEach(yOff => {
+    const slat = new THREE.Mesh(
+      new THREE.BoxGeometry(sz * 1.01, sz * 0.08, sz * 0.12),
+      new THREE.MeshLambertMaterial({ color: 0x5C4008 })
+    );
+    slat.position.set(x, h + sz * 0.5 + sz * yOff, z);
+    slat.rotation.y = yRot;
+    scene.add(slat);
+  });
+
+  [-0.3, 0.3].forEach(xOff => {
+    const slat = new THREE.Mesh(
+      new THREE.BoxGeometry(sz * 0.12, sz * 0.08, sz * 1.01),
+      new THREE.MeshLambertMaterial({ color: 0x5C4008 })
+    );
+    slat.position.set(x, h + sz * 0.5 + sz * xOff, z);
+    slat.rotation.y = yRot;
+    scene.add(slat);
+  });
+
+  // Bullet hitbox
+  const crateHit = new THREE.Mesh(
+    new THREE.BoxGeometry(sz, sz, sz),
     invisibleColliderMat
   );
-  collider.position.set(x, h + rh * 0.5 - 0.5, z);
+  crateHit.position.set(x, h + sz * 0.5, z);
+  crateHit.rotation.y = yRot;
+  scene.add(crateHit);
+  targets.push(crateHit);
+
+  // Player collider — exact match
+  const collider = new THREE.Mesh(
+    new THREE.BoxGeometry(sz, sz, sz),
+    invisibleColliderMat
+  );
+  collider.position.set(x, h + sz * 0.5, z);
+  collider.rotation.y = yRot;
   scene.add(collider);
   collidables.push(collider);
 }
+
 
 // ═══════════════════════════════════════════════════════════
