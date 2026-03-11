@@ -900,7 +900,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
 
     // Bush PLAYER collider — generous box, prevents walking through
     const bushCol = new THREE.Mesh(
-      new THREE.BoxGeometry(bushR * 1.4, bushR * 2.0, bushR * 1.4),
+      new THREE.BoxGeometry(bushR * 1.7, bushR * 2.0, bushR * 1.7),
       invisibleColliderMat
     );
     bushCol.position.set(x, h + bushR * 0.9, z);
