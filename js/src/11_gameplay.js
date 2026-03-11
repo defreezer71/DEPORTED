@@ -20,7 +20,7 @@ function shoot() {
   const isM4 = state.currentWeapon === 'm4';
 
   // Gunshot sound
-  if (isM4) SFX.gunshot_m4();
+  if (isM4) { SFX.gunshot_m4(); showMuzzleFlash(); }
   else SFX.gunshot_pistol();
 
   // Spread accumulation: resets if enough time has passed since last shot

@@ -108,6 +108,7 @@ function updateAshClouds(dt) {
 function update() {
   requestAnimationFrame(update);
   const dt = Math.min(clock.getDelta(), 0.05);
+  updateMuzzleFlash(dt);
 
   refreshDynamicColliders(); // Recompute only gate doors each frame
 
