@@ -1950,6 +1950,7 @@ const collidableCache = []; // { bb: Box3, dynamic: bool, obj: mesh }
 function buildCollisionCache() {
   collidableCache.length = 0;
   for (const obj of collidables) {
+    obj.updateMatrixWorld(true); // force world matrix before BB compute
     const isDynamic = (obj === gateDoorL || obj === gateDoorR);
     const bb = new THREE.Box3().setFromObject(obj);
     collidableCache.push({ bb, dynamic: isDynamic, obj });
