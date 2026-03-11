@@ -1051,57 +1051,65 @@ for (let i = 0; i < 25; i++) {
   const sz = 1.2 + Math.random() * 1.4;
   const yRot = Math.random() * 6.28;
 
-  // Crate body
+  // Compute terrain normal by sampling neighbours — tilts crate to match slope
+  const step = 0.8;
+  const hL = getTerrainHeight(x - step, z);
+  const hR = getTerrainHeight(x + step, z);
+  const hD = getTerrainHeight(x, z - step);
+  const hU = getTerrainHeight(x, z + step);
+  const slopeX = Math.atan2(hR - hL, step * 2);
+  const slopeZ = Math.atan2(hU - hD, step * 2);
+
+  // Crate body — tilted to slope
   const crate = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
     new THREE.MeshLambertMaterial({ color: 0x8B6914 })
   );
   crate.position.set(x, h + sz * 0.5, z);
-  crate.rotation.y = yRot;
+  crate.rotation.set(slopeZ, yRot, -slopeX);
   crate.castShadow = true;
   scene.add(crate);
 
-  // Dark wood slats — horizontal band
+  // Dark wood slats — horizontal band, same tilt
   [-0.3, 0.3].forEach(yOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 1.01, sz * 0.08, sz * 0.12),
       new THREE.MeshLambertMaterial({ color: 0x5C4008 })
     );
     slat.position.set(x, h + sz * 0.5 + sz * yOff, z);
-    slat.rotation.y = yRot;
+    slat.rotation.set(slopeZ, yRot, -slopeX);
     scene.add(slat);
   });
-
   [-0.3, 0.3].forEach(xOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 0.12, sz * 0.08, sz * 1.01),
       new THREE.MeshLambertMaterial({ color: 0x5C4008 })
     );
     slat.position.set(x, h + sz * 0.5 + sz * xOff, z);
-    slat.rotation.y = yRot;
+    slat.rotation.set(slopeZ, yRot, -slopeX);
     scene.add(slat);
   });
 
-  // Bullet hitbox
+  // Bullet hitbox — tilted to match visual
   const crateHit = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
     invisibleColliderMat
   );
   crateHit.position.set(x, h + sz * 0.5, z);
-  crateHit.rotation.y = yRot;
+  crateHit.rotation.set(slopeZ, yRot, -slopeX);
   scene.add(crateHit);
   targets.push(crateHit);
 
-  // Player collider — exact match
+  // Player collider — upright for reliable collision
   const collider = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
     invisibleColliderMat
   );
   collider.position.set(x, h + sz * 0.5, z);
-  collider.rotation.y = yRot;
   scene.add(collider);
   collidables.push(collider);
 }
+
 
 
 // ═══════════════════════════════════════════════════════════
