@@ -1065,8 +1065,8 @@ for (let i = 0; i < 25; i++) {
     new THREE.BoxGeometry(sz, sz, sz),
     new THREE.MeshLambertMaterial({ color: 0x8B6914 })
   );
-  crate.position.set(x, h + sz * 0.5, z);
-  crate.rotation.set(slopeZ, yRot, -slopeX);
+  crate.position.set(x, h + sz * 0.3, z);
+  crate.rotation.set(0, yRot, 0);
   crate.castShadow = true;
   scene.add(crate);
 
@@ -1076,8 +1076,8 @@ for (let i = 0; i < 25; i++) {
       new THREE.BoxGeometry(sz * 1.01, sz * 0.08, sz * 0.12),
       new THREE.MeshLambertMaterial({ color: 0x5C4008 })
     );
-    slat.position.set(x, h + sz * 0.5 + sz * yOff, z);
-    slat.rotation.set(slopeZ, yRot, -slopeX);
+    slat.position.set(x, h + sz * 0.3 + sz * yOff, z);
+    slat.rotation.set(0, yRot, 0);
     scene.add(slat);
   });
   [-0.3, 0.3].forEach(xOff => {
@@ -1085,8 +1085,8 @@ for (let i = 0; i < 25; i++) {
       new THREE.BoxGeometry(sz * 0.12, sz * 0.08, sz * 1.01),
       new THREE.MeshLambertMaterial({ color: 0x5C4008 })
     );
-    slat.position.set(x, h + sz * 0.5 + sz * xOff, z);
-    slat.rotation.set(slopeZ, yRot, -slopeX);
+    slat.position.set(x, h + sz * 0.3 + sz * xOff, z);
+    slat.rotation.set(0, yRot, 0);
     scene.add(slat);
   });
 
@@ -1095,8 +1095,8 @@ for (let i = 0; i < 25; i++) {
     new THREE.BoxGeometry(sz, sz, sz),
     invisibleColliderMat
   );
-  crateHit.position.set(x, h + sz * 0.5, z);
-  crateHit.rotation.set(slopeZ, yRot, -slopeX);
+  crateHit.position.set(x, h + sz * 0.3, z);
+  crateHit.rotation.set(0, yRot, 0);
   scene.add(crateHit);
   targets.push(crateHit);
 
