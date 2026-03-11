@@ -96,18 +96,23 @@ function createWeaponModel(type) {
     add(B(0.002,0.094,0.044), mEdge,  -0.022,-0.134,-0.120,-0.28,0,0); // texture L
 
     // ── CRANE STOCK (6-pos) ──
-    add(Cy(0.020,0.022,0.210,12), mMetal,  0,-0.018,-0.020, PI2,0,0); // buffer tube
-    add(B(0.048,0.060,0.010),     mDark,   0,-0.025,-0.128);           // end plate
-    add(B(0.044,0.056,0.148),     mBlack,  0,-0.022, 0.046);           // stock body
-    add(B(0.048,0.058,0.016),     mDark,   0,-0.022, 0.122);           // butt pad
-    add(B(0.046,0.008,0.148),     mDark,   0,-0.048, 0.046);           // bottom lug
-    add(B(0.012,0.014,0.008),     mEdge,   0, 0.002, 0.024);           // lock button
-    add(Cy(0.007,0.007,0.012,8),  mEdge,   0.024,-0.022, 0.076, 0,0,PI2); // QD mount
+    add(Cy(0.020,0.022,0.200,12), mMetal,  0,-0.018,-0.018, PI2,0,0); // buffer tube
+    add(B(0.050,0.064,0.014),     mDark,   0,-0.022,-0.120);           // end plate
+    add(B(0.046,0.058,0.144),     mBlack,  0,-0.020, 0.048);           // stock body
+    add(B(0.048,0.060,0.018),     mEdge,   0,-0.020, 0.120);           // butt pad
+    add(B(0.048,0.010,0.144),     mDark,   0,-0.050, 0.048);           // bottom lug
+    add(B(0.014,0.014,0.010),     mEdge,   0, 0.004, 0.026);           // lock button
 
-    // ── REAR BUIS ──
-    add(B(0.034,0.028,0.012), mDark,    0, 0.018,-0.152);
-    add(B(0.010,0.024,0.005), mChrome,  0.010, 0.022,-0.152);
-    add(B(0.010,0.024,0.005), mChrome, -0.010, 0.022,-0.152);
+    // ── REAR NOTCH SIGHT ──
+    add(B(0.040,0.006,0.010), mChrome,  0, 0.036,-0.138);        // base
+    add(B(0.040,0.022,0.008), mMetal,   0, 0.044,-0.138);        // body
+    add(B(0.012,0.022,0.010), mBlack,   0, 0.044,-0.138);        // notch gap (dark)
+    add(B(0.010,0.022,0.009), mChrome, -0.018, 0.044,-0.138);    // left post
+    add(B(0.010,0.022,0.009), mChrome,  0.018, 0.044,-0.138);    // right post
+    // ── FRONT SIGHT POST ──
+    add(B(0.018,0.006,0.010), mMetal,   0, 0.034,-0.826);        // base wings
+    add(B(0.006,0.006,0.010), mMetal,   0, 0.034,-0.826);        // base block
+    add(B(0.004,0.020,0.004), mChrome,  0, 0.046,-0.826);        // post
 
 
 
