@@ -109,17 +109,7 @@ function createWeaponModel(type) {
     add(B(0.010,0.024,0.005), mChrome,  0.010, 0.022,-0.152);
     add(B(0.010,0.024,0.005), mChrome, -0.010, 0.022,-0.152);
 
-    // ── AIMPOINT RED DOT ──
-    add(B(0.054,0.016,0.072), mMetal,  0, 0.039,-0.218);              // mount base
-    add(B(0.066,0.010,0.026), mEdge,   0, 0.035,-0.207);              // front mount ring
-    add(B(0.066,0.010,0.026), mEdge,   0, 0.035,-0.229);              // rear mount ring
-    add(Cy(0.022,0.022,0.080,14), mBlack,  0, 0.052,-0.218, PI2,0,0); // tube body
-    add(Cy(0.024,0.022,0.012,14), mEdge,   0, 0.052,-0.262, PI2,0,0); // objective rim
-    add(Cy(0.019,0.019,0.006,14), mLens,   0, 0.052,-0.268, PI2,0,0); // objective lens
-    add(Cy(0.024,0.022,0.012,14), mEdge,   0, 0.052,-0.174, PI2,0,0); // eyepiece rim
-    add(Cy(0.019,0.019,0.006,14), mLens,   0, 0.052,-0.168, PI2,0,0); // eyepiece lens
-    add(Cy(0.010,0.010,0.022, 8), mEdge,   0, 0.076,-0.218, 0,0,PI2); // elevation turret
-    add(Cy(0.010,0.010,0.022, 8), mEdge,   0.022, 0.064,-0.218, PI2,0,0); // windage turret
+
 
     // ── STUBBY VERTICAL FOREGRIP ──
     add(B(0.028,0.082,0.024), mBlack,  0,-0.060,-0.512, 0.05,0,0);
