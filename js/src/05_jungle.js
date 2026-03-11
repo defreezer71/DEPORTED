@@ -234,51 +234,82 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     }
   }
 
-  const rockGeo = new THREE.DodecahedronGeometry(0.7, 0);
-  const rockMat = new THREE.MeshPhongMaterial({ color: 0x8a8278, flatShading: true });
-  const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rockPlacements.length);
-  rockInst.castShadow = true;
+  // Crate visuals — 3 instanced meshes: main body, wood slat H, wood slat V
+  const crateBodyGeo = new THREE.BoxGeometry(1, 1, 1);
+  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x8B6914 });
+  const crateInst    = new THREE.InstancedMesh(crateBodyGeo, crateBodyMat, rockPlacements.length);
+  crateInst.castShadow = true;
+
+  const slatHGeo  = new THREE.BoxGeometry(1.01, 0.08, 0.12);
+  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x5C4008 });
+  const slatHInst = new THREE.InstancedMesh(slatHGeo, slatMat, rockPlacements.length * 2);
+  slatHInst.castShadow = false;
+
+  const slatVGeo  = new THREE.BoxGeometry(0.12, 0.08, 1.01);
+  const slatVInst = new THREE.InstancedMesh(slatVGeo, slatMat, rockPlacements.length * 2);
+  slatVInst.castShadow = false;
 
   const dummy = new THREE.Object3D();
-  const col = new THREE.Color();
 
   rockPlacements.forEach(({ x, z }, i) => {
-    const h = getTerrainHeight(x, z);
-    const rockSize = 1.0 + Math.random() * 1.0;
-    const rw = rockSize * (1.0 + Math.random() * 0.5);
-    const rh = rockSize * (0.6 + Math.random() * 0.4);
-    const rd = rockSize * (1.0 + Math.random() * 0.5);
+    const h  = getTerrainHeight(x, z);
+    const sz = 1.4 + Math.random() * 1.2;  // crate size 1.4–2.6 units
+    const yRot = Math.random() * 6.28;
 
-    dummy.position.set(x, h + rh * 0.5, z);
-    dummy.scale.set(rw, rh, rd);
-    dummy.rotation.set(Math.random() * 0.3, Math.random() * 6.28, Math.random() * 0.2);
+    // Main crate body
+    dummy.position.set(x, h + sz * 0.5, z);
+    dummy.scale.set(sz, sz, sz);
+    dummy.rotation.set(0, yRot, 0);
     dummy.updateMatrix();
-    rockInst.setMatrixAt(i, dummy.matrix);
-    rockInst.setColorAt(i, col.set(rockColors[Math.floor(Math.random() * rockColors.length)]));
+    crateInst.setMatrixAt(i, dummy.matrix);
 
-    // Rock PLAYER collider — generous, prevents walking through
+    // Horizontal slats (top + bottom band)
+    [-0.3, 0.3].forEach((yOff, si) => {
+      dummy.position.set(x, h + sz * 0.5 + sz * yOff, z);
+      dummy.scale.set(sz, sz, sz);
+      dummy.rotation.set(0, yRot, 0);
+      dummy.updateMatrix();
+      slatHInst.setMatrixAt(i * 2 + si, dummy.matrix);
+    });
+
+    // Vertical slats (front + back band)
+    [-0.3, 0.3].forEach((xOff, si) => {
+      dummy.position.set(x, h + sz * 0.5 + sz * xOff, z);
+      dummy.scale.set(sz, sz, sz);
+      dummy.rotation.set(0, yRot, 0);
+      dummy.updateMatrix();
+      slatVInst.setMatrixAt(i * 2 + si, dummy.matrix);
+    });
+
+    // Player collider — exact crate size, perfect fit since it's already a box
     const collider = new THREE.Mesh(
-      new THREE.BoxGeometry(rw * 1.2, rh + 3, rd * 1.2),
+      new THREE.BoxGeometry(sz, sz, sz),
       invisibleColliderMat
     );
-    collider.position.set(x, h + rh * 0.5 - 0.5, z);
+    collider.position.set(x, h + sz * 0.5, z);
+    collider.rotation.y = yRot;
     scene.add(collider);
     collidables.push(collider);
 
-    // Rock BULLET hitbox — tight to visual rock shape
-    const rockHit = new THREE.Mesh(
-      new THREE.BoxGeometry(rw * 0.8, rh * 1.0, rd * 0.8),
+    // Bullet hitbox — same as collider
+    const crateHit = new THREE.Mesh(
+      new THREE.BoxGeometry(sz, sz, sz),
       invisibleColliderMat
     );
-    rockHit.position.set(x, h + rh * 0.5, z);
-    scene.add(rockHit);
-    targets.push(rockHit);
+    crateHit.position.set(x, h + sz * 0.5, z);
+    crateHit.rotation.y = yRot;
+    scene.add(crateHit);
+    targets.push(crateHit);
   });
 
-  rockInst.instanceMatrix.needsUpdate = true;
-  if (rockInst.instanceColor) rockInst.instanceColor.needsUpdate = true;
-  scene.add(rockInst);
+  crateInst.instanceMatrix.needsUpdate = true;
+  slatHInst.instanceMatrix.needsUpdate = true;
+  slatVInst.instanceMatrix.needsUpdate = true;
+  scene.add(crateInst);
+  scene.add(slatHInst);
+  scene.add(slatVInst);
 }
+
 
 // Volcano LOS/bullet blocker
 const bulletBlockers = [];
