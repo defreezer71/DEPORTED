@@ -857,75 +857,74 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     }
   }
 
-  const bushGeo  = new THREE.SphereGeometry(1, 8, 6);
-  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1e4210, side: THREE.DoubleSide });
+  // bushInst  = arborvitae cone body  (even indices)
+  // bush2Inst = arborvitae base trunk  (even indices)
+  // bush3Inst = decorative small bush  (odd indices, no collider)
+  const bushGeo  = new THREE.ConeGeometry(0.5, 1, 6);
+  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1a4a0e });
   const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushPlacements.length);
   bushInst.castShadow = true;
-
-  const bush2Geo  = new THREE.SphereGeometry(1, 7, 5);
-  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x2d5c18, side: THREE.DoubleSide });
+  const bush2Geo  = new THREE.CylinderGeometry(0.25, 0.38, 0.5, 6);
+  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x243318 });
   const bush2Inst = new THREE.InstancedMesh(bush2Geo, bush2Mat, bushPlacements.length);
   bush2Inst.castShadow = false;
-
-  const bush3Geo  = new THREE.SphereGeometry(1, 7, 5);
-  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x3e7222, side: THREE.DoubleSide });
+  const bush3Geo  = new THREE.SphereGeometry(1, 6, 4);
+  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x2d5c18 });
   const bush3Inst = new THREE.InstancedMesh(bush3Geo, bush3Mat, bushPlacements.length);
   bush3Inst.castShadow = false;
-
   const dummy = new THREE.Object3D();
+  const zeroMatrix = (() => { const d = new THREE.Object3D(); d.scale.set(0,0,0); d.updateMatrix(); return d.matrix.clone(); })();
   bushPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const bushR  = (0.5 + Math.random() * 1.0) * 2.2;
-    const scaleY = 0.42 + Math.random() * 0.28;
-
-    dummy.position.set(x, h + bushR * 0.35, z);
-    dummy.scale.set(bushR, bushR * scaleY, bushR);
-    dummy.rotation.set(0, Math.random() * 6.28, 0);
-    dummy.updateMatrix();
-    bushInst.setMatrixAt(i, dummy.matrix);
-
-    const b2r = bushR * (0.62 + Math.random() * 0.2);
-    dummy.position.set(x + (Math.random()-0.5)*0.8, h + bushR * 0.52, z + (Math.random()-0.5)*0.8);
-    dummy.scale.set(b2r, b2r * (scaleY * 0.88 + 0.06), b2r);
-    dummy.rotation.set(0, Math.random() * 6.28, 0);
-    dummy.updateMatrix();
-    bush2Inst.setMatrixAt(i, dummy.matrix);
-
-    const b3r = bushR * (0.32 + Math.random() * 0.14);
-    dummy.position.set(x + (Math.random()-0.5)*0.4, h + bushR * 0.75 + b3r * 0.3, z + (Math.random()-0.5)*0.4);
-    dummy.scale.set(b3r, b3r * (scaleY * 0.7 + 0.1), b3r);
-    dummy.rotation.set(0, Math.random() * 6.28, 0);
-    dummy.updateMatrix();
-    bush3Inst.setMatrixAt(i, dummy.matrix);
-
-    // Bush PLAYER collider — generous box, prevents walking through
-    const bushCol = new THREE.Mesh(
-      new THREE.BoxGeometry(bushR * 1.6, bushR * 2.4, bushR * 1.6),
-      invisibleColliderMat
-    );
-    bushCol.position.set(x, h + bushR * 0.7, z);
-    scene.add(bushCol);
-    collidables.push(bushCol);
-
-    // Bush BULLET hitbox — tight to visual squashed sphere
-    // Visual is a sphere of radius bushR squashed to bushR*scaleY tall
-    const hitH = bushR * scaleY * 1.8;
-    const hitW = bushR * 1.2;
-    const bushHit = new THREE.Mesh(
-      new THREE.BoxGeometry(hitW, hitH, hitW),
-      invisibleColliderMat
-    );
-    bushHit.position.set(x, h + bushR * scaleY * 0.5, z);
-    scene.add(bushHit);
-    targets.push(bushHit);
+    if (i % 2 === 0) {
+      // Arborvitae
+      const w  = (0.4 + Math.random() * 0.35) * 2.2;
+      const ht = w * (2.6 + Math.random() * 1.0);
+      dummy.position.set(x, h + ht * 0.5, z);
+      dummy.scale.set(w, ht, w);
+      dummy.rotation.set(0, Math.random() * 6.28, 0);
+      dummy.updateMatrix();
+      bushInst.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, h + 0.25, z);
+      dummy.scale.set(w * 0.55, 1, w * 0.55);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      bush2Inst.setMatrixAt(i, dummy.matrix);
+      bush3Inst.setMatrixAt(i, zeroMatrix);
+      const bushCol = new THREE.Mesh(
+        new THREE.BoxGeometry(w * 1.1, ht * 1.05, w * 1.1),
+        invisibleColliderMat
+      );
+      bushCol.position.set(x, h + ht * 0.5, z);
+      scene.add(bushCol);
+      collidables.push(bushCol);
+      const bushHit = new THREE.Mesh(
+        new THREE.BoxGeometry(w, ht, w),
+        invisibleColliderMat
+      );
+      bushHit.position.set(x, h + ht * 0.5, z);
+      scene.add(bushHit);
+      targets.push(bushHit);
+    } else {
+      // Decorative small bush — no collider, walkthrough
+      const dr     = 0.35 + Math.random() * 0.55;
+      const dScaleY = 0.28 + Math.random() * 0.22;
+      dummy.position.set(x, h + dr * dScaleY * 0.5, z);
+      dummy.scale.set(dr, dr * dScaleY, dr);
+      dummy.rotation.set(0, Math.random() * 6.28, 0);
+      dummy.updateMatrix();
+      bush3Inst.setMatrixAt(i, dummy.matrix);
+      bushInst.setMatrixAt(i, zeroMatrix);
+      bush2Inst.setMatrixAt(i, zeroMatrix);
+    }
   });
-
   bushInst.instanceMatrix.needsUpdate = true;
   bush2Inst.instanceMatrix.needsUpdate = true;
   bush3Inst.instanceMatrix.needsUpdate = true;
   scene.add(bushInst);
   scene.add(bush2Inst);
   scene.add(bush3Inst);
+}
 }
 
 // ── Instanced Rocks ──
