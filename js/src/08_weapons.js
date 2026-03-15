@@ -1,7 +1,8 @@
 // WEAPON MODEL
 // ═══════════════════════════════════════════════════════════
 const weaponGroup = new THREE.Group();
-camera.add(weaponGroup);
+weaponScene.add(weaponCamera);
+weaponCamera.add(weaponGroup);
 scene.add(camera);
 
 // muzzle flash state — declared before createWeaponModel so function can assign into them

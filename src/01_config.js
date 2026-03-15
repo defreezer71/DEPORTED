@@ -29,6 +29,11 @@ const CONFIG = {
   crouchHeight: 1.0,        // Camera height when crouched
   crouchSpeedMult: 0.5,     // 50% speed when crouched
 
+  // ── Physics toggle ──
+  // true  = new capsule sweep-and-slide (08b_physics.js) — sliding walls, fixed timestep, deterministic
+  // false = legacy AABB system (checkCollisionAndStep) — original behaviour
+  newPhysics: false,
+
   weapons: {
     m4: {
       name: 'M4', magSize: 30, fireRate: 100,
@@ -63,12 +68,12 @@ const state = {
   nearbyLoot: null,
   kills: 0,
   // Match state
-  matchTime: 0,           // Elapsed seconds
-  sprintTimer: 0,         // Counts down from 15 once gate fully opens
+  matchTime: 0,
+  sprintTimer: 0,
   waterRising: false,
   waterLevel: 0.05,
-  waterRiseStart: 150,    // Water starts rising at 2:30
-  matchDuration: 600,     // 10 minute match
+  waterRiseStart: 150,
+  matchDuration: 600,
   waterDmgTimer: 0,
   // Game phase: 'lobby' → 'countdown' → 'playing' → 'gameover' | 'victory'
   phase: 'lobby',

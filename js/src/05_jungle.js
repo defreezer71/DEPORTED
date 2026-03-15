@@ -283,11 +283,11 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
     // Player collider — exact crate size, perfect fit since it's already a box
     const collider = new THREE.Mesh(
-      new THREE.BoxGeometry(sz, sz, sz),
+      new THREE.BoxGeometry(sz * 1.2, sz * 1.2, sz * 1.2),
       invisibleColliderMat
     );
     collider.position.set(x, h + sz * 0.5, z);
-    collider.rotation.y = yRot;
+    collider.rotation.y = 0;
     scene.add(collider);
     collidables.push(collider);
 
