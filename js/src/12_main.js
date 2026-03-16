@@ -178,7 +178,7 @@ function update() {
       setTimeout(() => {
         winScreen.classList.add('show');
         const music = document.getElementById('menu-music');
-        if (music) { music.currentTime = 0; music.volume = 0.75; music.play(); }
+        if (music) { music.currentTime = 41; music.volume = 0.80; music.play(); }
       }, 500);
     }
   }
