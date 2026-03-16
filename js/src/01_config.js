@@ -24,7 +24,7 @@ const CONFIG = {
   adsFov: 55,
   normalFov: 75,
   playerHeight: 1.7,
-  playerRadius: 0.4,
+  playerRadius: 0.25,
   moveSmoothing: 0.15,      // Strafe smoothing factor (lower = smoother)
   crouchHeight: 1.0,        // Camera height when crouched
   crouchSpeedMult: 0.5,     // 50% speed when crouched
