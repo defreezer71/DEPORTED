@@ -12,6 +12,12 @@ const waterVignette = document.getElementById('water-vignette');
 const reloadMsg = document.getElementById('reload-msg');
 const pickupPrompt = document.getElementById('pickup-prompt');
 
+// ── Canonical look state — yaw and pitch are the source of truth.
+//    physicsStep reads these and sets camera.quaternion each tick.
+//    Never mutate camera.quaternion directly from mouse input.
+state.yaw   = 0;
+state.pitch = 0;
+
 // ── Drone camera for menu background ──
 const droneCamera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 1, 800);
 const droneClock = { angle: 0, height: 95, radius: 155 };
@@ -77,14 +83,15 @@ document.addEventListener('pointerlockchange', () => {
   }
 });
 
+// ── Mouse look — accumulate into state.yaw / state.pitch only.
+//    Camera quaternion is reconstructed from these each physics tick.
+//    This makes look state serializable and fully deterministic.
 document.addEventListener('mousemove', (e) => {
   if (!state.locked) return;
   const sens = state.ads ? CONFIG.adsSens : CONFIG.mouseSens;
-  euler.setFromQuaternion(camera.quaternion);
-  euler.y -= e.movementX * sens;
-  euler.x -= e.movementY * sens;
-  euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
-  camera.quaternion.setFromEuler(euler);
+  state.yaw   -= e.movementX * sens;
+  state.pitch -= e.movementY * sens;
+  state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
 });
 
 document.addEventListener('keydown', (e) => {

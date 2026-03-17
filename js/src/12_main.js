@@ -9,6 +9,13 @@ const rgt = new THREE.Vector3();
 let minimapTimer = 0;
 let perfFrames = 0, perfLastTime = 0;
 
+// ── Fixed timestep physics ──
+// Physics always steps at exactly 64Hz regardless of render framerate.
+// This makes player position 100% predictable from inputs alone —
+// required for server-side reconciliation in multiplayer.
+const FIXED_DT = 1 / 64;
+let physicsAccumulator = 0;
+
 // ── Instanced Ash Cloud Pool — 1 draw call for ALL ash particles ──
 const ASH_POOL_SIZE = 300;
 const ashGeo = new THREE.SphereGeometry(1, 5, 4);
@@ -97,11 +104,163 @@ function updateAshClouds(dt) {
   ashMat.opacity = 0.65;
 }
 
+// ═══════════════════════════════════════════════════════════
+// PHYSICS STEP — runs at exactly FIXED_DT (1/64 s) per tick.
+//
+// Rules for this function:
+//   • Only uses fixedDt — never reads clock or Date.now()
+//   • Reads state.yaw / state.pitch as the canonical look angles
+//   • Reads input booleans (state.moveForward etc.) set by event handlers
+//   • Writes camera.position and camera.quaternion
+//   • Must produce identical output for identical (state, inputs) — always
+// ═══════════════════════════════════════════════════════════
+function physicsStep(fixedDt) {
+  if (state.playerDead) return;
+
+  // Reconstruct camera orientation from canonical yaw/pitch.
+  // YXZ order: yaw (Y) applied first, then pitch (X). No roll.
+  euler.set(state.pitch, state.yaw, 0, 'YXZ');
+  camera.quaternion.setFromEuler(euler);
+
+  // Build world-space move vector from camera facing + input booleans
+  camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  rgt.crossVectors(fwd, new THREE.Vector3(0, -1, 0)).normalize();
+  moveVec.set(0, 0, 0);
+  if (state.moveForward) moveVec.add(fwd);
+  if (state.moveBack)    moveVec.sub(fwd);
+  if (state.moveLeft)    moveVec.add(rgt);
+  if (state.moveRight)   moveVec.sub(rgt);
+  if (moveVec.lengthSq() > 0) moveVec.normalize();
+
+  // Smoothed move vector — fixedDt is constant so smoothFactor is constant.
+  // This means the lerp rate is perfectly frame-rate independent.
+  const smoothFactor = 1 - Math.pow(CONFIG.moveSmoothing, fixedDt * 60);
+  smoothedMove.lerp(moveVec, smoothFactor);
+
+  // Speed modifiers
+  const sprintActive = state.sprintTimer > 0;
+  const isSwimming = state.waterRising && state.waterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
+  let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
+  if (isSwimming)      speed *= 0.55;
+  if (sprintActive)    speed *= 1.5;
+  if (state.crouching) speed *= CONFIG.crouchSpeedMult;
+
+  if (CONFIG.newPhysics) {
+    // ═══════════════════════════════════════════════════
+    // NEW PHYSICS — capsule sweep-and-slide (08b_physics.js)
+    // ═══════════════════════════════════════════════════
+    physicsUpdate(fixedDt, moveVec, speed);
+
+  } else {
+    // ═══════════════════════════════════════════════════
+    // LEGACY PHYSICS — circle-vs-AABB (08_weapons.js)
+    // ═══════════════════════════════════════════════════
+    const targetHeight = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
+    const lerpRate = state.crouching ? 14 : 7;
+    state.smoothCameraHeight += (targetHeight - state.smoothCameraHeight) * Math.min(1, fixedDt * lerpRate);
+
+    if (smoothedMove.lengthSq() > 0.001) {
+      const frame = smoothedMove.clone().multiplyScalar(speed * fixedDt);
+
+      const testPosX = camera.position.clone();
+      testPosX.x += frame.x;
+      const collX = checkCollisionAndStep(testPosX);
+      if (!collX.blocked) {
+        camera.position.x = testPosX.x;
+        if (collX.stepUpY > camera.position.y) {
+          camera.position.y = collX.stepUpY;
+          state.velocityY = 0; state.isGrounded = true;
+        }
+      }
+
+      const testPosZ = camera.position.clone();
+      testPosZ.z += frame.z;
+      const collZ = checkCollisionAndStep(testPosZ);
+      if (!collZ.blocked) {
+        camera.position.z = testPosZ.z;
+        if (collZ.stepUpY > camera.position.y) {
+          camera.position.y = collZ.stepUpY;
+          state.velocityY = 0; state.isGrounded = true;
+        }
+      }
+    }
+
+    // Gravity
+    if (!state.isGrounded || state.velocityY > 0) {
+      state.velocityY -= CONFIG.gravity * fixedDt;
+      camera.position.y += state.velocityY * fixedDt;
+    }
+
+    // Floor height — terrain + top of any collider the player is standing on
+    let floorH = getTerrainHeight(camera.position.x, camera.position.z);
+    const r = CONFIG.playerRadius;
+    for (const entry of collidableCache) {
+      const objBB = entry.bb;
+      if (camera.position.x > objBB.min.x - r && camera.position.x < objBB.max.x + r &&
+          camera.position.z > objBB.min.z - r && camera.position.z < objBB.max.z + r) {
+        const objTop = objBB.max.y;
+        const feetCrouch = camera.position.y - CONFIG.crouchHeight;
+        const feetStand  = camera.position.y - CONFIG.playerHeight;
+        const nearTop = (feetCrouch >= objTop - 0.6 && feetCrouch <= objTop + 1.2) ||
+                        (feetStand  >= objTop - 0.6 && feetStand  <= objTop + 1.2);
+        if (nearTop) floorH = Math.max(floorH, objTop);
+      }
+    }
+
+    const standY = floorH + state.smoothCameraHeight;
+    const hardStandY = floorH + targetHeight;
+    if (camera.position.y <= standY) {
+      camera.position.y = standY; state.velocityY = 0; state.isGrounded = true;
+    } else if (camera.position.y > hardStandY + 0.15) {
+      state.isGrounded = false;
+    }
+
+    // Float on water
+    const floatLevel = state.waterLevel + 1.2;
+    if (state.waterRising && camera.position.y < floatLevel && state.waterLevel > floorH + 0.8) {
+      camera.position.y = floatLevel; state.velocityY = 0; state.isGrounded = true;
+    }
+
+    // Smooth crouch camera transition
+    if (state.isGrounded) {
+      camera.position.y += (standY - camera.position.y) * fixedDt * 20;
+    }
+
+    // World boundary clamp
+    const bound = half - 1;
+    camera.position.x = Math.max(-bound, Math.min(bound, camera.position.x));
+    camera.position.z = Math.max(-bound, Math.min(bound, camera.position.z));
+  } // end legacy physics
+
+  // Footstep sounds — driven by fixed timestep so cadence is frame-rate independent
+  if (smoothedMove.lengthSq() > 0.01 && state.isGrounded && !isSwimming) {
+    let stepSpeed = state.crouching ? 2.5 : 4.5;
+    if (state.ads) stepSpeed *= 0.6;
+    footstepTimer += fixedDt * stepSpeed;
+    if (footstepTimer >= 1) { footstepTimer = 0; SFX.footstep(); }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDER / GAME LOOP
+// Runs every animation frame. Physics is ticked separately via
+// the fixed-timestep accumulator above. Everything here uses
+// renderDt — visual smoothing, UI, bots, particles, rendering.
+// ═══════════════════════════════════════════════════════════
 function update() {
   requestAnimationFrame(update);
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const renderDt = Math.min(clock.getDelta(), 0.05);
 
   refreshDynamicColliders();
+
+  // ── Fixed-timestep physics accumulator ──
+  // Catches up all missed 64Hz ticks since last render frame.
+  // Player position is only ever advanced in steps of exactly FIXED_DT.
+  physicsAccumulator += renderDt;
+  while (physicsAccumulator >= FIXED_DT) {
+    physicsStep(FIXED_DT);
+    physicsAccumulator -= FIXED_DT;
+  }
 
   // Sprint HUD
   if (state.phase === 'playing' || state.phase === 'countdown') {
@@ -112,7 +271,7 @@ function update() {
 
   if (!state.locked) {
     if (state.phase === 'lobby') {
-      updateDroneCamera(dt);
+      updateDroneCamera(renderDt);
       droneRenderer.render(scene, droneCamera);
     }
     renderer.clear();
@@ -128,7 +287,7 @@ function update() {
   }
 
   if (state.phase === 'countdown') {
-    state.countdownTime -= dt;
+    state.countdownTime -= renderDt;
     const num = Math.ceil(state.countdownTime);
     const cdEl = document.getElementById('countdown-num');
     if (num > 0 && num <= 10) {
@@ -189,138 +348,19 @@ function update() {
     if (aliveBots.length > 0) {
       const specBot = aliveBots[state.spectateIndex % aliveBots.length];
       const specPos = specBot.group.position;
-      camera.position.lerp(new THREE.Vector3(specPos.x - 5, specPos.y + 4, specPos.z - 5), dt * 3);
+      camera.position.lerp(new THREE.Vector3(specPos.x - 5, specPos.y + 4, specPos.z - 5), renderDt * 3);
       camera.lookAt(specPos.x, specPos.y + 1.5, specPos.z);
     }
-    updateBots(dt);
+    updateBots(renderDt);
   }
 
   const sprintActive = state.sprintTimer > 0;
   if (streamBoostEl) streamBoostEl.style.display = sprintActive ? "block" : "none";
   if (sprintCdEl && sprintActive) sprintCdEl.textContent = Math.ceil(state.sprintTimer);
 
-  // ── Player movement ──
-  if (!state.playerDead) {
-
-    camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
-    rgt.crossVectors(fwd, new THREE.Vector3(0, -1, 0)).normalize();
-    moveVec.set(0, 0, 0);
-    if (state.moveForward) moveVec.add(fwd);
-    if (state.moveBack)    moveVec.sub(fwd);
-    if (state.moveLeft)    moveVec.add(rgt);
-    if (state.moveRight)   moveVec.sub(rgt);
-    if (moveVec.lengthSq() > 0) moveVec.normalize();
-
-    // Smoothed move vector (used by weapon bob and footsteps in both paths)
-    const smoothFactor = 1 - Math.pow(CONFIG.moveSmoothing, dt * 60);
-    smoothedMove.lerp(moveVec, smoothFactor);
-
-    // Speed modifiers (shared by both physics paths)
-    let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
-    const isSwimming = state.waterRising && state.waterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
-    if (isSwimming)   speed *= 0.55;
-    if (sprintActive) speed *= 1.5;
-    if (state.crouching) speed *= CONFIG.crouchSpeedMult;
-
-    if (CONFIG.newPhysics) {
-      // ═══════════════════════════════════════════════════
-      // NEW PHYSICS — capsule sweep-and-slide (08b_physics.js)
-      // ═══════════════════════════════════════════════════
-      physicsUpdate(dt, moveVec, speed);
-
-    } else {
-      // ═══════════════════════════════════════════════════
-      // LEGACY PHYSICS — AABB bounding box (original system)
-      // ═══════════════════════════════════════════════════
-      const targetHeight = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
-      const lerpRate = state.crouching ? 14 : 7;
-      state.smoothCameraHeight += (targetHeight - state.smoothCameraHeight) * Math.min(1, dt * lerpRate);
-
-      if (smoothedMove.lengthSq() > 0.001) {
-        const frame = smoothedMove.clone().multiplyScalar(speed * dt);
-
-        const testPosX = camera.position.clone();
-        testPosX.x += frame.x;
-        const collX = checkCollisionAndStep(testPosX);
-        if (!collX.blocked) {
-          camera.position.x = testPosX.x;
-          if (collX.stepUpY > camera.position.y) {
-            camera.position.y = collX.stepUpY;
-            state.velocityY = 0; state.isGrounded = true;
-          }
-        }
-
-        const testPosZ = camera.position.clone();
-        testPosZ.z += frame.z;
-        const collZ = checkCollisionAndStep(testPosZ);
-        if (!collZ.blocked) {
-          camera.position.z = testPosZ.z;
-          if (collZ.stepUpY > camera.position.y) {
-            camera.position.y = collZ.stepUpY;
-            state.velocityY = 0; state.isGrounded = true;
-          }
-        }
-      }
-
-      // Gravity
-      if (!state.isGrounded || state.velocityY > 0) {
-        state.velocityY -= CONFIG.gravity * dt;
-        camera.position.y += state.velocityY * dt;
-      }
-
-      // Floor height
-      let floorH = getTerrainHeight(camera.position.x, camera.position.z);
-      const r = CONFIG.playerRadius;
-      for (const entry of collidableCache) {
-        const objBB = entry.bb;
-        if (camera.position.x > objBB.min.x - r && camera.position.x < objBB.max.x + r &&
-            camera.position.z > objBB.min.z - r && camera.position.z < objBB.max.z + r) {
-          const objTop = objBB.max.y;
-          const feetCrouch = camera.position.y - CONFIG.crouchHeight;
-          const feetStand  = camera.position.y - CONFIG.playerHeight;
-          const nearTop = (feetCrouch >= objTop - 0.6 && feetCrouch <= objTop + 1.2) ||
-                          (feetStand  >= objTop - 0.6 && feetStand  <= objTop + 1.2);
-          if (nearTop) floorH = Math.max(floorH, objTop);
-        }
-      }
-
-      const standY = floorH + state.smoothCameraHeight;
-      const hardStandY = floorH + targetHeight;
-      if (camera.position.y <= standY) {
-        camera.position.y = standY; state.velocityY = 0; state.isGrounded = true;
-      } else if (camera.position.y > hardStandY + 0.15) {
-        state.isGrounded = false;
-      }
-
-      // Float on water
-      const floatLevel = state.waterLevel + 1.2;
-      if (state.waterRising && camera.position.y < floatLevel && state.waterLevel > floorH + 0.8) {
-        camera.position.y = floatLevel; state.velocityY = 0; state.isGrounded = true;
-      }
-
-      // Smooth crouch camera transition
-      if (state.isGrounded) {
-        camera.position.y += (standY - camera.position.y) * dt * 20;
-      }
-
-      const bound = half - 1;
-      camera.position.x = Math.max(-bound, Math.min(bound, camera.position.x));
-      camera.position.z = Math.max(-bound, Math.min(bound, camera.position.z));
-    } // end legacy physics
-
-    // Footstep sounds (both physics paths share this)
-    if (smoothedMove.lengthSq() > 0.01 && state.isGrounded && !isSwimming) {
-      let stepSpeed = state.crouching ? 2.5 : 4.5;
-      if (state.ads) stepSpeed *= 0.6;
-      footstepTimer += dt * stepSpeed;
-      if (footstepTimer >= 1) { footstepTimer = 0; SFX.footstep(); }
-    }
-
-  } // end !playerDead
-
   // Gate swing animation
   if (state.gateOpening && gateOpenProgress < 1) {
-    gateOpenProgress += dt * 0.5;
+    gateOpenProgress += renderDt * 0.5;
     if (gateOpenProgress > 1) {
       gateOpenProgress = 1;
       if (state.sprintTimer === 0) state.sprintTimer = 15;
@@ -330,11 +370,11 @@ function update() {
     gatePivotR.rotation.y = -angle;
   }
 
-  if (!state.playerDead) updateBots(dt);
+  if (!state.playerDead) updateBots(renderDt);
 
   // ── Match timer & water rise ──
-  state.matchTime += dt;
-  if (state.sprintTimer > 0) state.sprintTimer = Math.max(0, state.sprintTimer - dt);
+  state.matchTime += renderDt;
+  if (state.sprintTimer > 0) state.sprintTimer = Math.max(0, state.sprintTimer - renderDt);
   const remaining = Math.max(0, state.matchDuration - state.matchTime);
   const mins = Math.floor(remaining / 60);
   const secs = Math.floor(remaining % 60);
@@ -421,19 +461,19 @@ function update() {
   }
 
   if (state.erupted) {
-    state.ashTimer = (state.ashTimer || 0) + dt;
+    state.ashTimer = (state.ashTimer || 0) + renderDt;
     if (state.ashTimer > 0.07) {
       state.ashTimer = 0;
       spawnAshCloud(2.5 + Math.random() * 5, 8 + Math.random() * 18, 10 + Math.random() * 14);
     }
   }
 
-  updateAshClouds(dt);
+  updateAshClouds(renderDt);
 
   if (state.hazePlane) {
     const timeSinceEruption = Math.max(0, state.matchTime - eruptionTime);
     const targetOpacity = Math.min(0.35, timeSinceEruption * 0.003);
-    state.hazePlane.material.opacity += (targetOpacity - state.hazePlane.material.opacity) * dt * 0.5;
+    state.hazePlane.material.opacity += (targetOpacity - state.hazePlane.material.opacity) * renderDt * 0.5;
     const dimFactor = Math.max(0.35, 1 - timeSinceEruption * 0.004);
     sun.intensity = 1.6 * dimFactor;
     sunMesh.material.color.setHex(dimFactor > 0.6 ? 0xFFEE00 : 0xCC8800);
@@ -476,7 +516,7 @@ function update() {
     const playerFeetY = camera.position.y - playerCurrentH;
     const kneeY = playerFeetY + 0.4;
     if (state.waterLevel > kneeY) {
-      state.waterDmgTimer += dt;
+      state.waterDmgTimer += renderDt;
       if (state.waterDmgTimer >= 1) {
         state.waterDmgTimer -= 1;
         if (state.armor > 0) {
@@ -498,7 +538,7 @@ function update() {
       if (!bot.alive) continue;
       const botFeetY = bot.group.position.y;
       if (state.waterLevel > botFeetY + 0.4) {
-        bot.hp -= dt * 5;
+        bot.hp -= renderDt * 5;
         if (bot.hp <= 0) {
           bot.alive = false;
           bot.group.rotation.x = Math.PI / 2;
@@ -515,7 +555,7 @@ function update() {
   }
 
   // Ambient jungle sounds
-  ambientTimer -= dt;
+  ambientTimer -= renderDt;
   if (ambientTimer <= 0 && state.phase === 'playing') {
     const roll = Math.random();
     if (roll < 0.4) SFX.bird();
@@ -552,7 +592,7 @@ function update() {
     const floatY = state.waterLevel + 0.1;
     const effectiveY = Math.max(groundY, floatY);
     loot.position.y = effectiveY + Math.sin(clock.elapsedTime * 2 + loot.position.x) * 0.08;
-    loot.rotation.y += dt * 1.5;
+    loot.rotation.y += renderDt * 1.5;
   }
 
   // Smoke
@@ -581,7 +621,7 @@ function update() {
   if (!state.waterRising) {
     bubbleGroup.visible = true;
     bubbleGroup.children.forEach(b => {
-      b.position.y += b.userData.speed * dt;
+      b.position.y += b.userData.speed * renderDt;
       b.material.opacity = 0.2 + Math.sin(clock.elapsedTime * 1.5 + b.userData.phase) * 0.15;
       if (b.position.y > 3) b.position.y = -2 - Math.random() * 2;
     });
@@ -591,7 +631,7 @@ function update() {
 
   // Weapon bob + reload animation
   const isMoving = smoothedMove.lengthSq() > 0.01;
-  weaponBobPhase += dt * (isMoving ? 10 : 1.5);
+  weaponBobPhase += renderDt * (isMoving ? 10 : 1.5);
   const restPos = state.currentWeapon === 'm4' ? new THREE.Vector3(0.25, -0.22, -0.38) : new THREE.Vector3(0.2, -0.2, -0.3);
   let targetPos;
 
@@ -615,17 +655,17 @@ function update() {
     }
   }
   const lerpSpeed = state.reloadPhase ? 6 : 12;
-  weaponGroup.position.lerp(targetPos, dt * lerpSpeed);
+  weaponGroup.position.lerp(targetPos, renderDt * lerpSpeed);
   if (!state.reloadPhase) {
-    weaponGroup.rotation.x += (0 - weaponGroup.rotation.x) * dt * 10;
+    weaponGroup.rotation.x += (0 - weaponGroup.rotation.x) * renderDt * 10;
   } else {
-    weaponGroup.rotation.x += (-0.3 - weaponGroup.rotation.x) * dt * 6;
+    weaponGroup.rotation.x += (-0.3 - weaponGroup.rotation.x) * renderDt * 6;
   }
-  weaponGroup.rotation.y += (0 - weaponGroup.rotation.y) * dt * 10;
-  updateMuzzleFlash(dt);
+  weaponGroup.rotation.y += (0 - weaponGroup.rotation.y) * renderDt * 10;
+  updateMuzzleFlash(renderDt);
 
   // FOV
-  camera.fov += ((state.ads ? CONFIG.adsFov : CONFIG.normalFov) - camera.fov) * dt * 10;
+  camera.fov += ((state.ads ? CONFIG.adsFov : CONFIG.normalFov) - camera.fov) * renderDt * 10;
   camera.updateProjectionMatrix();
   // Sync weapon camera to main camera
   weaponCamera.position.copy(camera.position);
@@ -636,9 +676,9 @@ function update() {
   // Impact particles
   for (let i = impactParticles.length - 1; i >= 0; i--) {
     const p = impactParticles[i];
-    p.userData.vel.y -= 9.8 * dt;
-    p.position.addScaledVector(p.userData.vel, dt);
-    p.userData.life -= dt;
+    p.userData.vel.y -= 9.8 * renderDt;
+    p.position.addScaledVector(p.userData.vel, renderDt);
+    p.userData.life -= renderDt;
     if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); impactParticles.splice(i, 1); }
   }
 
