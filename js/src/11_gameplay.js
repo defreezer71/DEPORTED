@@ -46,10 +46,9 @@ function shoot() {
 
   // Recoil (camera kick) — applied AFTER capturing shot direction
   const recoil = state.ads ? wep.recoilAds : wep.recoilHip;
-  euler.setFromQuaternion(camera.quaternion);
-  euler.x += recoil * (0.7 + Math.random() * 0.3);
-  euler.y += (Math.random() - 0.5) * recoil * 0.3;
-  camera.quaternion.setFromEuler(euler);
+  state.pitch += recoil * (0.7 + Math.random() * 0.3);
+  state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
+  state.yaw += (Math.random() - 0.5) * recoil * 0.3;
 
   weaponGroup.position.z += 0.06;
   weaponGroup.rotation.x -= 0.08;
