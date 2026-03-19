@@ -56,6 +56,13 @@ const CONFIG = {
 // STATE
 // ═══════════════════════════════════════════════════════════
 const state = {
+  // Multiplayer
+  ws: null,
+  myId: null,
+  inputSeq: 0,
+  remotePlayers: {},
+  lastServerTick: 0,
+
   locked: false,
   moveForward: false, moveBack: false, moveLeft: false, moveRight: false,
   velocityY: 0, isGrounded: true,

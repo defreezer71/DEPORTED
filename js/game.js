@@ -56,6 +56,13 @@ const CONFIG = {
 // STATE
 // ═══════════════════════════════════════════════════════════
 const state = {
+  // Multiplayer
+  ws: null,
+  myId: null,
+  inputSeq: 0,
+  remotePlayers: {},
+  lastServerTick: 0,
+
   locked: false,
   moveForward: false, moveBack: false, moveLeft: false, moveRight: false,
   velocityY: 0, isGrounded: true,
@@ -3370,6 +3377,7 @@ function updateAshClouds(dt) {
 //   • Must produce identical output for identical (state, inputs) — always
 // ═══════════════════════════════════════════════════════════
 function physicsStep(fixedDt) {
+  sendInputToServer();
   if (state.playerDead) return;
 
   // Reconstruct camera orientation from canonical yaw/pitch.
@@ -3976,6 +3984,7 @@ document.addEventListener('pointerlockchange', () => {
 updateHUD();
 buildCollisionCache();
 if (CONFIG.newPhysics) physInit();  // Seed capsule from camera position
+connectToServer();
 update();
 
 document.getElementById('go-restart').addEventListener('click', () => location.reload());
@@ -3984,3 +3993,154 @@ document.getElementById('win-restart').addEventListener('click', () => location.
 document.addEventListener('click', () => {
   if (state.playerDead) state.spectateIndex++;
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MULTIPLAYER — WebSocket client
+// ─────────────────────────────────────────────────────────────────────────────
+
+var WS_URL = 'ws://localhost:3000';
+
+// Simple capsule mesh to represent a remote player
+function createRemotePlayerMesh(id) {
+  const group = new THREE.Group();
+
+  // Body
+  const bodyGeo  = new THREE.CylinderGeometry(0.35, 0.35, 1.4, 8);
+  const bodyMat  = new THREE.MeshLambertMaterial({ color: 0xe05a2b });
+  const body     = new THREE.Mesh(bodyGeo, bodyMat);
+  body.position.y = 0.7;
+  group.add(body);
+
+  // Head
+  const headGeo  = new THREE.SphereGeometry(0.3, 8, 8);
+  const headMat  = new THREE.MeshLambertMaterial({ color: 0xf0c080 });
+  const head     = new THREE.Mesh(headGeo, headMat);
+  head.position.y = 1.65;
+  group.add(head);
+
+  group.userData.id = id;
+  scene.add(group);
+  return group;
+}
+
+function removeRemotePlayer(id) {
+  const rp = state.remotePlayers[id];
+  if (!rp) return;
+  scene.remove(rp.mesh);
+  delete state.remotePlayers[id];
+  console.log('Player left:', id);
+}
+
+function updateRemotePlayers(playerList) {
+  const seen = new Set();
+
+  for (const p of playerList) {
+    if (p.id === state.myId) continue;   // skip self
+    seen.add(p.id);
+
+    if (!state.remotePlayers[p.id]) {
+      // New player — create mesh
+      state.remotePlayers[p.id] = {
+        mesh: createRemotePlayerMesh(p.id),
+        hp:   p.hp,
+        dead: p.dead,
+      };
+    }
+
+    const rp = state.remotePlayers[p.id];
+    rp.mesh.position.set(p.x, p.y, p.z);
+    rp.mesh.rotation.y = p.yaw;
+    rp.hp   = p.hp;
+    rp.dead = p.dead;
+    rp.mesh.visible = !p.dead;
+  }
+
+  // Remove players no longer in snapshot
+  for (const id of Object.keys(state.remotePlayers)) {
+    if (!seen.has(id)) removeRemotePlayer(id);
+  }
+}
+
+function connectToServer() {
+  console.log('Connecting to ws://localhost:3000');
+  state.ws = new WebSocket('ws://localhost:3000');
+
+  state.ws.onopen = () => {
+    console.log('WS connected');
+    state.ws.send(JSON.stringify({
+      type: 'join',
+      name: 'Player' + Math.floor(Math.random() * 1000),
+    }));
+  };
+
+  state.ws.onmessage = (event) => {
+    let msg;
+    try { msg = JSON.parse(event.data); } catch { return; }
+
+    switch (msg.type) {
+
+      case 'welcome':
+        state.myId = msg.id;
+        console.log('My ID:', state.myId);
+        // Optionally snap to server spawn position
+        // camera.position.set(msg.spawnX, msg.spawnY + CONFIG.playerHeight, msg.spawnZ);
+        break;
+
+      case 'world':
+        state.lastServerTick = msg.tick;
+        updateRemotePlayers(msg.players);
+        break;
+
+      case 'existingPlayers':
+        updateRemotePlayers(msg.players);
+        break;
+
+      case 'playerLeft':
+        removeRemotePlayer(msg.id);
+        break;
+
+      case 'error':
+        console.warn('Server error:', msg.reason);
+        break;
+    }
+  };
+
+  state.ws.onclose = () => {
+    console.log('WS disconnected — reconnecting in 3s');
+    state.myId = null;
+    setTimeout(connectToServer, 3000);
+  };
+
+  state.ws.onerror = (err) => {
+    console.error('WS error', err);
+  };
+}
+
+// Send input snapshot to server every physics tick
+function sendInputToServer() {
+  if (!state.keys) return;
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.myId) return;
+  state.inputSeq++;
+  state.ws.send(JSON.stringify({
+    type:     'input',
+    seq:      state.inputSeq,
+    yaw:      state.yaw,
+    pitch:    state.pitch,
+    keys: {
+      w:     state.keys['KeyW']     ? 1 : 0,
+      s:     state.keys['KeyS']     ? 1 : 0,
+      a:     state.keys['KeyA']     ? 1 : 0,
+      d:     state.keys['KeyD']     ? 1 : 0,
+      shift: state.keys['ShiftLeft'] ? 1 : 0,
+      jump:  state.keys['Space']    ? 1 : 0,
+    },
+    shooting: state.shooting || false,
+  }));
+}
+
+// Heartbeat — keeps connection alive when tab is backgrounded
+setInterval(() => {
+  if (state.ws && state.ws.readyState === WebSocket.OPEN && state.myId) {
+    state.ws.send(JSON.stringify({ type: "input", seq: state.inputSeq, yaw: state.yaw || 0, pitch: state.pitch || 0, keys: { w:0,s:0,a:0,d:0,shift:0,jump:0 }, shooting: false }));
+  }
+}, 5000);
