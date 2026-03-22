@@ -736,7 +736,7 @@ document.addEventListener('click', () => {
 // MULTIPLAYER — WebSocket client
 // ─────────────────────────────────────────────────────────────────────────────
 
-var WS_URL = 'ws://localhost:3000';
+var WS_URL = 'wss://deported.onrender.com';
 
 // Simple capsule mesh to represent a remote player
 function createRemotePlayerMesh(id) {
@@ -800,8 +800,8 @@ function updateRemotePlayers(playerList) {
 }
 
 function connectToServer() {
-  console.log('Connecting to ws://localhost:3000');
-  state.ws = new WebSocket('ws://localhost:3000');
+  console.log('Connecting to wss://deported.onrender.com');
+  state.ws = new WebSocket('wss://deported.onrender.com');
 
   state.ws.onopen = () => {
     console.log('WS connected');
