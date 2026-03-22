@@ -722,7 +722,8 @@ document.addEventListener('pointerlockchange', () => {
 updateHUD();
 buildCollisionCache();
 if (CONFIG.newPhysics) physInit();  // Seed capsule from camera position
-connectToServer();
+window._state = state;
+try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
 update();
 
 document.getElementById('go-restart').addEventListener('click', () => location.reload());
