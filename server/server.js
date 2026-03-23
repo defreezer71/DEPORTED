@@ -233,6 +233,10 @@ wss.on("connection", (ws) => {
     }
   });
 
+  ws.on("pong", () => {
+    const p = players.get(ws._playerId);
+    if (p) p.lastPing = Date.now();
+  });
   ws.on("error", (err) => {
     console.error("WS error:", err.message);
   });
@@ -255,13 +259,16 @@ setInterval(() => {
   broadcast(buildWorldSnapshot());
 }, TICK_MS);
 
-// ─── Stale connection cleanup (every 10s) ─────────────────────────────────────
+// ─── WebSocket ping/pong keepalive (every 15s) ───────────────────────────────
 setInterval(() => {
   const now = Date.now();
   for (const p of players.values()) {
-    if (now - p.lastPing > 60000) {
+    if (p.ws.readyState === p.ws.OPEN) {
+      p.ws.ping();
+    }
+    if (now - p.lastPing > 120000) {
       console.log(`[timeout] ${p.name} (${p.id}) timed out`);
       p.ws.terminate();
     }
   }
-}, 10000);
+}, 15000);
