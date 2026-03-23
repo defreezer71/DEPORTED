@@ -4045,11 +4045,14 @@ function updateRemotePlayers(playerList) {
         mesh: createRemotePlayerMesh(p.id),
         hp:   p.hp,
         dead: p.dead,
+        targetX: p.x,
+        targetY: p.y,
+        targetZ: p.z,
       };
     }
 
     const rp = state.remotePlayers[p.id];
-    rp.mesh.position.set(p.x, p.y, p.z);
+    rp.targetX = p.x; rp.targetY = p.y; rp.targetZ = p.z;
     rp.mesh.rotation.y = p.yaw;
     rp.hp   = p.hp;
     rp.dead = p.dead;
@@ -4127,6 +4130,9 @@ function sendInputToServer() {
     seq:      state.inputSeq,
     yaw:      state.yaw,
     pitch:    state.pitch,
+    x:        camera.position.x,
+    y:        camera.position.y,
+    z:        camera.position.z,
     keys: {
       w:     state.keys['KeyW']     ? 1 : 0,
       s:     state.keys['KeyS']     ? 1 : 0,
