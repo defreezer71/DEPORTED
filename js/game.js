@@ -4052,7 +4052,7 @@ function updateRemotePlayers(playerList) {
     }
 
     const rp = state.remotePlayers[p.id];
-    rp.targetX = p.x; rp.targetY = p.y; rp.targetZ = p.z;
+    rp.targetX = p.x; rp.targetY = p.y - CONFIG.playerHeight; rp.targetZ = p.z;
     rp.mesh.rotation.y = p.yaw;
     rp.hp   = p.hp;
     rp.dead = p.dead;
@@ -4092,7 +4092,6 @@ function connectToServer() {
 
       case 'world':
         state.lastServerTick = msg.tick;
-        if (msg.players.length > 1) console.log('World snapshot:', JSON.stringify(msg.players));
         updateRemotePlayers(msg.players);
         break;
 
