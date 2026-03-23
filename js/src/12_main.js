@@ -830,6 +830,7 @@ function connectToServer() {
 
       case 'world':
         state.lastServerTick = msg.tick;
+        if (msg.players.length > 1) console.log('World snapshot:', JSON.stringify(msg.players));
         updateRemotePlayers(msg.players);
         break;
 
