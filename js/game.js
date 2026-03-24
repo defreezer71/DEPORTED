@@ -3384,7 +3384,6 @@ function updateAshClouds(dt) {
 //   • Must produce identical output for identical (state, inputs) — always
 // ═══════════════════════════════════════════════════════════
 function physicsStep(fixedDt) {
-  sendInputToServer();
   if (state.playerDead) return;
 
   // Reconstruct camera orientation from canonical yaw/pitch.
