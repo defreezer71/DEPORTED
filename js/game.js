@@ -4092,6 +4092,7 @@ function connectToServer() {
 
       case 'world':
         state.lastServerTick = msg.tick;
+        console.log('WORLD tick', msg.tick, 'players:', msg.players.map(p => p.id + '(' + p.x.toFixed(1) + ',' + p.y.toFixed(1) + ',' + p.z.toFixed(1) + ')').join(' | '));
         updateRemotePlayers(msg.players);
         break;
 
