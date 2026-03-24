@@ -82,6 +82,16 @@ function stepPlayer(p, dt) {
 
   const inp = p.lastInput;
 
+  // Trust client-reported position
+  if (inp.x !== undefined) {
+    p.x = inp.x;
+    p.y = inp.y;
+    p.z = inp.z;
+    p.yaw = inp.yaw;
+    p.pitch = inp.pitch;
+    return;
+  }
+
   // Horizontal movement from input keys
   const forward = inp.keys.w ? 1 : inp.keys.s ? -1 : 0;
   const strafe  = inp.keys.d ? 1 : inp.keys.a ? -1 : 0;
