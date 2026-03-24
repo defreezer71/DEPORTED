@@ -824,6 +824,7 @@ function connectToServer() {
       case 'welcome':
         state.myId = msg.id;
         console.log('My ID:', state.myId);
+        if (msg.seed !== undefined) { _seed = msg.seed; console.log('World seed:', _seed); }
         // Optionally snap to server spawn position
         // camera.position.set(msg.spawnX, msg.spawnY + CONFIG.playerHeight, msg.spawnZ);
         break;

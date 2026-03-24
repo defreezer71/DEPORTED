@@ -139,8 +139,8 @@ for (let i = 0; i < gPosAttr.count; i++) {
     const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.012;
     const grass = n1 + n2 + n3 + n4 + n5;
     const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.025;
-    r = (0.07 + grass + warmth + Math.random() * 0.025) * 0.58;
-    g = (0.26 + grass + Math.random() * 0.045) * 0.58;
+    r = (0.07 + grass + warmth + seededRand() * 0.025) * 0.58;
+    g = (0.26 + grass + seededRand() * 0.045) * 0.58;
     b = (0.05 + grass * 0.4 - warmth * 0.5) * 0.58;
   }
   groundColors[i * 3] = r;
@@ -175,19 +175,19 @@ scene.add(smokeInst);
 const smokeParticles = [];
 const _smokeDummy = new THREE.Object3D();
 for (let i = 0; i < SMOKE_COUNT; i++) {
-  const size = 1.0 + Math.random() * 2.5;
-  const baseY = CONFIG.volcanoHeight + 1 + Math.random() * 16;
+  const size = 1.0 + seededRand() * 2.5;
+  const baseY = CONFIG.volcanoHeight + 1 + seededRand() * 16;
   smokeParticles.push({
     baseY,
-    phase: Math.random() * 6.28,
-    speed: 0.4 + Math.random() * 0.8,
+    phase: seededRand() * 6.28,
+    speed: 0.4 + seededRand() * 0.8,
     size,
-    ox: (Math.random() - 0.5) * 6,
-    oz: (Math.random() - 0.5) * 6,
+    ox: (seededRand() - 0.5) * 6,
+    oz: (seededRand() - 0.5) * 6,
     index: i
   });
   // Set initial matrix so nothing is at origin on frame 0
-  _smokeDummy.position.set((Math.random() - 0.5) * 6, baseY, (Math.random() - 0.5) * 6);
+  _smokeDummy.position.set((seededRand() - 0.5) * 6, baseY, (seededRand() - 0.5) * 6);
   _smokeDummy.scale.setScalar(size);
   _smokeDummy.updateMatrix();
   smokeInst.setMatrixAt(i, _smokeDummy.matrix);
@@ -210,18 +210,18 @@ scene.add(water);
 const bubbleGroup = new THREE.Group();
 const bubbleMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
 for (let i = 0; i < 40; i++) {
-  const angle = Math.random() * Math.PI * 2;
-  const dist = half - 4 - Math.random() * 12;
+  const angle = seededRand() * Math.PI * 2;
+  const dist = half - 4 - seededRand() * 12;
   const bx = Math.cos(angle) * dist;
   const bz = Math.sin(angle) * dist;
   if (Math.abs(bx - CONFIG.prisonPos.x) < CONFIG.prisonSize / 2 + 5 &&
       Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) continue;
   const bubble = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4 + Math.random() * 0.7, 5, 4),
+    new THREE.SphereGeometry(0.4 + seededRand() * 0.7, 5, 4),
     bubbleMat
   );
-  bubble.position.set(bx, -1 + Math.random() * 2, bz);
-  bubble.userData = { speed: 0.4 + Math.random() * 0.8, phase: Math.random() * 6.28 };
+  bubble.position.set(bx, -1 + seededRand() * 2, bz);
+  bubble.userData = { speed: 0.4 + seededRand() * 0.8, phase: seededRand() * 6.28 };
   bubbleGroup.add(bubble);
 }
 scene.add(bubbleGroup);

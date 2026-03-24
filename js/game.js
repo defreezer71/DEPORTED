@@ -1,3 +1,10 @@
+// Seeded RNG
+var _seed = 123456;
+function seededRand() {
+  _seed ^= _seed << 13; _seed ^= _seed >> 17; _seed ^= _seed << 5;
+  return ((_seed >>> 0) / 4294967296);
+}
+
 import * as THREE from 'three';
 
 // ═══════════════════════════════════════════════════════════
@@ -288,8 +295,8 @@ for (let i = 0; i < gPosAttr.count; i++) {
     const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.012;
     const grass = n1 + n2 + n3 + n4 + n5;
     const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.025;
-    r = (0.07 + grass + warmth + Math.random() * 0.025) * 0.58;
-    g = (0.26 + grass + Math.random() * 0.045) * 0.58;
+    r = (0.07 + grass + warmth + seededRand() * 0.025) * 0.58;
+    g = (0.26 + grass + seededRand() * 0.045) * 0.58;
     b = (0.05 + grass * 0.4 - warmth * 0.5) * 0.58;
   }
   groundColors[i * 3] = r;
@@ -324,19 +331,19 @@ scene.add(smokeInst);
 const smokeParticles = [];
 const _smokeDummy = new THREE.Object3D();
 for (let i = 0; i < SMOKE_COUNT; i++) {
-  const size = 1.0 + Math.random() * 2.5;
-  const baseY = CONFIG.volcanoHeight + 1 + Math.random() * 16;
+  const size = 1.0 + seededRand() * 2.5;
+  const baseY = CONFIG.volcanoHeight + 1 + seededRand() * 16;
   smokeParticles.push({
     baseY,
-    phase: Math.random() * 6.28,
-    speed: 0.4 + Math.random() * 0.8,
+    phase: seededRand() * 6.28,
+    speed: 0.4 + seededRand() * 0.8,
     size,
-    ox: (Math.random() - 0.5) * 6,
-    oz: (Math.random() - 0.5) * 6,
+    ox: (seededRand() - 0.5) * 6,
+    oz: (seededRand() - 0.5) * 6,
     index: i
   });
   // Set initial matrix so nothing is at origin on frame 0
-  _smokeDummy.position.set((Math.random() - 0.5) * 6, baseY, (Math.random() - 0.5) * 6);
+  _smokeDummy.position.set((seededRand() - 0.5) * 6, baseY, (seededRand() - 0.5) * 6);
   _smokeDummy.scale.setScalar(size);
   _smokeDummy.updateMatrix();
   smokeInst.setMatrixAt(i, _smokeDummy.matrix);
@@ -359,18 +366,18 @@ scene.add(water);
 const bubbleGroup = new THREE.Group();
 const bubbleMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
 for (let i = 0; i < 40; i++) {
-  const angle = Math.random() * Math.PI * 2;
-  const dist = half - 4 - Math.random() * 12;
+  const angle = seededRand() * Math.PI * 2;
+  const dist = half - 4 - seededRand() * 12;
   const bx = Math.cos(angle) * dist;
   const bz = Math.sin(angle) * dist;
   if (Math.abs(bx - CONFIG.prisonPos.x) < CONFIG.prisonSize / 2 + 5 &&
       Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) continue;
   const bubble = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4 + Math.random() * 0.7, 5, 4),
+    new THREE.SphereGeometry(0.4 + seededRand() * 0.7, 5, 4),
     bubbleMat
   );
-  bubble.position.set(bx, -1 + Math.random() * 2, bz);
-  bubble.userData = { speed: 0.4 + Math.random() * 0.8, phase: Math.random() * 6.28 };
+  bubble.position.set(bx, -1 + seededRand() * 2, bz);
+  bubble.userData = { speed: 0.4 + seededRand() * 0.8, phase: seededRand() * 6.28 };
   bubbleGroup.add(bubble);
 }
 scene.add(bubbleGroup);
@@ -599,7 +606,7 @@ for (const door of [gateDoorL, gateDoorR]) {
   door.add(hBar2);
   for (let r = 0; r < 3; r++) {
     const rust = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.18), prisonRust);
-    rust.position.set(0.22, pwh * 0.1 - r * pwh * 0.15, (Math.random() - 0.5) * gateHalfW * 0.6);
+    rust.position.set(0.22, pwh * 0.1 - r * pwh * 0.15, (seededRand() - 0.5) * gateHalfW * 0.6);
     door.add(rust);
   }
 }
@@ -750,8 +757,8 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   const treeGridSize = 18;
   for (let gx = -half + 15; gx < half - 15; gx += treeGridSize) {
     for (let gz = -half + 15; gz < half - 15; gz += treeGridSize) {
-      const x = gx + (Math.random() - 0.5) * treeGridSize * 0.7;
-      const z = gz + (Math.random() - 0.5) * treeGridSize * 0.7;
+      const x = gx + (seededRand() - 0.5) * treeGridSize * 0.7;
+      const z = gz + (seededRand() - 0.5) * treeGridSize * 0.7;
       if (canPlaceAt(x, z)) treePlacements.push({ x, z });
     }
   }
@@ -787,42 +794,42 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
 
   treePlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const trunkH   = 5.5 + Math.random() * 4.0;
-    const trunkR   = 0.42 + Math.random() * 0.32;
-    const canopyR  = (2.2 + Math.random() * 2.8) * 1.5;
-    const scaleY   = 0.55 + Math.random() * 0.28;
-    const lean     = (Math.random() - 0.5) * 0.06;
+    const trunkH   = 5.5 + seededRand() * 4.0;
+    const trunkR   = 0.42 + seededRand() * 0.32;
+    const canopyR  = (2.2 + seededRand() * 2.8) * 1.5;
+    const scaleY   = 0.55 + seededRand() * 0.28;
+    const lean     = (seededRand() - 0.5) * 0.06;
 
     dummy.position.set(x, h + trunkH / 2, z);
     dummy.scale.set(trunkR / 0.44, trunkH, trunkR / 0.44);
-    dummy.rotation.set(lean, Math.random() * 6.28, lean * 0.5);
+    dummy.rotation.set(lean, seededRand() * 6.28, lean * 0.5);
     dummy.updateMatrix();
     trunkInst.setMatrixAt(i, dummy.matrix);
 
     dummy.position.set(x, h + 0.55, z);
     dummy.scale.set(trunkR / 0.44 * 1.1, 1.1, trunkR / 0.44 * 1.1);
-    dummy.rotation.set(0, Math.random() * 6.28, 0);
+    dummy.rotation.set(0, seededRand() * 6.28, 0);
     dummy.updateMatrix();
     flareInst.setMatrixAt(i, dummy.matrix);
 
-    const jx = (Math.random()-0.5)*0.6, jz = (Math.random()-0.5)*0.6;
+    const jx = (seededRand()-0.5)*0.6, jz = (seededRand()-0.5)*0.6;
     dummy.position.set(x + jx, h + trunkH + canopyR * 0.25, z + jz);
     dummy.scale.set(canopyR, canopyR * scaleY, canopyR);
-    dummy.rotation.set(lean * 0.3, Math.random() * 6.28, 0);
+    dummy.rotation.set(lean * 0.3, seededRand() * 6.28, 0);
     dummy.updateMatrix();
     canopyInst.setMatrixAt(i, dummy.matrix);
 
-    const c2r = canopyR * (0.60 + Math.random() * 0.18);
-    dummy.position.set(x + jx + (Math.random()-0.5)*1.2, h + trunkH + canopyR * 0.52 + c2r * 0.1, z + jz + (Math.random()-0.5)*1.2);
+    const c2r = canopyR * (0.60 + seededRand() * 0.18);
+    dummy.position.set(x + jx + (seededRand()-0.5)*1.2, h + trunkH + canopyR * 0.52 + c2r * 0.1, z + jz + (seededRand()-0.5)*1.2);
     dummy.scale.set(c2r, c2r * (scaleY * 0.88 + 0.08), c2r);
-    dummy.rotation.set(0, Math.random() * 6.28, 0);
+    dummy.rotation.set(0, seededRand() * 6.28, 0);
     dummy.updateMatrix();
     canopy2Inst.setMatrixAt(i, dummy.matrix);
 
-    const c3r = canopyR * (0.35 + Math.random() * 0.15);
+    const c3r = canopyR * (0.35 + seededRand() * 0.15);
     dummy.position.set(x + jx * 0.3, h + trunkH + canopyR * 0.8 + c3r * 0.3, z + jz * 0.3);
     dummy.scale.set(c3r, c3r * (scaleY * 0.75 + 0.15), c3r);
-    dummy.rotation.set(0, Math.random() * 6.28, 0);
+    dummy.rotation.set(0, seededRand() * 6.28, 0);
     dummy.updateMatrix();
     canopy3Inst.setMatrixAt(i, dummy.matrix);
 
@@ -872,8 +879,8 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   const bushGridSize = 14;
   for (let gx = -half + 20; gx < half - 20; gx += bushGridSize) {
     for (let gz = -half + 20; gz < half - 20; gz += bushGridSize) {
-      const x = gx + (Math.random() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
-      const z = gz + (Math.random() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
+      const x = gx + (seededRand() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
+      const z = gz + (seededRand() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
       if (canPlaceAt(x, z)) bushPlacements.push({ x, z });
     }
   }
@@ -899,11 +906,11 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     const h = getTerrainHeight(x, z);
     if (i % 2 === 0) {
       // Arborvitae
-      const w  = (0.4 + Math.random() * 0.35) * 4.4;
-      const ht = w * (2.6 + Math.random() * 1.0);
+      const w  = (0.4 + seededRand() * 0.35) * 4.4;
+      const ht = w * (2.6 + seededRand() * 1.0);
       dummy.position.set(x, h + ht * 0.5, z);
       dummy.scale.set(w * 1.25, ht, w * 1.25);
-      dummy.rotation.set(0, Math.random() * 6.28, 0);
+      dummy.rotation.set(0, seededRand() * 6.28, 0);
       dummy.updateMatrix();
       bushInst.setMatrixAt(i, dummy.matrix);
       dummy.position.set(x, h + 0.25, z);
@@ -928,11 +935,11 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       targets.push(bushHit);
     } else {
       // Decorative small bush — no collider, walkthrough
-      const dr     = 0.546 + Math.random() * 0.858;
-      const dScaleY = 0.28 + Math.random() * 0.22;
+      const dr     = 0.546 + seededRand() * 0.858;
+      const dScaleY = 0.28 + seededRand() * 0.22;
       dummy.position.set(x, h + dr * dScaleY * 0.5, z);
       dummy.scale.set(dr, dr * dScaleY, dr);
-      dummy.rotation.set(0, Math.random() * 6.28, 0);
+      dummy.rotation.set(0, seededRand() * 6.28, 0);
       dummy.updateMatrix();
       bush3Inst.setMatrixAt(i, dummy.matrix);
       bushInst.setMatrixAt(i, zeroMatrix);
@@ -954,8 +961,8 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
   const rockGridSize = 21;
   for (let gx = -half + 25; gx < half - 25; gx += rockGridSize) {
     for (let gz = -half + 25; gz < half - 25; gz += rockGridSize) {
-      const x = gx + (Math.random() - 0.5) * rockGridSize * 0.6;
-      const z = gz + (Math.random() - 0.5) * rockGridSize * 0.6;
+      const x = gx + (seededRand() - 0.5) * rockGridSize * 0.6;
+      const z = gz + (seededRand() - 0.5) * rockGridSize * 0.6;
       if (canPlaceAt(x, z)) rockPlacements.push({ x, z });
     }
   }
@@ -979,8 +986,8 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
   rockPlacements.forEach(({ x, z }, i) => {
     const h  = getTerrainHeight(x, z);
-    const sz = 1.4 + Math.random() * 1.2;  // crate size 1.4–2.6 units
-    const yRot = Math.random() * 6.28;
+    const sz = 1.4 + seededRand() * 1.2;  // crate size 1.4–2.6 units
+    const yRot = seededRand() * 6.28;
 
     // Main crate body
     dummy.position.set(x, h + sz * 0.5, z);
@@ -1065,12 +1072,12 @@ scene.add(vTop);
 bulletBlockers.push(vTop);
 
 for (let i = 0; i < 25; i++) {
-  const angle = Math.random() * Math.PI * 2;
-  const r = 10 + Math.random() * (CONFIG.volcanoRadius - 14);
+  const angle = seededRand() * Math.PI * 2;
+  const r = 10 + seededRand() * (CONFIG.volcanoRadius - 14);
   const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
   const h = getTerrainHeight(x, z);
-  const sz = 1.2 + Math.random() * 1.4;
-  const yRot = Math.random() * 6.28;
+  const sz = 1.2 + seededRand() * 1.4;
+  const yRot = seededRand() * 6.28;
 
   // Compute terrain normal by sampling neighbours — tilts crate to match slope
   const step = 0.8;
@@ -4086,6 +4093,7 @@ function connectToServer() {
       case 'welcome':
         state.myId = msg.id;
         console.log('My ID:', state.myId);
+        if (msg.seed !== undefined) { _seed = msg.seed; console.log('World seed:', _seed); }
         // Optionally snap to server spawn position
         // camera.position.set(msg.spawnX, msg.spawnY + CONFIG.playerHeight, msg.spawnZ);
         break;

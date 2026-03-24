@@ -1,3 +1,10 @@
+// Seeded RNG
+var _seed = 123456;
+function seededRand() {
+  _seed ^= _seed << 13; _seed ^= _seed >> 17; _seed ^= _seed << 5;
+  return ((_seed >>> 0) / 4294967296);
+}
+
 import * as THREE from 'three';
 
 // ═══════════════════════════════════════════════════════════

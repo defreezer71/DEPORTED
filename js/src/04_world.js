@@ -154,7 +154,7 @@ for (const door of [gateDoorL, gateDoorR]) {
   door.add(hBar2);
   for (let r = 0; r < 3; r++) {
     const rust = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.18), prisonRust);
-    rust.position.set(0.22, pwh * 0.1 - r * pwh * 0.15, (Math.random() - 0.5) * gateHalfW * 0.6);
+    rust.position.set(0.22, pwh * 0.1 - r * pwh * 0.15, (seededRand() - 0.5) * gateHalfW * 0.6);
     door.add(rust);
   }
 }
