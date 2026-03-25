@@ -4160,9 +4160,7 @@ function connectToServer() {
 
 // Send input snapshot to server every physics tick
 function sendInputToServer() {
-  if (!state.keys) { console.log("BLOCKED: no keys"); return; }
-  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.myId) { console.log("BLOCKED: ws="+(state.ws?.readyState)+" myId="+state.myId); return; }
-  console.log("SENDING pos:", camera.position.x.toFixed(2), camera.position.z.toFixed(2));
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.myId) return;
   state.inputSeq++;
   state.ws.send(JSON.stringify({
     type:     'input',
@@ -4173,12 +4171,12 @@ function sendInputToServer() {
     y:        camera.position.y,
     z:        camera.position.z,
     keys: {
-      w:     state.keys['KeyW']     ? 1 : 0,
-      s:     state.keys['KeyS']     ? 1 : 0,
-      a:     state.keys['KeyA']     ? 1 : 0,
-      d:     state.keys['KeyD']     ? 1 : 0,
-      shift: state.keys['ShiftLeft'] ? 1 : 0,
-      jump:  state.keys['Space']    ? 1 : 0,
+      w:     state.moveForward  ? 1 : 0,
+      s:     state.moveBack     ? 1 : 0,
+      a:     state.moveLeft     ? 1 : 0,
+      d:     state.moveRight    ? 1 : 0,
+      shift: state.crouching    ? 1 : 0,
+      jump:  0,
     },
     shooting: state.shooting || false,
   }));
