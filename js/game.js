@@ -3651,25 +3651,7 @@ function update() {
   }
 
   // Debug overlay - remote player distances
-  let debugDiv = document.getElementById("mp-debug");
-  if (!debugDiv) {
-    debugDiv = document.createElement("div");
-    debugDiv.id = "mp-debug";
-    debugDiv.style.cssText = "position:fixed;top:10px;left:10px;color:#0f0;font:14px monospace;z-index:9999;pointer-events:none;background:rgba(0,0,0,0.5);padding:6px";
-    document.body.appendChild(debugDiv);
-  }
-  const rids = Object.keys(state.remotePlayers);
-  if (rids.length === 0) {
-    debugDiv.textContent = "Remote players: NONE";
-  } else {
-    debugDiv.textContent = rids.map(id => {
-      const rp = state.remotePlayers[id];
-      const dx = (rp.targetX||0) - camera.position.x;
-      const dz = (rp.targetZ||0) - camera.position.z;
-      const dist = Math.sqrt(dx*dx+dz*dz).toFixed(1);
-      return id + " dist:" + dist + "m y:" + (rp.targetY||0).toFixed(1);
-    }).join("\n");
-  }
+
 
   // ── Match timer & water rise ──
   state.matchTime += renderDt;

@@ -276,7 +276,7 @@ setInterval(() => {
     if (p.ws.readyState === p.ws.OPEN) {
       p.ws.ping();
     }
-    if (now - p.lastPing > 120000) {
+    if (now - p.lastPing > 10000) {
       console.log(`[timeout] ${p.name} (${p.id}) timed out`);
       p.ws.terminate();
     }
