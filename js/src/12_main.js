@@ -915,6 +915,8 @@ function sendInputToServer() {
 }
 
 // Heartbeat — keeps connection alive when tab is backgrounded
+setInterval(sendInputToServer, 50);
+
 setInterval(() => {
   if (state.ws && state.ws.readyState === WebSocket.OPEN && state.myId) {
     state.ws.send(JSON.stringify({ type: "input", seq: state.inputSeq, yaw: state.yaw || 0, pitch: state.pitch || 0, keys: { w:0,s:0,a:0,d:0,shift:0,jump:0 }, shooting: false }));
