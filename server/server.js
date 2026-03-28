@@ -231,6 +231,53 @@ function handleMessage(ws, raw) {
       break;
     }
 
+    case "shoot": {
+      const shooter = players.get(ws._playerId);
+      if (!shooter || shooter.dead) return;
+
+      const target = players.get(msg.targetId);
+      if (!target || target.dead) return;
+
+      // Range validation — server positions are authoritative
+      const dx = target.x - shooter.x;
+      const dz = target.z - shooter.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > 600) {
+        console.warn("[cheat?] " + shooter.name + " shot " + dist.toFixed(1) + "m away");
+        return;
+      }
+
+      // Clamp damage to max possible weapon value (150 headshot + buffer)
+      const damage = Math.min(Math.max(Number(msg.damage) || 0, 0), 200);
+      const headshot = !!msg.headshot;
+
+      // Armor absorbs damage first; overflow goes to hp
+      if (target.armor > 0) {
+        const absorbed = Math.min(target.armor, damage);
+        target.armor -= absorbed;
+        target.hp = Math.max(0, target.hp - (damage - absorbed));
+      } else {
+        target.hp = Math.max(0, target.hp - damage);
+      }
+
+      if (target.hp <= 0) {
+        target.dead = true;
+        console.log("[kill] " + shooter.name + " killed " + target.name + " (hs:" + headshot + ")");
+      }
+
+      events.push({
+        type:        "hit",
+        shooter:     shooter.id,
+        target:      target.id,
+        damage,
+        headshot,
+        targetHp:    target.hp,
+        targetArmor: target.armor,
+        targetDead:  target.dead,
+      });
+      break;
+    }
+
     default:
       // Unknown message — ignore
       break;

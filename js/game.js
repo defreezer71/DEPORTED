@@ -2953,6 +2953,54 @@ document.addEventListener('mouseup', (e) => {
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+// REMOTE PLAYER HIT DETECTION
+// ═══════════════════════════════════════════════════════════
+
+// Collect all live remote player sub-meshes for the raycast
+function getRemotePlayerMeshes() {
+  const meshes = [];
+  for (const rp of Object.values(state.remotePlayers || {})) {
+    if (rp.mesh && !rp.dead) {
+      rp.mesh.traverse(child => { if (child.isMesh) meshes.push(child); });
+    }
+  }
+  return meshes;
+}
+
+// Walk up parent chain to find which remote player owns a hit mesh
+function findRemotePlayerByPart(obj) {
+  for (const [id, rp] of Object.entries(state.remotePlayers || {})) {
+    if (!rp.mesh || rp.dead) continue;
+    let cur = obj;
+    while (cur) {
+      if (cur === rp.mesh) return { id, rp };
+      cur = cur.parent;
+    }
+  }
+  return null;
+}
+
+// Called by 12_main.js when a hit event arrives in a world snapshot
+function applyHitEvent(evt) {
+  const rp = (state.remotePlayers || {})[evt.target];
+  if (!rp) return;
+  if (evt.targetHp !== undefined) rp.hp = evt.targetHp;
+  else rp.hp = Math.max(0, (rp.hp !== undefined ? rp.hp : 100) - evt.damage);
+  if (evt.targetDead || rp.hp <= 0) {
+    rp.dead = true;
+    if (rp.mesh) rp.mesh.visible = false;
+  }
+}
+
+// Fire-and-forget shoot message to server
+function sendShoot(targetId, damage, headshot) {
+  const sock = (state && state.ws) ? state.ws : (typeof ws !== 'undefined' ? ws : null);
+  if (sock && sock.readyState === 1) {
+    sock.send(JSON.stringify({ type: 'shoot', targetId, damage, headshot }));
+  }
+}
+
 // SHOOTING — First shot accurate, spread accumulates with rapid fire
 // ═══════════════════════════════════════════════════════════
 const raycaster = new THREE.Raycaster();
@@ -3030,7 +3078,8 @@ function shoot() {
   raycaster.set(shotOrigin, dir);
   raycaster.far = wep.range || 500;
 
-  const intersects = raycaster.intersectObjects(targets, false);
+  const remoteTargets = getRemotePlayerMeshes();
+  const intersects = raycaster.intersectObjects([...targets, ...remoteTargets], false);
 
   // Volcano terrain LOS — sample along ray; if ray dips below volcano surface it's blocked
   function shotBlockedByVolcano(origin, direction, maxDist) {
@@ -3081,6 +3130,17 @@ function shoot() {
         const wasAlive = bot.alive;
         damageBot(bot, dmg, isHead);
         if (wasAlive && !bot.alive) SFX.kill_chaching();
+      } else {
+        // Not a bot — check remote players
+        const remoteHit = findRemotePlayerByPart(hit.object);
+        if (remoteHit && !remoteHit.rp.dead) {
+          hitmarker.classList.add('show');
+          hitmarker.style.filter = isHead ? 'hue-rotate(200deg) brightness(2)' : 'none';
+          clearTimeout(hitmarkerTimeout);
+          hitmarkerTimeout = setTimeout(() => hitmarker.classList.remove('show'), 120);
+          if (isHead) SFX.headshot(); else SFX.hitmarker();
+          sendShoot(remoteHit.id, dmg, isHead);
+        }
       }
     }
   }
@@ -4140,6 +4200,11 @@ function connectToServer() {
         state.lastServerTick = msg.tick;
         console.log('WORLD tick', msg.tick, 'players:', msg.players.map(p => p.id + '(' + p.x.toFixed(1) + ',' + p.y.toFixed(1) + ',' + p.z.toFixed(1) + ')').join(' | '));
         updateRemotePlayers(msg.players);
+        if (msg.events && msg.events.length) {
+          for (const evt of msg.events) {
+            if (evt.type === 'hit') applyHitEvent(evt);
+          }
+        }
         break;
 
       case 'existingPlayers':
