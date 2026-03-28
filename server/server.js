@@ -77,17 +77,30 @@ function createPlayer(ws, name) {
 }
 
 // ─── Physics (server-authoritative, simplified) ───────────────────────────────
+const MAX_SPEED       = 14.0;   // m/s — sprint (12) + generous lag buffer
+const MAX_DIST_PER_MSG = MAX_SPEED * 0.25; // 250ms of max movement = ~3.5m
+
 function stepPlayer(p, dt) {
   if (p.dead || !p.lastInput) return;
 
   const inp = p.lastInput;
 
-  // Trust client-reported position
+  // Validate client-reported position against server position.
+  // Accept if within plausible range, reject (use server pos) if teleport detected.
   if (inp.x !== undefined) {
-    p.x = inp.x;
-    p.y = inp.y;
-    p.z = inp.z;
-    p.yaw = inp.yaw;
+    const dx = inp.x - p.x;
+    const dz = inp.z - p.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist <= MAX_DIST_PER_MSG) {
+      // Plausible — accept client XZ and Y (client has terrain, server doesn't yet)
+      p.x = inp.x;
+      p.z = inp.z;
+      p.y = inp.y;
+    } else {
+      // Teleport detected — log and hold server position
+      console.warn(`[cheat?] ${p.name} (${p.id}) moved ${dist.toFixed(2)}m in one msg (max ${MAX_DIST_PER_MSG.toFixed(2)}m)`);
+    }
+    p.yaw   = inp.yaw;
     p.pitch = inp.pitch;
     return;
   }
