@@ -3408,6 +3408,7 @@ function physicsStep(fixedDt) {
 
   // Speed modifiers
   const sprintActive = state.sprintTimer > 0;
+  if (sprintActive) state.sprintTimer = Math.max(0, state.sprintTimer - fixedDt);
   const isSwimming = state.waterRising && state.waterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
   let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
   if (isSwimming)      speed *= 0.55;
@@ -3655,7 +3656,6 @@ function update() {
 
   // ── Match timer & water rise ──
   state.matchTime += renderDt;
-  if (state.sprintTimer > 0) state.sprintTimer = Math.max(0, state.sprintTimer - renderDt);
   const remaining = Math.max(0, state.matchDuration - state.matchTime);
   const mins = Math.floor(remaining / 60);
   const secs = Math.floor(remaining % 60);
