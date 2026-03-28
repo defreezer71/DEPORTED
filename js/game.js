@@ -2830,6 +2830,7 @@ const pickupPrompt = document.getElementById('pickup-prompt');
 //    Never mutate camera.quaternion directly from mouse input.
 state.yaw   = 0;
 state.shakeOffset = new THREE.Vector3();
+state.physicsTime = 0;
 state.pitch = 0;
 
 // ── Drone camera for menu background ──
@@ -3407,10 +3408,29 @@ function physicsStep(fixedDt) {
   const smoothFactor = 1 - Math.pow(CONFIG.moveSmoothing, fixedDt * 60);
   smoothedMove.lerp(moveVec, smoothFactor);
 
+  // Advance deterministic physics clock
+  state.physicsTime += fixedDt;
+
   // Speed modifiers
   const sprintActive = state.sprintTimer > 0;
   if (sprintActive) state.sprintTimer = Math.max(0, state.sprintTimer - fixedDt);
-  const isSwimming = state.waterRising && state.waterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
+
+  // Compute water level from physicsTime — deterministic, framerate-independent
+  let physicsWaterLevel = -0.3;
+  if (state.waterRising) {
+    const timeSinceRise = state.physicsTime - state.waterRiseStart;
+    if (timeSinceRise > 0) {
+      let riseProgress;
+      if (timeSinceRise < 10) {
+        riseProgress = (timeSinceRise / 10) * 0.02;
+      } else {
+        const normalProgress = (timeSinceRise - 10) / (state.matchDuration - state.waterRiseStart - 10);
+        riseProgress = 0.02 + Math.pow(Math.max(0, Math.min(1, normalProgress)), 0.70) * 0.98;
+      }
+      physicsWaterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3);
+    }
+  }
+  const isSwimming = state.waterRising && physicsWaterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
   let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
   if (isSwimming)      speed *= 0.55;
   if (sprintActive)    speed *= 1.5;

@@ -17,6 +17,7 @@ const pickupPrompt = document.getElementById('pickup-prompt');
 //    Never mutate camera.quaternion directly from mouse input.
 state.yaw   = 0;
 state.shakeOffset = new THREE.Vector3();
+state.physicsTime = 0;
 state.pitch = 0;
 
 // ── Drone camera for menu background ──
