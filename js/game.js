@@ -2829,6 +2829,7 @@ const pickupPrompt = document.getElementById('pickup-prompt');
 //    physicsStep reads these and sets camera.quaternion each tick.
 //    Never mutate camera.quaternion directly from mouse input.
 state.yaw   = 0;
+state.shakeOffset = new THREE.Vector3();
 state.pitch = 0;
 
 // ── Drone camera for menu background ──
@@ -3762,9 +3763,13 @@ function update() {
 
   if (state.erupted && state.matchTime < eruptionTime + 5 && !state.playerDead) {
     const shakeIntensity = 0.12 * (1 - (state.matchTime - eruptionTime) / 5);
-    camera.position.x += (Math.random() - 0.5) * shakeIntensity;
-    camera.position.y += (Math.random() - 0.5) * shakeIntensity * 0.5;
-    camera.position.z += (Math.random() - 0.5) * shakeIntensity * 0.25;
+    state.shakeOffset.set(
+      (Math.random() - 0.5) * shakeIntensity,
+      (Math.random() - 0.5) * shakeIntensity * 0.5,
+      (Math.random() - 0.5) * shakeIntensity * 0.25
+    );
+  } else {
+    state.shakeOffset.set(0, 0, 0);
   }
 
   if (state.matchTime >= state.waterRiseStart) {
@@ -3976,10 +3981,12 @@ function update() {
       `FPS: ${fps} | Tris: ${(tris/1000).toFixed(1)}k | Calls: ${calls}`;
   }
 
+  camera.position.add(state.shakeOffset);
   renderer.clear();
   renderer.render(scene, camera);
   renderer.clearDepth();
   renderer.render(weaponScene, weaponCamera);
+  camera.position.sub(state.shakeOffset);
 }
 
 window.addEventListener('resize', () => {

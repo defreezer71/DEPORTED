@@ -16,6 +16,7 @@ const pickupPrompt = document.getElementById('pickup-prompt');
 //    physicsStep reads these and sets camera.quaternion each tick.
 //    Never mutate camera.quaternion directly from mouse input.
 state.yaw   = 0;
+state.shakeOffset = new THREE.Vector3();
 state.pitch = 0;
 
 // ── Drone camera for menu background ──
