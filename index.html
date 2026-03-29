@@ -360,7 +360,7 @@
         style="background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.25);color:#fff;
                padding:7px 12px;font-size:1em;letter-spacing:3px;text-transform:uppercase;
                border-radius:4px;width:160px;text-align:center;outline:none"
-        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" />
+        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onclick="event.stopPropagation()" />
     </div>
     <div class="click-start">▶ &nbsp; Click to Play</div>
   </div>
