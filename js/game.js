@@ -4173,13 +4173,14 @@ function createRemotePlayerMesh(id) {
   head.position.y = -0.10;
   group.add(head);
 
-  // ── TACTICAL HELMET ──
-  const helmetTop  = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.12, 8), helmetMat);
-  helmetTop.position.y = 0.05;
-  group.add(helmetTop);
-  const helmetBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.03, 8), helmetMat);
-  helmetBrim.position.y = -0.01;
-  group.add(helmetBrim);
+  // ── COMBAT HELMET — wide dome + front visor only ──
+  const helmetDome = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.21, 0.15, 8), helmetMat);
+  helmetDome.position.set(0, 0.03, 0);
+  group.add(helmetDome);
+  const visorMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.05, 0.09), visorMat);
+  visor.position.set(0, -0.05, -0.21);
+  group.add(visor);
 
   // ── NECK ──
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 6), skinMat);
@@ -4204,10 +4205,10 @@ function createRemotePlayerMesh(id) {
 
   // ── WEAPON SILHOUETTE on right side (M4 proportions) ──
   const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.52), gunMat);
-  gunBody.position.set(0.36, -0.72, 0.17);
+  gunBody.position.set(0.36, -0.72, -0.17);
   group.add(gunBody);
   const gunStock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.13, 0.17), stockMat);
-  gunStock.position.set(0.36, -0.76, -0.15);
+  gunStock.position.set(0.36, -0.76, 0.15);
   group.add(gunStock);
 
   // ── LEGS ──
@@ -4228,11 +4229,17 @@ function createRemotePlayerMesh(id) {
   rBoot.position.set(0.11, -1.57, 0.03);
   group.add(rBoot);
 
-  // ── BALACLAVA STRIP — dark cloth across lower face ──
-  const balaMatLocal = new THREE.MeshLambertMaterial({ color: 0x111111 });
-  const balaclava = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.09, 0.06), balaMatLocal);
-  balaclava.position.set(0, -0.17, 0.14);
-  group.add(balaclava);
+  // ── BALACLAVA — covers lower face, wraps sides ──
+  const balaMatLocal = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  const balaFront = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.15, 0.05), balaMatLocal);
+  balaFront.position.set(0, -0.20, -0.14);
+  group.add(balaFront);
+  const balaSideL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.10), balaMatLocal);
+  balaSideL.position.set(-0.13, -0.20, -0.08);
+  group.add(balaSideL);
+  const balaSideR = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.10), balaMatLocal);
+  balaSideR.position.set(0.13, -0.20, -0.08);
+  group.add(balaSideR);
   // Store named part refs so the render loop can animate crouch per-frame
   group.userData.parts = { lLeg, rLeg, lBoot, rBoot, torso };
   group.userData.id = id;
