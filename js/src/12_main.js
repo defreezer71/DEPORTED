@@ -904,6 +904,7 @@ function connectToServer() {
 
       case 'world':
         state.lastServerTick = msg.tick;
+        state.lastWorldAt = Date.now();
         updateRemotePlayers(msg.players);
         if (msg.events && msg.events.length) {
           for (const evt of msg.events) {
@@ -963,6 +964,18 @@ function sendInputToServer() {
 
 // Heartbeat — keeps connection alive when tab is backgrounded
 setInterval(sendInputToServer, 50);
+
+// Stale connection watchdog — Render's proxy can silently drop WS connections
+// without firing onclose. If no world snapshot arrives in 5s, force reconnect.
+setInterval(() => {
+  if (!state.myId) return; // not connected yet
+  const age = Date.now() - (state.lastWorldAt || Date.now());
+  if (age > 5000) {
+    console.warn('[watchdog] No world snapshot for ' + (age/1000).toFixed(1) + 's — reconnecting');
+    if (state.ws) state.ws.close();
+    state.lastWorldAt = Date.now(); // reset so we don't fire again immediately
+  }
+}, 2000);
 
 setInterval(() => {
   if (state.ws && state.ws.readyState === WebSocket.OPEN && state.myId) {

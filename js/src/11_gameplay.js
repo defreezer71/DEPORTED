@@ -28,6 +28,15 @@ function findRemotePlayerByPart(obj) {
 
 // Called by 12_main.js when a hit event arrives in a world snapshot
 function applyHitEvent(evt) {
+  // We are the target — apply damage to our own HP
+  if (evt.target === state.myId) {
+    if (evt.targetHp !== undefined)    state.hp    = evt.targetHp;
+    else state.hp = Math.max(0, state.hp - evt.damage);
+    if (evt.targetArmor !== undefined) state.armor = evt.targetArmor;
+    updateHUD();
+    return;
+  }
+  // Remote player is the target
   const rp = (state.remotePlayers || {})[evt.target];
   if (!rp) return;
   if (evt.targetHp !== undefined) rp.hp = evt.targetHp;

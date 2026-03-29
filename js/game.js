@@ -2983,6 +2983,15 @@ function findRemotePlayerByPart(obj) {
 
 // Called by 12_main.js when a hit event arrives in a world snapshot
 function applyHitEvent(evt) {
+  // We are the target — apply damage to our own HP
+  if (evt.target === state.myId) {
+    if (evt.targetHp !== undefined)    state.hp    = evt.targetHp;
+    else state.hp = Math.max(0, state.hp - evt.damage);
+    if (evt.targetArmor !== undefined) state.armor = evt.targetArmor;
+    updateHUD();
+    return;
+  }
+  // Remote player is the target
   const rp = (state.remotePlayers || {})[evt.target];
   if (!rp) return;
   if (evt.targetHp !== undefined) rp.hp = evt.targetHp;
@@ -4235,6 +4244,7 @@ function connectToServer() {
 
       case 'world':
         state.lastServerTick = msg.tick;
+        state.lastWorldAt = Date.now();
         updateRemotePlayers(msg.players);
         if (msg.events && msg.events.length) {
           for (const evt of msg.events) {
@@ -4294,6 +4304,18 @@ function sendInputToServer() {
 
 // Heartbeat — keeps connection alive when tab is backgrounded
 setInterval(sendInputToServer, 50);
+
+// Stale connection watchdog — Render's proxy can silently drop WS connections
+// without firing onclose. If no world snapshot arrives in 5s, force reconnect.
+setInterval(() => {
+  if (!state.myId) return; // not connected yet
+  const age = Date.now() - (state.lastWorldAt || Date.now());
+  if (age > 5000) {
+    console.warn('[watchdog] No world snapshot for ' + (age/1000).toFixed(1) + 's — reconnecting');
+    if (state.ws) state.ws.close();
+    state.lastWorldAt = Date.now(); // reset so we don't fire again immediately
+  }
+}, 2000);
 
 setInterval(() => {
   if (state.ws && state.ws.readyState === WebSocket.OPEN && state.myId) {
