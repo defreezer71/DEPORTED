@@ -36,7 +36,8 @@ function tickRoom(code) {
     type: 'world',
     players: Object.values(room.players).map(p => ({
       id: p.id, x: p.x, y: p.y, z: p.z,
-      hp: p.hp, armor: p.armor, dead: p.dead, name: p.name
+      hp: p.hp, armor: p.armor, dead: p.dead, name: p.name,
+      yaw: p.yaw || 0, crouch: p.crouch || false
     })),
     events: room.events.splice(0),
     phase: room.phase
@@ -133,6 +134,8 @@ wss.on('connection', ws => {
       const dx = msg.x - player.x, dz = msg.z - player.z;
       if (Math.sqrt(dx*dx+dz*dz) > 3.5) { console.log('[cheat?]', myId, 'teleport'); return; }
       player.x = msg.x; player.y = msg.y || 0; player.z = msg.z;
+      player.yaw = msg.yaw || 0;
+      player.crouch = !!(msg.keys && msg.keys.shift);
     }
 
     if (msg.type === 'ready') {

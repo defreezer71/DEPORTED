@@ -395,13 +395,38 @@ function update() {
 
   if (!state.playerDead) updateBots(renderDt);
 
-  // Interpolate remote player meshes toward server-reported positions
+  // Interpolate remote player meshes — position, yaw, crouch
   for (const id in state.remotePlayers) {
     const rp = state.remotePlayers[id];
     if (rp.targetX === undefined) continue;
-    rp.mesh.position.x += (rp.targetX - rp.mesh.position.x) * Math.min(1, renderDt * 15);
-    rp.mesh.position.y += (rp.targetY - rp.mesh.position.y) * Math.min(1, renderDt * 15);
-    rp.mesh.position.z += (rp.targetZ - rp.mesh.position.z) * Math.min(1, renderDt * 15);
+    const t = Math.min(1, renderDt * 15);
+    rp.mesh.position.x += (rp.targetX - rp.mesh.position.x) * t;
+    rp.mesh.position.y += (rp.targetY - rp.mesh.position.y) * t;
+    rp.mesh.position.z += (rp.targetZ - rp.mesh.position.z) * t;
+    // Smooth yaw — shortest-path lerp to avoid 180-degree spin
+    if (rp.targetYaw !== undefined) {
+      let dy = rp.targetYaw - rp.mesh.rotation.y;
+      while (dy >  Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      rp.mesh.rotation.y += dy * Math.min(1, renderDt * 12);
+    }
+    // Crouch animation — smoothly compress legs and drop torso
+    const parts = rp.mesh.userData.parts;
+    if (parts) {
+      const cr = rp.crouching || false;
+      const legSY  = cr ? 0.55 : 1.0;
+      const tY     = cr ? -0.90 : -0.65;
+      const lgY    = cr ? -0.90 : -1.15;
+      const btY    = cr ? -1.20 : -1.57;
+      const sp = Math.min(1, renderDt * 10);
+      parts.lLeg.scale.y    += (legSY - parts.lLeg.scale.y)    * sp;
+      parts.rLeg.scale.y    += (legSY - parts.rLeg.scale.y)    * sp;
+      parts.torso.position.y += (tY  - parts.torso.position.y) * sp;
+      parts.lLeg.position.y  += (lgY - parts.lLeg.position.y)  * sp;
+      parts.rLeg.position.y  += (lgY - parts.rLeg.position.y)  * sp;
+      parts.lBoot.position.y += (btY - parts.lBoot.position.y) * sp;
+      parts.rBoot.position.y += (btY - parts.rBoot.position.y) * sp;
+    }
   }
 
   // Debug overlay - remote player distances
@@ -861,6 +886,13 @@ function createRemotePlayerMesh(id) {
   rBoot.position.set(0.11, -1.57, 0.03);
   group.add(rBoot);
 
+  // ── BALACLAVA STRIP — dark cloth across lower face ──
+  const balaMatLocal = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const balaclava = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.09, 0.06), balaMatLocal);
+  balaclava.position.set(0, -0.17, 0.14);
+  group.add(balaclava);
+  // Store named part refs so the render loop can animate crouch per-frame
+  group.userData.parts = { lLeg, rLeg, lBoot, rBoot, torso };
   group.userData.id = id;
   scene.add(group);
   return group;
@@ -896,9 +928,10 @@ function updateRemotePlayers(playerList) {
 
     const rp = state.remotePlayers[p.id];
     rp.targetX = p.x; rp.targetY = p.y; rp.targetZ = p.z;
-    if (p.yaw !== undefined) rp.mesh.rotation.y = p.yaw;
-    rp.hp   = p.hp;
-    rp.dead = p.dead;
+    if (p.yaw !== undefined) rp.targetYaw = p.yaw;
+    rp.hp       = p.hp;
+    rp.dead     = p.dead;
+    rp.crouching = p.crouch || false;
     rp.mesh.visible = !p.dead;
   }
 
