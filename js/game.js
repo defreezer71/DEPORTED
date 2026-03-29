@@ -435,21 +435,39 @@ const avgH = CONFIG.cliffHeight + 4;
   for (let i = 0; i < pos2.count; i++) {
     const vy = pos2.getY(i) + (avgH / 2 - 3);
     const vx = pos2.getX(i) + px;
-    const band = Math.sin(vy * 1.8) * 0.06 + Math.sin(vy * 4.3) * 0.03;
-    const nx = Math.sin(vx * 0.41 + pz * 0.17) * 0.05 + Math.cos(vx * 1.2) * 0.03;
-    const t = (vy + 5) / (avgH + 5);
-    const base = 0.36 + t * 0.12 + band + nx;
-    cols2[i*3] = Math.min(1, base + 0.08);
-    cols2[i*3+1] = Math.min(1, base * 0.88);
-    cols2[i*3+2] = Math.min(1, base * 0.72);
+    const depthT = Math.max(0, Math.min(1, (vy + 2) / avgH));
+    const waveB  = Math.sin(vy * 2.1 + vx * 0.08) * 0.035 + Math.sin(vy * 5.3) * 0.015;
+    const foamT  = Math.max(0, (depthT - 0.80) / 0.20);
+    const oceanR = 0.01 + depthT * 0.09 + waveB * 0.5 + foamT * 0.72;
+    const oceanG = 0.07 + depthT * 0.33 + waveB * 1.2 + foamT * 0.85;
+    const oceanB = 0.20 + depthT * 0.46 + waveB       + foamT * 0.76;
+    cols2[i*3]   = Math.min(1, oceanR);
+    cols2[i*3+1] = Math.min(1, oceanG);
+    cols2[i*3+2] = Math.min(1, oceanB);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cols2, 3));
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
   mesh.position.set(px, avgH / 2 - 3, pz);
-  mesh.castShadow = true; mesh.receiveShadow = true;
   scene.add(mesh);
   collidables.push(mesh);
+});
+
+// ── Ocean foam caps — cresting white wave tops on each perimeter wall ──
+window._oceanFoam = [];
+const foamMat = new THREE.MeshBasicMaterial({ color: 0xe8f8ff, transparent: true, opacity: 0.82 });
+const foamY   = avgH - 3 + 0.38;
+[
+  { px: 0,            pz: -half - ct/2, w: wallLen + ct, d: ct + 0.5 },
+  { px: 0,            pz:  half + ct/2, w: wallLen + ct, d: ct + 0.5 },
+  { px:  half + ct/2, pz: 0,            w: ct + 0.5,     d: wallLen + ct },
+  { px: -half - ct/2, pz: 0,            w: ct + 0.5,     d: wallLen + ct },
+].forEach(({ px, pz, w, d }, i) => {
+  const foam = new THREE.Mesh(new THREE.BoxGeometry(w, 0.55, d), foamMat);
+  foam.position.set(px, foamY, pz);
+  foam.userData.baseY = foamY;
+  scene.add(foam);
+  window._oceanFoam.push(foam);
 });
 // ═══════════════════════════════════════════════════════════
 // PRISON COMPOUND — Taller walls
@@ -767,27 +785,27 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   const treeCount = treePlacements.length;
 
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.62, 1, 8);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x2e1e0f });
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a2e12 });
   const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
   trunkInst.castShadow = true;
 
   const flareGeo = new THREE.CylinderGeometry(0.55, 0.90, 1, 8);
-  const flareMat = new THREE.MeshLambertMaterial({ color: 0x271808 });
+  const flareMat = new THREE.MeshLambertMaterial({ color: 0x2a1808 });
   const flareInst = new THREE.InstancedMesh(flareGeo, flareMat, treeCount);
   flareInst.castShadow = false;
 
   const canopyGeo = new THREE.SphereGeometry(1, 10, 8);
-  const canopyMat = new THREE.MeshLambertMaterial({ color: 0x1e4d0f });
+  const canopyMat = new THREE.MeshLambertMaterial({ color: 0x1a5210 });
   const canopyInst = new THREE.InstancedMesh(canopyGeo, canopyMat, treeCount);
   canopyInst.castShadow = true;
 
   const canopy2Geo = new THREE.SphereGeometry(1, 9, 7);
-  const canopy2Mat = new THREE.MeshLambertMaterial({ color: 0x2e6b18 });
+  const canopy2Mat = new THREE.MeshLambertMaterial({ color: 0x2d7318 });
   const canopy2Inst = new THREE.InstancedMesh(canopy2Geo, canopy2Mat, treeCount);
   canopy2Inst.castShadow = false;
 
   const canopy3Geo = new THREE.SphereGeometry(1, 8, 6);
-  const canopy3Mat = new THREE.MeshLambertMaterial({ color: 0x3d8220 });
+  const canopy3Mat = new THREE.MeshLambertMaterial({ color: 0x4a9422 });
   const canopy3Inst = new THREE.InstancedMesh(canopy3Geo, canopy3Mat, treeCount);
   canopy3Inst.castShadow = false;
 
@@ -890,15 +908,15 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   // bush2Inst = arborvitae base trunk  (even indices)
   // bush3Inst = decorative small bush  (odd indices, no collider)
   const bushGeo  = new THREE.ConeGeometry(0.5, 1, 6);
-  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1a4a0e });
+  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1c5c0e });
   const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushPlacements.length);
   bushInst.castShadow = true;
   const bush2Geo  = new THREE.CylinderGeometry(0.25, 0.38, 0.5, 6);
-  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x243318 });
+  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x1c2a12 });
   const bush2Inst = new THREE.InstancedMesh(bush2Geo, bush2Mat, bushPlacements.length);
   bush2Inst.castShadow = false;
   const bush3Geo  = new THREE.SphereGeometry(1, 6, 4);
-  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x2d5c18 });
+  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x387520 });
   const bush3Inst = new THREE.InstancedMesh(bush3Geo, bush3Mat, bushPlacements.length);
   bush3Inst.castShadow = false;
   const dummy = new THREE.Object3D();
@@ -970,12 +988,12 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
   // Crate visuals — 3 instanced meshes: main body, wood slat H, wood slat V
   const crateBodyGeo = new THREE.BoxGeometry(1, 1, 1);
-  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x8B6914 });
+  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x4a5820 });
   const crateInst    = new THREE.InstancedMesh(crateBodyGeo, crateBodyMat, rockPlacements.length);
   crateInst.castShadow = true;
 
   const slatHGeo  = new THREE.BoxGeometry(1.01, 0.08, 0.12);
-  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x5C4008 });
+  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x2e3a12 });
   const slatHInst = new THREE.InstancedMesh(slatHGeo, slatMat, rockPlacements.length * 2);
   slatHInst.castShadow = false;
 
@@ -1092,7 +1110,7 @@ for (let i = 0; i < 25; i++) {
   // Crate body — tilted to slope
   const crate = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
-    new THREE.MeshLambertMaterial({ color: 0x8B6914 })
+    new THREE.MeshLambertMaterial({ color: 0x4a5820 })
   );
   crate.position.set(x, h + sz * 0.3, z);
   crate.rotation.set(0, yRot, 0);
@@ -1103,7 +1121,7 @@ for (let i = 0; i < 25; i++) {
   [-0.3, 0.3].forEach(yOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 1.01, sz * 0.08, sz * 0.12),
-      new THREE.MeshLambertMaterial({ color: 0x5C4008 })
+      new THREE.MeshLambertMaterial({ color: 0x2e3a12 })
     );
     slat.position.set(x, h + sz * 0.3 + sz * yOff, z);
     slat.rotation.set(0, yRot, 0);
@@ -1112,7 +1130,7 @@ for (let i = 0; i < 25; i++) {
   [-0.3, 0.3].forEach(xOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 0.12, sz * 0.08, sz * 1.01),
-      new THREE.MeshLambertMaterial({ color: 0x5C4008 })
+      new THREE.MeshLambertMaterial({ color: 0x2e3a12 })
     );
     slat.position.set(x, h + sz * 0.3 + sz * xOff, z);
     slat.rotation.set(0, yRot, 0);

@@ -278,19 +278,37 @@ const avgH = CONFIG.cliffHeight + 4;
   for (let i = 0; i < pos2.count; i++) {
     const vy = pos2.getY(i) + (avgH / 2 - 3);
     const vx = pos2.getX(i) + px;
-    const band = Math.sin(vy * 1.8) * 0.06 + Math.sin(vy * 4.3) * 0.03;
-    const nx = Math.sin(vx * 0.41 + pz * 0.17) * 0.05 + Math.cos(vx * 1.2) * 0.03;
-    const t = (vy + 5) / (avgH + 5);
-    const base = 0.36 + t * 0.12 + band + nx;
-    cols2[i*3] = Math.min(1, base + 0.08);
-    cols2[i*3+1] = Math.min(1, base * 0.88);
-    cols2[i*3+2] = Math.min(1, base * 0.72);
+    const depthT = Math.max(0, Math.min(1, (vy + 2) / avgH));
+    const waveB  = Math.sin(vy * 2.1 + vx * 0.08) * 0.035 + Math.sin(vy * 5.3) * 0.015;
+    const foamT  = Math.max(0, (depthT - 0.80) / 0.20);
+    const oceanR = 0.01 + depthT * 0.09 + waveB * 0.5 + foamT * 0.72;
+    const oceanG = 0.07 + depthT * 0.33 + waveB * 1.2 + foamT * 0.85;
+    const oceanB = 0.20 + depthT * 0.46 + waveB       + foamT * 0.76;
+    cols2[i*3]   = Math.min(1, oceanR);
+    cols2[i*3+1] = Math.min(1, oceanG);
+    cols2[i*3+2] = Math.min(1, oceanB);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(cols2, 3));
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
   mesh.position.set(px, avgH / 2 - 3, pz);
-  mesh.castShadow = true; mesh.receiveShadow = true;
   scene.add(mesh);
   collidables.push(mesh);
+});
+
+// ── Ocean foam caps — cresting white wave tops on each perimeter wall ──
+window._oceanFoam = [];
+const foamMat = new THREE.MeshBasicMaterial({ color: 0xe8f8ff, transparent: true, opacity: 0.82 });
+const foamY   = avgH - 3 + 0.38;
+[
+  { px: 0,            pz: -half - ct/2, w: wallLen + ct, d: ct + 0.5 },
+  { px: 0,            pz:  half + ct/2, w: wallLen + ct, d: ct + 0.5 },
+  { px:  half + ct/2, pz: 0,            w: ct + 0.5,     d: wallLen + ct },
+  { px: -half - ct/2, pz: 0,            w: ct + 0.5,     d: wallLen + ct },
+].forEach(({ px, pz, w, d }, i) => {
+  const foam = new THREE.Mesh(new THREE.BoxGeometry(w, 0.55, d), foamMat);
+  foam.position.set(px, foamY, pz);
+  foam.userData.baseY = foamY;
+  scene.add(foam);
+  window._oceanFoam.push(foam);
 });
