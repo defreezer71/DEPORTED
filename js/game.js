@@ -3644,6 +3644,7 @@ function update() {
   if (state.phase === 'lobby') {
     state.phase = 'countdown';
     state.countdownTime = 10;
+    sendJoin();
   }
 
   if (state.phase === 'countdown') {
@@ -4216,6 +4217,20 @@ function updateRemotePlayers(playerList) {
   }
 }
 
+function sendJoin() {
+  if (state.joinSent) return;
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+  const roomInput = document.getElementById('room-input');
+  const requestedRoom = roomInput ? roomInput.value.trim().toUpperCase() : '';
+  state.ws.send(JSON.stringify({
+    type: 'join',
+    name: 'Player' + Math.floor(Math.random() * 1000),
+    room: requestedRoom || undefined,
+  }));
+  state.joinSent = true;
+  console.log('Join sent — room:', requestedRoom || '(auto)');
+}
+
 function adjustBotsForPlayerCount(playerCount) {
   const toRemove = Math.min(Math.max(0, playerCount - 1), bots.length);
   let removed = 0;
@@ -4247,14 +4262,9 @@ function connectToServer() {
   state.ws = new WebSocket('wss://deported.onrender.com');
 
   state.ws.onopen = () => {
-    console.log('WS connected');
-    const roomInput = document.getElementById('room-input');
-    const requestedRoom = roomInput ? roomInput.value.trim().toUpperCase() : '';
-    state.ws.send(JSON.stringify({
-      type: 'join',
-      name: 'Player' + Math.floor(Math.random() * 1000),
-      room: requestedRoom || undefined,
-    }));
+    console.log('WS connected — waiting for player to click play');
+    state.wsReady = true;
+    // Join is sent when the player actually clicks play (see sendJoin)
   };
 
   state.ws.onmessage = (event) => {
