@@ -355,6 +355,13 @@
       <div class="tip">💡 Sprint ability for first 15 seconds of match.</div>
     </div>
     <div class="music-btn" id="music-toggle-btn" onclick="toggleMenuMusic()">♪ &nbsp; Play Theme Song</div>
+    <div style="margin:10px 0 6px;display:flex;gap:8px;justify-content:center;align-items:center">
+      <input id="room-input" maxlength="4" placeholder="Room code (optional)"
+        style="background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.25);color:#fff;
+               padding:7px 12px;font-size:1em;letter-spacing:3px;text-transform:uppercase;
+               border-radius:4px;width:160px;text-align:center;outline:none"
+        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" />
+    </div>
     <div class="click-start">▶ &nbsp; Click to Play</div>
   </div>
 </div>
@@ -376,6 +383,9 @@
 <div id="kill-count">KILLS<br><span class="num" id="kills-val">0</span></div>
 <div id="kill-feed"></div>
 <div id="alive-count">ALIVE: <span id="alive-val">21</span></div>
+<div id="room-code-badge" style="display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,0.55);color:#fff;font-size:13px;font-weight:700;letter-spacing:3px;
+  padding:4px 14px;border-radius:20px;pointer-events:none;z-index:60;text-transform:uppercase"></div>
 <div id="match-timer">10:00</div>
 <div id="water-warning">⚠ VOLCANO RUMBLING — WATER RISING ⚠</div>
 <div id="countdown-overlay"><div class="num" id="countdown-num"></div></div>

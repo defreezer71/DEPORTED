@@ -4216,15 +4216,44 @@ function updateRemotePlayers(playerList) {
   }
 }
 
+function adjustBotsForPlayerCount(playerCount) {
+  const toRemove = Math.min(Math.max(0, playerCount - 1), bots.length);
+  let removed = 0;
+  for (let i = 0; i < bots.length && removed < toRemove; i++) {
+    const bot = bots[i];
+    if (!bot.alive) continue;
+    bot.alive = false;
+    bot.hp = 0;
+    scene.remove(bot.group);
+    bot.group.children.forEach(c => {
+      const idx = targets.indexOf(c);
+      if (idx >= 0) targets.splice(idx, 1);
+    });
+    removed++;
+  }
+  if (removed > 0) console.log('[room] Removed ' + removed + ' bots — ' + bots.filter(b=>b.alive).length + ' bots + ' + playerCount + ' players = 21 total');
+}
+
+function showRoomCode(code) {
+  if (!code) return;
+  const el = document.getElementById('room-code-badge');
+  if (!el) return;
+  el.textContent = 'Room: ' + code;
+  el.style.display = 'block';
+}
+
 function connectToServer() {
   console.log('Connecting to wss://deported.onrender.com');
   state.ws = new WebSocket('wss://deported.onrender.com');
 
   state.ws.onopen = () => {
     console.log('WS connected');
+    const roomInput = document.getElementById('room-input');
+    const requestedRoom = roomInput ? roomInput.value.trim().toUpperCase() : '';
     state.ws.send(JSON.stringify({
       type: 'join',
       name: 'Player' + Math.floor(Math.random() * 1000),
+      room: requestedRoom || undefined,
     }));
   };
 
@@ -4236,10 +4265,12 @@ function connectToServer() {
 
       case 'welcome':
         state.myId = msg.id;
-        console.log('My ID:', state.myId);
+        state.roomCode = msg.roomCode;
+        state.roomPlayerCount = msg.playerCount || 1;
+        console.log('My ID:', state.myId, '| Room:', state.roomCode, '| Players:', state.roomPlayerCount);
         if (msg.seed !== undefined) { _seed = msg.seed; console.log('World seed:', _seed); }
-        // Optionally snap to server spawn position
-        // camera.position.set(msg.spawnX, msg.spawnY + CONFIG.playerHeight, msg.spawnZ);
+        adjustBotsForPlayerCount(state.roomPlayerCount);
+        showRoomCode(state.roomCode);
         break;
 
       case 'world':
@@ -4255,6 +4286,12 @@ function connectToServer() {
 
       case 'existingPlayers':
         updateRemotePlayers(msg.players);
+        break;
+
+      case 'roomUpdate':
+        state.roomPlayerCount = msg.playerCount || state.roomPlayerCount;
+        adjustBotsForPlayerCount(state.roomPlayerCount);
+        showRoomCode(msg.roomCode || state.roomCode);
         break;
 
       case 'playerLeft':
