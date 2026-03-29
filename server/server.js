@@ -51,15 +51,17 @@ let   serverTick = 0;
 // ─── Player factory ──────────────────────────────────────────────────────────
 function createPlayer(ws, name) {
   const angle = Math.random() * Math.PI * 2;
-  const r     = 10 + Math.random() * SPAWN_RADIUS;
+  const r     = Math.random() * 8;  // spawn within 8m of prison centre
+  const PRISON_X = -75;
+  const PRISON_Z =  75;
   return {
     id:     uuidv4().slice(0, 8),
     name:   name || "Player",
     ws,
     // position
-    x: MAP_CENTRE.x + Math.cos(angle) * r,
+    x: PRISON_X + Math.cos(angle) * r,
     y: PLAYER_HEIGHT / 2,
-    z: MAP_CENTRE.z + Math.sin(angle) * r,
+    z: PRISON_Z + Math.sin(angle) * r,
     vy: 0,        // vertical velocity
     // orientation
     yaw:   0,

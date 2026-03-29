@@ -4145,9 +4145,11 @@ function updateRemotePlayers(playerList) {
     seen.add(p.id);
 
     if (!state.remotePlayers[p.id]) {
-      // New player — create mesh
+      // New player — create mesh and snap immediately to real position
+      const newMesh = createRemotePlayerMesh(p.id);
+      newMesh.position.set(p.x, p.y, p.z);
       state.remotePlayers[p.id] = {
-        mesh: createRemotePlayerMesh(p.id),
+        mesh: newMesh,
         hp:   p.hp,
         dead: p.dead,
         targetX: p.x,
