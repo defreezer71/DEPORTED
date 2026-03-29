@@ -236,16 +236,16 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
   // Crate visuals — 3 instanced meshes: main body, wood slat H, wood slat V
   const crateBodyGeo = new THREE.BoxGeometry(1, 1, 1);
-  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x8a5e2a });
+  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0xa06828 });
   const crateInst    = new THREE.InstancedMesh(crateBodyGeo, crateBodyMat, rockPlacements.length);
   crateInst.castShadow = true;
 
-  const slatHGeo  = new THREE.BoxGeometry(1.01, 0.08, 0.12);
-  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x3e1f06 });
+  const slatHGeo  = new THREE.BoxGeometry(1.12, 0.11, 1.12);
+  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x1e0c02 });
   const slatHInst = new THREE.InstancedMesh(slatHGeo, slatMat, rockPlacements.length * 2);
   slatHInst.castShadow = false;
 
-  const slatVGeo  = new THREE.BoxGeometry(0.12, 0.08, 1.01);
+  const slatVGeo  = new THREE.BoxGeometry(1.12, 0.11, 1.12);
   const slatVInst = new THREE.InstancedMesh(slatVGeo, slatMat, rockPlacements.length * 2);
   slatVInst.castShadow = false;
 
@@ -264,7 +264,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     crateInst.setMatrixAt(i, dummy.matrix);
 
     // Horizontal slats (top + bottom band)
-    [-0.3, 0.3].forEach((yOff, si) => {
+    [-0.41, 0.41].forEach((yOff, si) => {
       dummy.position.set(x, h + sz * 0.5 + sz * yOff, z);
       dummy.scale.set(sz, sz, sz);
       dummy.rotation.set(0, yRot, 0);
@@ -273,7 +273,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     });
 
     // Vertical slats (front + back band)
-    [-0.3, 0.3].forEach((xOff, si) => {
+    [-0.41, 0.41].forEach((xOff, si) => {
       dummy.position.set(x, h + sz * 0.5 + sz * xOff, z);
       dummy.scale.set(sz, sz, sz);
       dummy.rotation.set(0, yRot, 0);
@@ -342,7 +342,7 @@ for (let i = 0; i < 25; i++) {
   const angle = seededRand() * Math.PI * 2;
   const r = 10 + seededRand() * (CONFIG.volcanoRadius - 14);
   const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
-  const h = getTerrainHeight(x, z);
+  const h = Math.min(getTerrainHeight(x,z), getTerrainHeight(x-0.8,z), getTerrainHeight(x+0.8,z), getTerrainHeight(x,z-0.8), getTerrainHeight(x,z+0.8));
   const sz = 1.2 + seededRand() * 1.4;
   const yRot = seededRand() * 6.28;
 
@@ -358,29 +358,20 @@ for (let i = 0; i < 25; i++) {
   // Crate body — tilted to slope
   const crate = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
-    new THREE.MeshLambertMaterial({ color: 0x8a5e2a })
+    new THREE.MeshLambertMaterial({ color: 0xa06828 })
   );
-  crate.position.set(x, h + sz * 0.3, z);
+  crate.position.set(x, h + sz * 0.5, z);
   crate.rotation.set(0, yRot, 0);
   crate.castShadow = true;
   scene.add(crate);
 
-  // Dark wood slats — horizontal band, same tilt
-  [-0.3, 0.3].forEach(yOff => {
+  // Dark wood slats — full-wrap bands near top and bottom edges
+  [-0.41, 0.41].forEach(yOff => {
     const slat = new THREE.Mesh(
-      new THREE.BoxGeometry(sz * 1.01, sz * 0.08, sz * 0.12),
-      new THREE.MeshLambertMaterial({ color: 0x3e1f06 })
+      new THREE.BoxGeometry(sz * 1.12, sz * 0.11, sz * 1.12),
+      new THREE.MeshLambertMaterial({ color: 0x1e0c02 })
     );
-    slat.position.set(x, h + sz * 0.3 + sz * yOff, z);
-    slat.rotation.set(0, yRot, 0);
-    scene.add(slat);
-  });
-  [-0.3, 0.3].forEach(xOff => {
-    const slat = new THREE.Mesh(
-      new THREE.BoxGeometry(sz * 0.12, sz * 0.08, sz * 1.01),
-      new THREE.MeshLambertMaterial({ color: 0x3e1f06 })
-    );
-    slat.position.set(x, h + sz * 0.3 + sz * xOff, z);
+    slat.position.set(x, h + sz * 0.5 + sz * yOff, z);
     slat.rotation.set(0, yRot, 0);
     scene.add(slat);
   });
@@ -390,7 +381,7 @@ for (let i = 0; i < 25; i++) {
     new THREE.BoxGeometry(sz, sz, sz),
     invisibleColliderMat
   );
-  crateHit.position.set(x, h + sz * 0.3, z);
+  crateHit.position.set(x, h + sz * 0.5, z);
   crateHit.rotation.set(0, yRot, 0);
   scene.add(crateHit);
   targets.push(crateHit);
