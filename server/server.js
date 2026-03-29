@@ -161,6 +161,12 @@ wss.on('connection', ws => {
     }
   });
 
+  if (msg.type === 'chat') {
+      const raw = (typeof msg.text === 'string') ? msg.text.trim().slice(0, 120) : '';
+      if (raw) broadcastToRoom(myRoom, { type: 'chat', id: myId, text: raw });
+      return;
+    }
+
   ws.on('close', () => { if (myId && myRoom) removePlayer(myRoom, myId); });
   ws.on('error', () => { if (myId && myRoom) removePlayer(myRoom, myId); });
 });

@@ -3349,6 +3349,89 @@ function drawMinimap() {
   mCtx.beginPath(); mCtx.moveTo(0, -5); mCtx.lineTo(-3, 3); mCtx.lineTo(3, 3); mCtx.closePath();
   mCtx.fillStyle = '#fff'; mCtx.fill(); mCtx.restore();
 }
+
+// ── CHAT ─────────────────────────────────────────────────────────────
+window._chatActive = false;
+
+var _chatColors = ['#7ecfff','#ffcc55','#88ff88','#ff9966','#cc88ff','#ff6688','#55ddcc','#ffdd88'];
+function _chatColor(id) {
+  var h = 0;
+  for (var i = 0; i < id.length; i++) h = id.charCodeAt(i) + ((h << 5) - h);
+  return _chatColors[Math.abs(h) % _chatColors.length];
+}
+
+function addChatMessage(senderId, text) {
+  var log = document.getElementById('chat-log');
+  if (!log) return;
+  var msg = document.createElement('div');
+  msg.className = 'chat-msg';
+  var name = document.createElement('span');
+  name.className = 'chat-name';
+  name.style.color = _chatColor(senderId);
+  name.textContent = senderId.slice(0, 6) + ': ';
+  msg.appendChild(name);
+  msg.appendChild(document.createTextNode(text));
+  log.appendChild(msg);
+  while (log.children.length > 8) log.removeChild(log.firstChild);
+  setTimeout(function() {
+    msg.classList.add('fading');
+    setTimeout(function() { if (msg.parentNode) msg.parentNode.removeChild(msg); }, 900);
+  }, 7000);
+}
+
+function sendChat(text) {
+  if (!text || !text.trim()) return;
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'chat', text: text.trim().slice(0, 120) }));
+  }
+}
+
+function setupChat() {
+  var input = document.getElementById('chat-input');
+  var hint  = document.getElementById('chat-hint');
+  if (!input) return;
+
+  function openChat() {
+    window._chatActive = true;
+    input.classList.add('active');
+    if (hint) hint.classList.add('active');
+    input.focus();
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+  function closeChat() {
+    window._chatActive = false;
+    input.classList.remove('active');
+    if (hint) hint.classList.remove('active');
+    input.blur();
+    input.value = '';
+  }
+
+  // Capture phase — runs before game keydown handlers
+  document.addEventListener('keydown', function(e) {
+    if (window._chatActive) {
+      if (e.code === 'Enter') {
+        sendChat(input.value);
+        closeChat();
+      } else if (e.code === 'Escape') {
+        closeChat();
+      } else {
+        // Let typing through but stop game from seeing it
+        e.stopPropagation();
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (e.code === 'KeyT') {
+      openChat();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+}
+// ── END CHAT ──────────────────────────────────────────────────────────
+
 // ═══════════════════════════════════════════════════════════
 // GAME LOOP
 // ═══════════════════════════════════════════════════════════
@@ -4443,6 +4526,9 @@ function connectToServer() {
         state.inLobby = false;
         hideLobbyScreen();
         renderer.domElement.requestPointerLock();
+        break;
+      case 'chat':
+        addChatMessage(msg.id || 'unknown', msg.text || '');
         break;
       case 'world':
         state.lastServerTick = msg.tick;

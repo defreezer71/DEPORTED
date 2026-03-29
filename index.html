@@ -378,6 +378,65 @@
 .lobby-status { color: #555; font-size: 11px; letter-spacing: 1px; min-height: 16px; }
 
 </style>
+
+/* ── CHAT ── */
+#chat-container {
+  position: fixed;
+  bottom: 80px;
+  left: 16px;
+  width: 320px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+#chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 200px;
+  overflow: hidden;
+}
+.chat-msg {
+  background: rgba(0,0,0,0.58);
+  color: #e8e8e8;
+  font-family: monospace;
+  font-size: 13px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  word-break: break-word;
+  opacity: 1;
+  transition: opacity 0.8s;
+  pointer-events: none;
+}
+.chat-msg.fading { opacity: 0; }
+.chat-msg .chat-name { font-weight: bold; }
+#chat-input-row { pointer-events: auto; }
+#chat-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0,0,0,0.78);
+  border: 1px solid rgba(255,255,255,0.35);
+  color: #fff;
+  font-family: monospace;
+  font-size: 13px;
+  padding: 5px 9px;
+  border-radius: 3px;
+  outline: none;
+  display: none;
+}
+#chat-input.active { display: block; }
+#chat-hint {
+  color: rgba(255,255,255,0.35);
+  font-family: monospace;
+  font-size: 11px;
+  margin-top: 2px;
+  display: none;
+}
+#chat-hint.active { display: block; }
+/* ── END CHAT ── */
+
 </head>
 <body>
 
@@ -495,6 +554,16 @@
     <button id="lobbyReadyBtn" onclick="window.toggleReady()">READY UP</button>
     <div class="lobby-status" id="lobbyStatus">Waiting for players...</div>
   </div>
+</div>
+
+
+<div id="chat-container">
+  <div id="chat-log"></div>
+  <div id="chat-input-row">
+    <input id="chat-input" type="text" maxlength="120"
+           autocomplete="off" spellcheck="false" placeholder="Type and press Enter..." />
+  </div>
+  <div id="chat-hint">T to chat &nbsp;·&nbsp; Enter to send &nbsp;·&nbsp; Esc to cancel</div>
 </div>
 
 </body>
