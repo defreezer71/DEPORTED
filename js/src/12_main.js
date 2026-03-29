@@ -867,7 +867,7 @@ function updateRemotePlayers(playerList) {
 
     const rp = state.remotePlayers[p.id];
     rp.targetX = p.x; rp.targetY = p.y; rp.targetZ = p.z;
-    rp.mesh.rotation.y = p.yaw;
+    if (p.yaw !== undefined) rp.mesh.rotation.y = p.yaw;
     rp.hp   = p.hp;
     rp.dead = p.dead;
     rp.mesh.visible = !p.dead;
