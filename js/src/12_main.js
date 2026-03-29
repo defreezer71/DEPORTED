@@ -303,7 +303,7 @@ function update() {
   // ── Game phase management ──
   if (state.phase === 'lobby') {
     if (!state.joinSent) sendJoin();
-    if (!state.inLobby) {
+    if (state.myId && !state.inLobby) {
       state.phase = 'countdown';
       state.countdownTime = 10;
     }
