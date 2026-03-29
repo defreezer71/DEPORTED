@@ -886,6 +886,7 @@ function showLobbyScreen(code) {
   const codeEl = document.getElementById('lobbyCode');
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
+  if (document.pointerLockElement) document.exitPointerLock();
 }
 
 function hideLobbyScreen() {
@@ -1021,6 +1022,7 @@ function connectToServer() {
       case 'startMatch':
         state.inLobby = false;
         hideLobbyScreen();
+        renderer.domElement.requestPointerLock();
         break;
       case 'world':
         state.lastServerTick = msg.tick;

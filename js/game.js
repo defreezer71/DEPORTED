@@ -2892,6 +2892,7 @@ renderer.domElement.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   state.locked = !!document.pointerLockElement;
+  if (state.inLobby) return; // lobby screen handles its own overlay state
   if (state.phase === 'lobby' && !state.locked) {
     overlay.classList.remove('hidden');
   } else if (state.locked) {
@@ -4227,6 +4228,7 @@ function showLobbyScreen(code) {
   const codeEl = document.getElementById('lobbyCode');
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
+  if (document.pointerLockElement) document.exitPointerLock();
 }
 
 function hideLobbyScreen() {
@@ -4362,6 +4364,7 @@ function connectToServer() {
       case 'startMatch':
         state.inLobby = false;
         hideLobbyScreen();
+        renderer.domElement.requestPointerLock();
         break;
       case 'world':
         state.lastServerTick = msg.tick;

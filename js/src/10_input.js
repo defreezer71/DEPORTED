@@ -78,6 +78,7 @@ renderer.domElement.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   state.locked = !!document.pointerLockElement;
+  if (state.inLobby) return; // lobby screen handles its own overlay state
   if (state.phase === 'lobby' && !state.locked) {
     overlay.classList.remove('hidden');
   } else if (state.locked) {
