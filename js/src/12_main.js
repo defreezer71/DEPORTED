@@ -775,23 +775,58 @@ document.addEventListener('click', () => {
 
 var WS_URL = 'wss://deported.onrender.com';
 
-// Simple capsule mesh to represent a remote player
+// Humanoid remote player model — group origin = camera eye height.
+// All parts offset downward so feet land at world ground level.
 function createRemotePlayerMesh(id) {
   const group = new THREE.Group();
 
-  // Body
-  const bodyGeo  = new THREE.CylinderGeometry(0.35, 0.35, 1.4, 8);
-  const bodyMat  = new THREE.MeshLambertMaterial({ color: 0xe05a2b });
-  const body     = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = 0.7;
-  group.add(body);
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x2255cc }); // blue uniform
+  const legMat  = new THREE.MeshLambertMaterial({ color: 0x1a2a44 }); // dark trousers
+  const skinMat = new THREE.MeshLambertMaterial({ color: 0xf0c080 }); // skin tone
+  const bootMat = new THREE.MeshLambertMaterial({ color: 0x111111 }); // black boots
 
-  // Head
-  const headGeo  = new THREE.SphereGeometry(0.3, 8, 8);
-  const headMat  = new THREE.MeshLambertMaterial({ color: 0xf0c080 });
-  const head     = new THREE.Mesh(headGeo, headMat);
-  head.position.y = 1.65;
+  // ── HEAD — userData.isHead = true so headshots register correctly ──
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), skinMat);
+  head.position.y = -0.10;
+  head.userData.isHead = true;
   group.add(head);
+
+  // ── TORSO ──
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.52, 0.22), bodyMat);
+  torso.position.y = -0.65;
+  group.add(torso);
+
+  // ── ARMS ──
+  const armGeo = new THREE.CylinderGeometry(0.065, 0.055, 0.48, 6);
+  const lArm = new THREE.Mesh(armGeo, bodyMat);
+  lArm.position.set(-0.28, -0.68, 0);
+  lArm.rotation.z = 0.15;
+  group.add(lArm);
+
+  const rArm = new THREE.Mesh(armGeo, bodyMat);
+  rArm.position.set(0.28, -0.68, 0);
+  rArm.rotation.z = -0.15;
+  group.add(rArm);
+
+  // ── LEGS ──
+  const legGeo = new THREE.CylinderGeometry(0.09, 0.08, 0.65, 6);
+  const lLeg = new THREE.Mesh(legGeo, legMat);
+  lLeg.position.set(-0.11, -1.15, 0);
+  group.add(lLeg);
+
+  const rLeg = new THREE.Mesh(legGeo, legMat);
+  rLeg.position.set(0.11, -1.15, 0);
+  group.add(rLeg);
+
+  // ── BOOTS ──
+  const bootGeo = new THREE.BoxGeometry(0.13, 0.12, 0.20);
+  const lBoot = new THREE.Mesh(bootGeo, bootMat);
+  lBoot.position.set(-0.11, -1.57, 0.03);
+  group.add(lBoot);
+
+  const rBoot = new THREE.Mesh(bootGeo, bootMat);
+  rBoot.position.set(0.11, -1.57, 0.03);
+  group.add(rBoot);
 
   group.userData.id = id;
   scene.add(group);
