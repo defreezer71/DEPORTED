@@ -382,59 +382,97 @@
 /* ── CHAT ── */
 #chat-container {
   position: fixed;
-  bottom: 80px;
+  bottom: 16px;
   left: 16px;
-  width: 320px;
+  width: 260px;
   z-index: 50;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  pointer-events: none;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  overflow: hidden;
+  pointer-events: auto;
+}
+#chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  background: rgba(0,0,0,0.4);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  cursor: default;
+  user-select: none;
+}
+#chat-header-label {
+  color: rgba(255,255,255,0.45);
+  font-family: monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#chat-minimize {
+  color: rgba(255,255,255,0.45);
+  font-family: monospace;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 0.15s;
+}
+#chat-minimize:hover { color: #fff; }
+#chat-body {
+  display: flex;
+  flex-direction: column;
 }
 #chat-log {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  max-height: 200px;
-  overflow: hidden;
+  gap: 1px;
+  max-height: 160px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 5px 6px 3px 6px;
+  scrollbar-width: none;
 }
+#chat-log::-webkit-scrollbar { display: none; }
 .chat-msg {
-  background: rgba(0,0,0,0.58);
-  color: #e8e8e8;
+  color: #ddd;
   font-family: monospace;
-  font-size: 13px;
-  padding: 3px 8px;
-  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.4;
   word-break: break-word;
   opacity: 1;
   transition: opacity 0.8s;
-  pointer-events: none;
 }
 .chat-msg.fading { opacity: 0; }
 .chat-msg .chat-name { font-weight: bold; }
-#chat-input-row { pointer-events: auto; }
+#chat-input-row {
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding: 4px 6px;
+  display: none;
+}
+#chat-input-row.active { display: block; }
 #chat-input {
   width: 100%;
   box-sizing: border-box;
-  background: rgba(0,0,0,0.78);
-  border: 1px solid rgba(255,255,255,0.35);
+  background: transparent;
+  border: none;
   color: #fff;
   font-family: monospace;
-  font-size: 13px;
-  padding: 5px 9px;
-  border-radius: 3px;
+  font-size: 12px;
   outline: none;
-  display: none;
 }
-#chat-input.active { display: block; }
 #chat-hint {
-  color: rgba(255,255,255,0.35);
+  color: rgba(255,255,255,0.28);
   font-family: monospace;
-  font-size: 11px;
-  margin-top: 2px;
+  font-size: 10px;
+  padding: 0 6px 4px 6px;
   display: none;
 }
 #chat-hint.active { display: block; }
+#chat-container.minimized #chat-body { display: none; }
+#chat-container.minimized { border-radius: 6px; }
 /* ── END CHAT ── */
 
 </head>
@@ -558,12 +596,18 @@
 
 
 <div id="chat-container">
-  <div id="chat-log"></div>
-  <div id="chat-input-row">
-    <input id="chat-input" type="text" maxlength="120"
-           autocomplete="off" spellcheck="false" placeholder="Type and press Enter..." />
+  <div id="chat-header">
+    <span id="chat-header-label">Chat</span>
+    <span id="chat-minimize" title="Minimize">&#8722;</span>
   </div>
-  <div id="chat-hint">T to chat &nbsp;·&nbsp; Enter to send &nbsp;·&nbsp; Esc to cancel</div>
+  <div id="chat-body">
+    <div id="chat-log"></div>
+    <div id="chat-input-row">
+      <input id="chat-input" type="text" maxlength="120"
+             autocomplete="off" spellcheck="false" placeholder="Press Enter to send..." />
+    </div>
+    <div id="chat-hint">T&nbsp;to&nbsp;chat &nbsp;·&nbsp; Enter&nbsp;to&nbsp;send &nbsp;·&nbsp; Esc&nbsp;to&nbsp;cancel</div>
+  </div>
 </div>
 
 </body>

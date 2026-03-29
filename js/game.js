@@ -3387,20 +3387,35 @@ function sendChat(text) {
 }
 
 function setupChat() {
-  var input = document.getElementById('chat-input');
-  var hint  = document.getElementById('chat-hint');
+  var input    = document.getElementById('chat-input');
+  var hint     = document.getElementById('chat-hint');
+  var inputRow = document.getElementById('chat-input-row');
+  var container= document.getElementById('chat-container');
+  var minBtn   = document.getElementById('chat-minimize');
   if (!input) return;
 
+  // Minimize / restore
+  var minimized = false;
+  if (minBtn) {
+    minBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      minimized = !minimized;
+      container.classList.toggle('minimized', minimized);
+      minBtn.innerHTML = minimized ? '&#43;' : '&#8722;';
+    });
+  }
+
   function openChat() {
+    if (minimized) { minimized = false; container.classList.remove('minimized'); if(minBtn) minBtn.innerHTML='&#8722;'; }
     window._chatActive = true;
-    input.classList.add('active');
+    if (inputRow) inputRow.classList.add('active');
     if (hint) hint.classList.add('active');
     input.focus();
     if (document.pointerLockElement) document.exitPointerLock();
   }
   function closeChat() {
     window._chatActive = false;
-    input.classList.remove('active');
+    if (inputRow) inputRow.classList.remove('active');
     if (hint) hint.classList.remove('active');
     input.blur();
     input.value = '';
@@ -3415,7 +3430,6 @@ function setupChat() {
       } else if (e.code === 'Escape') {
         closeChat();
       } else {
-        // Let typing through but stop game from seeing it
         e.stopPropagation();
         return;
       }

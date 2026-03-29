@@ -159,13 +159,12 @@ wss.on('connection', ws => {
       room.events.push({ type:'hit', target:msg.targetId, shooter:myId, damage:dmg,
         hp:t.hp, armor:t.armor, dead:t.dead, headshot:!!msg.headshot });
     }
+      if (msg.type === 'chat') {
+        const raw = (typeof msg.text === 'string') ? msg.text.trim().slice(0, 120) : '';
+        if (raw) broadcastToRoom(myRoom, { type: 'chat', id: myId, text: raw });
+        return;
+      }
   });
-
-  if (msg.type === 'chat') {
-      const raw = (typeof msg.text === 'string') ? msg.text.trim().slice(0, 120) : '';
-      if (raw) broadcastToRoom(myRoom, { type: 'chat', id: myId, text: raw });
-      return;
-    }
 
   ws.on('close', () => { if (myId && myRoom) removePlayer(myRoom, myId); });
   ws.on('error', () => { if (myId && myRoom) removePlayer(myRoom, myId); });
