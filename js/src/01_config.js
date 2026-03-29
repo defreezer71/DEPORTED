@@ -66,6 +66,7 @@ const state = {
   // Multiplayer
   ws: null,
   myId: null,
+  inLobby: false,
   inputSeq: 0,
   remotePlayers: {},
   lastServerTick: 0,

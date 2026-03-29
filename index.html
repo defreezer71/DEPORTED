@@ -331,6 +331,52 @@
     text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
     line-height: 1.6;
   }
+
+/* ── LOBBY SCREEN ─────────────────────────────────────────── */
+#lobbyScreen {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.93);
+  display: none; align-items: center; justify-content: center;
+  z-index: 200; font-family: 'Courier New', monospace;
+}
+#lobbyScreen.visible { display: flex; }
+.lobby-box {
+  background: #0d0d0d; border: 2px solid #c00;
+  border-radius: 3px; padding: 40px 52px; min-width: 400px;
+  max-width: 500px; text-align: center; color: #ddd;
+}
+.lobby-title { color: #cc0000; font-size: 30px; font-weight: bold;
+  letter-spacing: 5px; margin: 0 0 4px; }
+.lobby-subtitle { color: #555; font-size: 10px; letter-spacing: 3px;
+  margin-bottom: 30px; }
+.lobby-code-label { color: #555; font-size: 10px; letter-spacing: 3px;
+  text-transform: uppercase; }
+.lobby-code { color: #fff; font-size: 44px; font-weight: bold;
+  letter-spacing: 10px; margin: 4px 0 6px; text-shadow: 0 0 12px #c00; }
+.lobby-code-hint { color: #444; font-size: 11px; margin-bottom: 24px; }
+.lobby-players { text-align: left; margin-bottom: 14px; min-height: 60px; }
+.lobby-player-row { display: flex; align-items: center; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid #1a1a1a; }
+.lobby-player-row:last-child { border-bottom: none; }
+.ready-dot { width: 9px; height: 9px; border-radius: 50%;
+  background: #333; flex-shrink: 0; transition: background 0.2s; }
+.ready-dot.is-ready { background: #00cc00; box-shadow: 0 0 5px #0c0; }
+.lobby-player-name { font-size: 13px; color: #bbb; flex: 1; }
+.lobby-player-name.is-me { color: #fff; font-weight: bold; }
+.lobby-player-status { font-size: 11px; color: #444; }
+.lobby-player-status.is-ready { color: #090; }
+.lobby-bot-line { color: #444; font-size: 12px; margin-bottom: 22px; }
+.lobby-bot-line span { color: #777; font-weight: bold; }
+#lobbyReadyBtn {
+  background: #aa0000; color: #fff; border: none; padding: 15px 0;
+  font-size: 14px; font-weight: bold; letter-spacing: 4px; cursor: pointer;
+  font-family: 'Courier New', monospace; text-transform: uppercase;
+  width: 100%; margin-bottom: 14px; transition: background 0.15s;
+}
+#lobbyReadyBtn:hover { background: #dd0000; }
+#lobbyReadyBtn.is-ready { background: #005500; letter-spacing: 3px; }
+#lobbyReadyBtn.is-ready:hover { background: #007700; }
+.lobby-status { color: #555; font-size: 11px; letter-spacing: 1px; min-height: 16px; }
+
 </style>
 </head>
 <body>
@@ -434,6 +480,22 @@
 { "imports": { "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js", "three/addons/": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/" } }
 </script>
 <script type="module" src="js/game.js"></script>
+
+
+<!-- LOBBY SCREEN -->
+<div id="lobbyScreen">
+  <div class="lobby-box">
+    <div class="lobby-title">DEPORTED</div>
+    <div class="lobby-subtitle">BATTLE ROYALE — CODED ROOM</div>
+    <div class="lobby-code-label">ROOM CODE</div>
+    <div class="lobby-code" id="lobbyCode">----</div>
+    <div class="lobby-code-hint">Share this code with friends</div>
+    <div class="lobby-players" id="lobbyPlayerList"></div>
+    <div class="lobby-bot-line">+ <span id="lobbyBotCount">20</span> bots to fill remaining slots</div>
+    <button id="lobbyReadyBtn" onclick="window.toggleReady()">READY UP</button>
+    <div class="lobby-status" id="lobbyStatus">Waiting for players...</div>
+  </div>
+</div>
 
 </body>
 </html>

@@ -66,6 +66,7 @@ const state = {
   // Multiplayer
   ws: null,
   myId: null,
+  inLobby: false,
   inputSeq: 0,
   remotePlayers: {},
   lastServerTick: 0,
@@ -3642,9 +3643,11 @@ function update() {
 
   // ── Game phase management ──
   if (state.phase === 'lobby') {
-    state.phase = 'countdown';
-    state.countdownTime = 10;
-    sendJoin();
+    if (!state.joinSent) sendJoin();
+    if (!state.inLobby) {
+      state.phase = 'countdown';
+      state.countdownTime = 10;
+    }
   }
 
   if (state.phase === 'countdown') {
@@ -4217,6 +4220,65 @@ function updateRemotePlayers(playerList) {
   }
 }
 
+
+// ── LOBBY SCREEN HELPERS ────────────────────────────────────
+function showLobbyScreen(code) {
+  const el = document.getElementById('lobbyScreen');
+  const codeEl = document.getElementById('lobbyCode');
+  if (el) el.classList.add('visible');
+  if (codeEl) codeEl.textContent = code || '----';
+}
+
+function hideLobbyScreen() {
+  const el = document.getElementById('lobbyScreen');
+  if (el) el.classList.remove('visible');
+}
+
+function updateLobbyUI(msg) {
+  const listEl   = document.getElementById('lobbyPlayerList');
+  const botEl    = document.getElementById('lobbyBotCount');
+  const statusEl = document.getElementById('lobbyStatus');
+  const btn      = document.getElementById('lobbyReadyBtn');
+  if (botEl) botEl.textContent = msg.botCount;
+  if (listEl) {
+    listEl.innerHTML = msg.players.map(p => {
+      const isMe = (p.id === state.myId);
+      const rc   = p.ready ? 'is-ready' : '';
+      return '<div class="lobby-player-row">' +
+        '<div class="ready-dot ' + rc + '"></div>' +
+        '<div class="lobby-player-name' + (isMe ? ' is-me' : '') + '">' +
+          (p.name || p.id) + (isMe ? ' (you)' : '') +
+        '</div>' +
+        '<div class="lobby-player-status ' + rc + '">' +
+          (p.ready ? 'READY' : 'waiting') +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+  if (statusEl) {
+    const readyCount = msg.players.filter(p => p.ready).length;
+    const total = msg.players.length;
+    const need  = Math.ceil(total / 2);
+    statusEl.textContent = readyCount + ' / ' + total + ' ready  —  need ' + need + ' to start';
+  }
+  if (btn) {
+    const me = msg.players.find(p => p.id === state.myId);
+    if (me && me.ready) {
+      btn.textContent = 'UNREADY';
+      btn.classList.add('is-ready');
+    } else {
+      btn.textContent = 'READY UP';
+      btn.classList.remove('is-ready');
+    }
+  }
+}
+
+window.toggleReady = function() {
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'ready' }));
+  }
+};
+
 function sendJoin() {
   if (state.joinSent) return;
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
@@ -4225,7 +4287,7 @@ function sendJoin() {
   state.ws.send(JSON.stringify({
     type: 'join',
     name: 'Player' + Math.floor(Math.random() * 1000),
-    room: requestedRoom || undefined,
+    roomCode: requestedRoom || undefined,
   }));
   state.joinSent = true;
   console.log('Join sent — room:', requestedRoom || '(auto)');
@@ -4283,6 +4345,24 @@ function connectToServer() {
         showRoomCode(state.roomCode);
         break;
 
+      case 'joined':
+        state.myId = msg.id;
+        state.roomCode = msg.roomCode;
+        showRoomCode(msg.roomCode);
+        if (msg.phase === 'waiting') {
+          state.inLobby = true;
+          showLobbyScreen(msg.roomCode);
+        } else {
+          state.inLobby = false;
+        }
+        break;
+      case 'lobbyState':
+        updateLobbyUI(msg);
+        break;
+      case 'startMatch':
+        state.inLobby = false;
+        hideLobbyScreen();
+        break;
       case 'world':
         state.lastServerTick = msg.tick;
         state.lastWorldAt = Date.now();
