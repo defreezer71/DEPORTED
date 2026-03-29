@@ -236,12 +236,12 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
   // Crate visuals — 3 instanced meshes: main body, wood slat H, wood slat V
   const crateBodyGeo = new THREE.BoxGeometry(1, 1, 1);
-  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x3a4a14 });
+  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x8a5e2a });
   const crateInst    = new THREE.InstancedMesh(crateBodyGeo, crateBodyMat, rockPlacements.length);
   crateInst.castShadow = true;
 
   const slatHGeo  = new THREE.BoxGeometry(1.01, 0.08, 0.12);
-  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x1a2208 });
+  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x3e1f06 });
   const slatHInst = new THREE.InstancedMesh(slatHGeo, slatMat, rockPlacements.length * 2);
   slatHInst.castShadow = false;
 
@@ -358,7 +358,7 @@ for (let i = 0; i < 25; i++) {
   // Crate body — tilted to slope
   const crate = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
-    new THREE.MeshLambertMaterial({ color: 0x3a4a14 })
+    new THREE.MeshLambertMaterial({ color: 0x8a5e2a })
   );
   crate.position.set(x, h + sz * 0.3, z);
   crate.rotation.set(0, yRot, 0);
@@ -369,7 +369,7 @@ for (let i = 0; i < 25; i++) {
   [-0.3, 0.3].forEach(yOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 1.01, sz * 0.08, sz * 0.12),
-      new THREE.MeshLambertMaterial({ color: 0x1a2208 })
+      new THREE.MeshLambertMaterial({ color: 0x3e1f06 })
     );
     slat.position.set(x, h + sz * 0.3 + sz * yOff, z);
     slat.rotation.set(0, yRot, 0);
@@ -378,7 +378,7 @@ for (let i = 0; i < 25; i++) {
   [-0.3, 0.3].forEach(xOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 0.12, sz * 0.08, sz * 1.01),
-      new THREE.MeshLambertMaterial({ color: 0x1a2208 })
+      new THREE.MeshLambertMaterial({ color: 0x3e1f06 })
     );
     slat.position.set(x, h + sz * 0.3 + sz * xOff, z);
     slat.rotation.set(0, yRot, 0);
