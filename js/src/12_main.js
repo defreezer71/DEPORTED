@@ -783,16 +783,41 @@ var WS_URL = 'wss://deported.onrender.com';
 function createRemotePlayerMesh(id) {
   const group = new THREE.Group();
 
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x2255cc }); // blue uniform
-  const legMat  = new THREE.MeshLambertMaterial({ color: 0x1a2a44 }); // dark trousers
-  const skinMat = new THREE.MeshLambertMaterial({ color: 0xf0c080 }); // skin tone
-  const bootMat = new THREE.MeshLambertMaterial({ color: 0x111111 }); // black boots
+  // Per-player hue from ID so each player has a distinct color
+  const hue     = (parseInt(id.slice(-4), 16) || 0) % 360;
+  const bodyMat   = new THREE.MeshLambertMaterial({ color: new THREE.Color('hsl(' + hue + ',60%,40%)') });
+  const legMat    = new THREE.MeshLambertMaterial({ color: 0x1a2a44 });
+  const skinMat   = new THREE.MeshLambertMaterial({ color: 0xf0c080 });
+  const bootMat   = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  const helmetMat = new THREE.MeshLambertMaterial({ color: new THREE.Color('hsl(' + hue + ',40%,25%)') });
+  const gunMat    = new THREE.MeshLambertMaterial({ color: 0x222222 });
+  const stockMat  = new THREE.MeshLambertMaterial({ color: 0x3a2a1a });
+  // colorWrite:false = invisible to camera but still raycasted (safe vs visible:false)
+  const hitboxMat = new THREE.MeshBasicMaterial({ colorWrite: false });
 
-  // ── HEAD — userData.isHead = true so headshots register correctly ──
+  // ── INVISIBLE HEAD HITBOX — tagged isHead, slightly oversized for reliable registration ──
+  const hitbox = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 4), hitboxMat);
+  hitbox.position.y = -0.10;
+  hitbox.userData.isHead = true;
+  group.add(hitbox);
+
+  // ── HEAD (visual only — hitbox above handles all raycasting) ──
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), skinMat);
   head.position.y = -0.10;
-  head.userData.isHead = true;
   group.add(head);
+
+  // ── TACTICAL HELMET ──
+  const helmetTop  = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.19, 0.12, 8), helmetMat);
+  helmetTop.position.y = 0.05;
+  group.add(helmetTop);
+  const helmetBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.03, 8), helmetMat);
+  helmetBrim.position.y = -0.01;
+  group.add(helmetBrim);
+
+  // ── NECK ──
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 6), skinMat);
+  neck.position.y = -0.33;
+  group.add(neck);
 
   // ── TORSO ──
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.52, 0.22), bodyMat);
@@ -805,18 +830,24 @@ function createRemotePlayerMesh(id) {
   lArm.position.set(-0.28, -0.68, 0);
   lArm.rotation.z = 0.15;
   group.add(lArm);
-
   const rArm = new THREE.Mesh(armGeo, bodyMat);
   rArm.position.set(0.28, -0.68, 0);
   rArm.rotation.z = -0.15;
   group.add(rArm);
+
+  // ── WEAPON SILHOUETTE on right side (M4 proportions) ──
+  const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.52), gunMat);
+  gunBody.position.set(0.36, -0.72, 0.17);
+  group.add(gunBody);
+  const gunStock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.13, 0.17), stockMat);
+  gunStock.position.set(0.36, -0.76, -0.15);
+  group.add(gunStock);
 
   // ── LEGS ──
   const legGeo = new THREE.CylinderGeometry(0.09, 0.08, 0.65, 6);
   const lLeg = new THREE.Mesh(legGeo, legMat);
   lLeg.position.set(-0.11, -1.15, 0);
   group.add(lLeg);
-
   const rLeg = new THREE.Mesh(legGeo, legMat);
   rLeg.position.set(0.11, -1.15, 0);
   group.add(rLeg);
@@ -826,7 +857,6 @@ function createRemotePlayerMesh(id) {
   const lBoot = new THREE.Mesh(bootGeo, bootMat);
   lBoot.position.set(-0.11, -1.57, 0.03);
   group.add(lBoot);
-
   const rBoot = new THREE.Mesh(bootGeo, bootMat);
   rBoot.position.set(0.11, -1.57, 0.03);
   group.add(rBoot);
@@ -835,7 +865,6 @@ function createRemotePlayerMesh(id) {
   scene.add(group);
   return group;
 }
-
 function removeRemotePlayer(id) {
   const rp = state.remotePlayers[id];
   if (!rp) return;
