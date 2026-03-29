@@ -33,27 +33,27 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   const treeCount = treePlacements.length;
 
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.62, 1, 8);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4a2e12 });
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5c3310 });
   const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
   trunkInst.castShadow = true;
 
   const flareGeo = new THREE.CylinderGeometry(0.55, 0.90, 1, 8);
-  const flareMat = new THREE.MeshLambertMaterial({ color: 0x2a1808 });
+  const flareMat = new THREE.MeshLambertMaterial({ color: 0x2e1a06 });
   const flareInst = new THREE.InstancedMesh(flareGeo, flareMat, treeCount);
   flareInst.castShadow = false;
 
   const canopyGeo = new THREE.SphereGeometry(1, 10, 8);
-  const canopyMat = new THREE.MeshLambertMaterial({ color: 0x1a5210 });
+  const canopyMat = new THREE.MeshLambertMaterial({ color: 0x0f3a08 });
   const canopyInst = new THREE.InstancedMesh(canopyGeo, canopyMat, treeCount);
   canopyInst.castShadow = true;
 
   const canopy2Geo = new THREE.SphereGeometry(1, 9, 7);
-  const canopy2Mat = new THREE.MeshLambertMaterial({ color: 0x2d7318 });
+  const canopy2Mat = new THREE.MeshLambertMaterial({ color: 0x1e6010 });
   const canopy2Inst = new THREE.InstancedMesh(canopy2Geo, canopy2Mat, treeCount);
   canopy2Inst.castShadow = false;
 
   const canopy3Geo = new THREE.SphereGeometry(1, 8, 6);
-  const canopy3Mat = new THREE.MeshLambertMaterial({ color: 0x4a9422 });
+  const canopy3Mat = new THREE.MeshLambertMaterial({ color: 0x5cb82a });
   const canopy3Inst = new THREE.InstancedMesh(canopy3Geo, canopy3Mat, treeCount);
   canopy3Inst.castShadow = false;
 
@@ -156,15 +156,15 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   // bush2Inst = arborvitae base trunk  (even indices)
   // bush3Inst = decorative small bush  (odd indices, no collider)
   const bushGeo  = new THREE.ConeGeometry(0.5, 1, 6);
-  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x1c5c0e });
+  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x0e3808 });
   const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushPlacements.length);
   bushInst.castShadow = true;
   const bush2Geo  = new THREE.CylinderGeometry(0.25, 0.38, 0.5, 6);
-  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x1c2a12 });
+  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x0a1806 });
   const bush2Inst = new THREE.InstancedMesh(bush2Geo, bush2Mat, bushPlacements.length);
   bush2Inst.castShadow = false;
   const bush3Geo  = new THREE.SphereGeometry(1, 6, 4);
-  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x387520 });
+  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x4aa020 });
   const bush3Inst = new THREE.InstancedMesh(bush3Geo, bush3Mat, bushPlacements.length);
   bush3Inst.castShadow = false;
   const dummy = new THREE.Object3D();
@@ -236,12 +236,12 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
 
   // Crate visuals — 3 instanced meshes: main body, wood slat H, wood slat V
   const crateBodyGeo = new THREE.BoxGeometry(1, 1, 1);
-  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x4a5820 });
+  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0x3a4a14 });
   const crateInst    = new THREE.InstancedMesh(crateBodyGeo, crateBodyMat, rockPlacements.length);
   crateInst.castShadow = true;
 
   const slatHGeo  = new THREE.BoxGeometry(1.01, 0.08, 0.12);
-  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x2e3a12 });
+  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x1a2208 });
   const slatHInst = new THREE.InstancedMesh(slatHGeo, slatMat, rockPlacements.length * 2);
   slatHInst.castShadow = false;
 
@@ -358,7 +358,7 @@ for (let i = 0; i < 25; i++) {
   // Crate body — tilted to slope
   const crate = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
-    new THREE.MeshLambertMaterial({ color: 0x4a5820 })
+    new THREE.MeshLambertMaterial({ color: 0x3a4a14 })
   );
   crate.position.set(x, h + sz * 0.3, z);
   crate.rotation.set(0, yRot, 0);
@@ -369,7 +369,7 @@ for (let i = 0; i < 25; i++) {
   [-0.3, 0.3].forEach(yOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 1.01, sz * 0.08, sz * 0.12),
-      new THREE.MeshLambertMaterial({ color: 0x2e3a12 })
+      new THREE.MeshLambertMaterial({ color: 0x1a2208 })
     );
     slat.position.set(x, h + sz * 0.3 + sz * yOff, z);
     slat.rotation.set(0, yRot, 0);
@@ -378,7 +378,7 @@ for (let i = 0; i < 25; i++) {
   [-0.3, 0.3].forEach(xOff => {
     const slat = new THREE.Mesh(
       new THREE.BoxGeometry(sz * 0.12, sz * 0.08, sz * 1.01),
-      new THREE.MeshLambertMaterial({ color: 0x2e3a12 })
+      new THREE.MeshLambertMaterial({ color: 0x1a2208 })
     );
     slat.position.set(x, h + sz * 0.3 + sz * xOff, z);
     slat.rotation.set(0, yRot, 0);
