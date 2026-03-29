@@ -128,7 +128,7 @@ wss.on('connection', ws => {
     const player = room.players[myId];
     player.lastSeen = Date.now();
 
-    if (msg.type === 'move') {
+    if (msg.type === 'move' || msg.type === 'input') {
       if (room.phase === 'waiting') return;
       const dx = msg.x - player.x, dz = msg.z - player.z;
       if (Math.sqrt(dx*dx+dz*dz) > 3.5) { console.log('[cheat?]', myId, 'teleport'); return; }
