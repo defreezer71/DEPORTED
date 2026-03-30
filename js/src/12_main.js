@@ -1067,6 +1067,8 @@ function showLobbyScreen(code) {
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
   if (document.pointerLockElement) document.exitPointerLock();
+  const chat = document.getElementById('chat-container');
+  if (chat) chat.classList.add('chat-visible');
 }
 
 function hideLobbyScreen() {
@@ -1194,6 +1196,8 @@ function connectToServer() {
           showLobbyScreen(msg.roomCode);
         } else {
           state.inLobby = false;
+          const chat = document.getElementById('chat-container');
+          if (chat) chat.classList.add('chat-visible');
         }
         break;
       case 'lobbyState':
@@ -1293,3 +1297,5 @@ setInterval(() => {
     state.ws.send(JSON.stringify({ type: "input", seq: state.inputSeq, yaw: state.yaw || 0, pitch: state.pitch || 0, keys: { w:0,s:0,a:0,d:0,shift:0,jump:0 }, shooting: false }));
   }
 }, 5000);
+
+window.addEventListener('DOMContentLoaded', function() { setupChat(); });
