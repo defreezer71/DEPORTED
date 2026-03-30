@@ -386,7 +386,7 @@
   left: 16px;
   width: 340px;
   z-index: 120;
-  display: none;
+  display: flex;
   flex-direction: column;
   background: rgba(0,0,0,0.82);
   border: 1px solid rgba(255,255,255,0.18);
@@ -452,7 +452,7 @@
 #chat-input-row {
   border-top: 1px solid rgba(255,255,255,0.12);
   padding: 4px 6px;
-  display: none;
+  display: flex;
   align-items: center;
   gap: 4px;
 }
@@ -603,14 +603,14 @@
 </div>
 
 
-<div id="chat-container" style="z-index:120;position:fixed;display:none;">
+<div id="chat-container">
   <div id="chat-header">
     <span id="chat-header-label">CHATBOX</span>
     <span id="chat-minimize" title="Minimize">&#8722;</span>
   </div>
   <div id="chat-body">
     <div id="chat-log"></div>
-    <div id="chat-input-row" style="display:none;">
+    <div id="chat-input-row">
       <input id="chat-input" type="text" maxlength="120" placeholder="Type a message..." autocomplete="off" spellcheck="false" /><button id="chat-send">Send</button>
     </div>
   </div>

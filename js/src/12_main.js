@@ -43,14 +43,16 @@ function sendChat(text) {
 }
 
 function setupChat() {
-  var input    = document.getElementById('chat-input');
-  var hint     = document.getElementById('chat-hint');
-  var inputRow = document.getElementById('chat-input-row');
-  var container= document.getElementById('chat-container');
-  var minBtn   = document.getElementById('chat-minimize');
-  var sendBtn  = document.getElementById('chat-send');
+  var input     = document.getElementById('chat-input');
+  var inputRow  = document.getElementById('chat-input-row');
+  var container = document.getElementById('chat-container');
+  var minBtn    = document.getElementById('chat-minimize');
+  var sendBtn   = document.getElementById('chat-send');
   if (!input) return;
-  if (sendBtn) sendBtn.addEventListener('click', function() { sendChat(input.value); input.value = ''; input.focus(); });
+
+  // Always show
+  if (container) container.style.display = 'flex';
+  if (inputRow)  inputRow.style.display  = 'flex';
 
   // Minimize / restore
   var minimized = false;
@@ -63,58 +65,46 @@ function setupChat() {
     });
   }
 
-  function openChat() {
-    if (minimized) { minimized = false; container.classList.remove('minimized'); if(minBtn) minBtn.innerHTML='&#8722;'; }
+  // Click input -> exit pointer lock so player can type
+  input.addEventListener('mousedown', function(e) {
+    e.stopPropagation();
     window._chatActive = true;
-    if (inputRow) inputRow.classList.add('active');
-    if (hint) hint.classList.add('active');
-    input.focus();
     if (document.pointerLockElement) document.exitPointerLock();
-  }
-  function closeChat() {
-    window._chatActive = false;
-    if (inputRow) inputRow.classList.remove('active');
-    if (hint) hint.classList.remove('active');
-    input.blur();
-    input.value = '';
-  }
+  });
 
-  // Enter/Esc directly on the input — catches all cases
+  // Enter sends, Escape clears, all other keys blocked from game
   input.addEventListener('keydown', function(e) {
     if (e.code === 'Enter') {
       sendChat(input.value);
-      closeChat();
+      input.value = '';
+      input.blur();
+      window._chatActive = false;
       e.preventDefault();
       e.stopPropagation();
     } else if (e.code === 'Escape') {
-      closeChat();
+      input.value = '';
+      input.blur();
+      window._chatActive = false;
       e.preventDefault();
       e.stopPropagation();
-    }
-  });
-
-  // Capture phase — runs before game keydown handlers
-  document.addEventListener('keydown', function(e) {
-    if (window._chatActive) {
-      if (e.code === 'Enter') {
-        sendChat(input.value);
-        closeChat();
-      } else if (e.code === 'Escape') {
-        closeChat();
-      } else {
-        e.stopPropagation();
-        return;
-      }
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
-    if (e.code === 'KeyT') {
-      openChat();
-      e.preventDefault();
+    } else {
       e.stopPropagation();
     }
   }, true);
+
+  // Send button
+  if (sendBtn) {
+    sendBtn.addEventListener('click', function() {
+      sendChat(input.value);
+      input.value = '';
+      input.blur();
+      window._chatActive = false;
+    });
+  }
+
+  // Track focus
+  input.addEventListener('focus', function() { window._chatActive = true; });
+  input.addEventListener('blur',  function() { window._chatActive = false; });
 }
 // ── END CHAT ──────────────────────────────────────────────────────────
 
