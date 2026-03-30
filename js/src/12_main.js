@@ -25,7 +25,10 @@ function addChatMessage(senderId, text) {
   name.textContent = senderId.slice(0, 12) + ': ';
   msg.appendChild(tsSpan);
   msg.appendChild(name);
-  msg.appendChild(document.createTextNode(text));
+  var textSpan = document.createElement('span');
+  textSpan.style.color = '#cccccc';
+  textSpan.textContent = text;
+  msg.appendChild(textSpan);
   log.appendChild(msg);
   log.scrollTop = log.scrollHeight;
   while (log.children.length > 20) log.removeChild(log.firstChild);
