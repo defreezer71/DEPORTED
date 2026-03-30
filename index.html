@@ -381,19 +381,19 @@
 
 /* ── CHAT ── */
 #chat-container {
-  position: fixed;
-  bottom: 16px;
-  left: 16px;
-  width: 340px;
-  z-index: 120;
+  position: fixed !important;
+  bottom: 16px !important;
+  left: 16px !important;
+  width: 340px !important;
+  z-index: 9999 !important;
   display: flex !important;
-  flex-direction: column;
-  background: rgba(0,0,0,0.82);
-  border: 1px solid rgba(255,255,255,0.18);
-  border-radius: 4px;
-  overflow: hidden;
-  pointer-events: auto;
-  font-family: 'Courier New', monospace;
+  flex-direction: column !important;
+  background: rgba(0,0,0,0.82) !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+  border-radius: 4px !important;
+  overflow: hidden !important;
+  pointer-events: auto !important;
+  font-family: 'Courier New', monospace !important;
 }
 #chat-container.chat-visible { display: flex; }
 #chat-header {
@@ -603,14 +603,14 @@
 </div>
 
 
-<div id="chat-container">
+<div id="chat-container" style="position:fixed !important;bottom:16px !important;left:16px !important;width:340px !important;z-index:9999 !important;display:flex !important;flex-direction:column !important;background:rgba(0,0,0,0.82) !important;border:1px solid rgba(255,255,255,0.18) !important;border-radius:4px !important;overflow:hidden !important;pointer-events:auto !important;font-family:Courier New,monospace !important;">
   <div id="chat-header">
     <span id="chat-header-label">CHATBOX</span>
     <span id="chat-minimize" title="Minimize">&#8722;</span>
   </div>
   <div id="chat-body">
     <div id="chat-log"></div>
-    <div id="chat-input-row">
+    <div id="chat-input-row" style="display:flex !important;border-top:1px solid rgba(255,255,255,0.12);padding:4px 6px;align-items:center;gap:4px;">
       <input id="chat-input" type="text" maxlength="120" placeholder="Type a message..." autocomplete="off" spellcheck="false" /><button id="chat-send">Send</button>
     </div>
   </div>
