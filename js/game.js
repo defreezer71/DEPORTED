@@ -3382,11 +3382,8 @@ function addChatMessage(senderId, text) {
   msg.appendChild(textSpan);
   log.appendChild(msg);
   log.scrollTop = log.scrollHeight;
-  while (log.children.length > 20) log.removeChild(log.firstChild);
-  setTimeout(function() {
-    msg.classList.add('fading');
-    setTimeout(function() { if (msg.parentNode) msg.parentNode.removeChild(msg); }, 900);
-  }, 7000);
+  while (log.children.length > 8) log.removeChild(log.firstChild);
+
 }
 
 function sendChat(text) {
