@@ -161,7 +161,12 @@ wss.on('connection', ws => {
     }
       if (msg.type === 'chat') {
         const raw = (typeof msg.text === 'string') ? msg.text.trim().slice(0, 120) : '';
-        if (raw) broadcastToRoom(myRoom, { type: 'chat', id: myId, text: raw });
+        if (raw) {
+          const str = JSON.stringify({ type: 'chat', id: myId, text: raw });
+          for (const p of Object.values(room.players)) {
+            if (p.id !== myId && p.ws.readyState === 1) p.ws.send(str);
+          }
+        }
         return;
       }
   });

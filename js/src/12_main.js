@@ -21,7 +21,7 @@ function addChatMessage(senderId, text) {
   msg.appendChild(name);
   msg.appendChild(document.createTextNode(text));
   log.appendChild(msg);
-  while (log.children.length > 8) log.removeChild(log.firstChild);
+  while (log.children.length > 5) log.removeChild(log.firstChild);
   setTimeout(function() {
     msg.classList.add('fading');
     setTimeout(function() { if (msg.parentNode) msg.parentNode.removeChild(msg); }, 900);
@@ -69,6 +69,20 @@ function setupChat() {
     input.blur();
     input.value = '';
   }
+
+  // Enter/Esc directly on the input — catches all cases
+  input.addEventListener('keydown', function(e) {
+    if (e.code === 'Enter') {
+      sendChat(input.value);
+      closeChat();
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (e.code === 'Escape') {
+      closeChat();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
 
   // Capture phase — runs before game keydown handlers
   document.addEventListener('keydown', function(e) {
