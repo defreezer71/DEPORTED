@@ -1068,7 +1068,7 @@ function showLobbyScreen(code) {
   if (codeEl) codeEl.textContent = code || '----';
   if (document.pointerLockElement) document.exitPointerLock();
   const chat = document.getElementById('chat-container');
-  if (chat) chat.classList.add('chat-visible');
+  if (chat) chat.style.display = 'flex';
 }
 
 function hideLobbyScreen() {
@@ -1197,7 +1197,7 @@ function connectToServer() {
         } else {
           state.inLobby = false;
           const chat = document.getElementById('chat-container');
-          if (chat) chat.classList.add('chat-visible');
+          if (chat) chat.style.display = 'flex';
         }
         break;
       case 'lobbyState':
