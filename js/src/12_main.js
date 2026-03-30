@@ -37,8 +37,10 @@ function addChatMessage(senderId, text) {
 
 function sendChat(text) {
   if (!text || !text.trim()) return;
+  var trimmed = text.trim().slice(0, 120);
+  addChatMessage(state.myId || 'You', trimmed);
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-    state.ws.send(JSON.stringify({ type: 'chat', text: text.trim().slice(0, 120) }));
+    state.ws.send(JSON.stringify({ type: 'chat', text: trimmed }));
   }
 }
 
