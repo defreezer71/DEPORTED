@@ -3402,7 +3402,6 @@ function setupChat() {
   if (!input) return;
 
   // Always show
-  if (container) container.style.display = 'flex';
   if (inputRow)  inputRow.style.display  = 'flex';
 
   // Minimize / restore
@@ -4417,8 +4416,6 @@ function showLobbyScreen(code) {
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
   if (document.pointerLockElement) document.exitPointerLock();
-  const chat = document.getElementById('chat-container');
-  if (chat) chat.style.display = 'flex';
 }
 
 function hideLobbyScreen() {
