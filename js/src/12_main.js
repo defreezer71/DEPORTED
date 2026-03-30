@@ -1197,7 +1197,7 @@ function connectToServer() {
         } else {
           state.inLobby = false;
           const chat = document.getElementById('chat-container');
-          if (chat) chat.style.display = 'flex';
+          if (chat) chat.style.setProperty('display', 'flex', 'important');
         }
         break;
       case 'lobbyState':
@@ -1207,7 +1207,7 @@ function connectToServer() {
         state.inLobby = false;
         hideLobbyScreen();
         const chatEl = document.getElementById('chat-container');
-        if (chatEl) chatEl.style.display = 'flex';
+        if (chatEl) chatEl.style.setProperty('display', 'flex', 'important');
         renderer.domElement.requestPointerLock();
         break;
       case 'chat':
