@@ -384,7 +384,7 @@
   position: fixed;
   bottom: 16px;
   left: 16px;
-  width: 220px;
+  width: 340px;
   z-index: 120;
   display: none;
   flex-direction: column;
@@ -428,7 +428,7 @@
   display: flex;
   flex-direction: column;
   gap: 0px;
-  max-height: 120px;
+  max-height: 160px;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 4px 6px;
@@ -467,6 +467,32 @@
   outline: none;
 }
 #chat-input::placeholder { color: rgba(255,255,255,0.3); }
+#chat-send {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #fff;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#chat-send:hover { background: rgba(255,255,255,0.22); }
+#chat-send {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #fff;
+  font-family: "Courier New", monospace;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#chat-send:hover { background: rgba(255,255,255,0.22); }
 #chat-container.minimized #chat-body { display: none; }
 /* ── END CHAT ── */
 
@@ -598,8 +624,7 @@
   <div id="chat-body">
     <div id="chat-log"></div>
     <div id="chat-input-row" style="display:none;">
-      <input id="chat-input" type="text" maxlength="120"
-             autocomplete="off" spellcheck="false" placeholder="Type and press Enter..." />
+      <input id="chat-input" type="text" maxlength="120" placeholder="Type a message..." autocomplete="off" spellcheck="false" /><button id="chat-send">Send</button>
     </div>
   </div>
 </div>

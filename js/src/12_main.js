@@ -10,18 +10,25 @@ function _chatColor(id) {
 }
 
 function addChatMessage(senderId, text) {
+  var now = new Date();
+  var ts = '[' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0') + '] ';
   var log = document.getElementById('chat-log');
   if (!log) return;
   var msg = document.createElement('div');
   msg.className = 'chat-msg';
+  var tsSpan = document.createElement('span');
+  tsSpan.style.color = 'rgba(255,255,255,0.4)';
+  tsSpan.textContent = ts;
   var name = document.createElement('span');
   name.className = 'chat-name';
   name.style.color = _chatColor(senderId);
-  name.textContent = senderId.slice(0, 6) + ': ';
+  name.textContent = senderId.slice(0, 12) + ': ';
+  msg.appendChild(tsSpan);
   msg.appendChild(name);
   msg.appendChild(document.createTextNode(text));
   log.appendChild(msg);
-  while (log.children.length > 5) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+  while (log.children.length > 20) log.removeChild(log.firstChild);
   setTimeout(function() {
     msg.classList.add('fading');
     setTimeout(function() { if (msg.parentNode) msg.parentNode.removeChild(msg); }, 900);
@@ -41,7 +48,9 @@ function setupChat() {
   var inputRow = document.getElementById('chat-input-row');
   var container= document.getElementById('chat-container');
   var minBtn   = document.getElementById('chat-minimize');
+  var sendBtn  = document.getElementById('chat-send');
   if (!input) return;
+  if (sendBtn) sendBtn.addEventListener('click', function() { sendChat(input.value); input.value = ''; input.focus(); });
 
   // Minimize / restore
   var minimized = false;
