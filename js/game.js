@@ -3408,11 +3408,13 @@ function setupChat() {
 
   // Minimize / restore
   var minimized = false;
+  var chatBody = document.getElementById('chat-body');
   if (minBtn) {
+    minBtn.innerHTML = '&#8722;';
     minBtn.addEventListener('click', function(e) {
       e.stopPropagation();
       minimized = !minimized;
-      container.classList.toggle('minimized', minimized);
+      if (chatBody) chatBody.style.display = minimized ? 'none' : 'flex';
       minBtn.innerHTML = minimized ? '&#43;' : '&#8722;';
     });
   }
