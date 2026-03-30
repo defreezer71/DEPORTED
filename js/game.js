@@ -4556,6 +4556,8 @@ function connectToServer() {
       case 'startMatch':
         state.inLobby = false;
         hideLobbyScreen();
+        const chatEl = document.getElementById('chat-container');
+        if (chatEl) chatEl.style.display = 'flex';
         renderer.domElement.requestPointerLock();
         break;
       case 'chat':
