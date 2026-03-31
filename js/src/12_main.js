@@ -1068,7 +1068,14 @@ function showLobbyScreen(code) {
   const codeEl = document.getElementById('lobbyCode');
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
-  if (document.pointerLockElement) document.exitPointerLock();
+  // Give warmup ammo so players can shoot in prison — resets to 0 on match start
+  state.ammo.m4 = 30; state.ammo.pistol = 15;
+  state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
+  // Hide main menu overlay so the 3D world is visible
+  const ov = document.getElementById('overlay');
+  if (ov) ov.classList.add('hidden');
+  // Request pointer lock so player can move immediately
+  renderer.domElement.requestPointerLock();
 }
 
 function hideLobbyScreen() {
@@ -1078,33 +1085,45 @@ function hideLobbyScreen() {
 
 function updateLobbyUI(msg) {
   const listEl   = document.getElementById('lobbyPlayerList');
-  const botEl    = document.getElementById('lobbyBotCount');
   const statusEl = document.getElementById('lobbyStatus');
   const btn      = document.getElementById('lobbyReadyBtn');
-  if (botEl) botEl.textContent = msg.botCount;
+  const TOTAL_SLOTS = 21;
+  const players = msg.players || [];
+
   if (listEl) {
-    listEl.innerHTML = msg.players.map(p => {
-      const isMe = (p.id === state.myId);
-      const rc   = p.ready ? 'is-ready' : '';
-      return '<div class="lobby-player-row">' +
-        '<div class="ready-dot ' + rc + '"></div>' +
-        '<div class="lobby-player-name' + (isMe ? ' is-me' : '') + '">' +
-          (p.name || p.id) + (isMe ? ' (you)' : '') +
-        '</div>' +
-        '<div class="lobby-player-status ' + rc + '">' +
-          (p.ready ? 'READY' : 'waiting') +
-        '</div>' +
-      '</div>';
-    }).join('');
+    let html = '';
+    for (let i = 0; i < TOTAL_SLOTS; i++) {
+      if (i < players.length) {
+        const p = players[i];
+        const isMe = (p.id === state.myId);
+        const rc = p.ready ? 'is-ready' : '';
+        html += '<div class="lobby-slot">' +
+          '<div class="slot-dot ' + rc + '"></div>' +
+          '<div class="slot-name ' + (isMe ? 'is-me' : 'is-player') + '">' +
+            (p.name || p.id) + (isMe ? ' (you)' : '') +
+          '</div>' +
+          '<div class="slot-status ' + rc + '">' + (p.ready ? 'READY' : 'waiting') + '</div>' +
+        '</div>';
+      } else {
+        html += '<div class="lobby-slot">' +
+          '<div class="slot-dot is-bot"></div>' +
+          '<div class="slot-name">bot</div>' +
+          '<div class="slot-status">—</div>' +
+        '</div>';
+      }
+    }
+    listEl.innerHTML = html;
   }
+
   if (statusEl) {
-    const readyCount = msg.players.filter(p => p.ready).length;
-    const total = msg.players.length;
+    const readyCount = players.filter(p => p.ready).length;
+    const total = players.length;
     const need  = Math.ceil(total / 2);
-    statusEl.textContent = readyCount + ' / ' + total + ' ready  —  need ' + need + ' to start';
+    statusEl.textContent = readyCount + ' / ' + total + ' ready — need ' + need + ' to start';
   }
+
   if (btn) {
-    const me = msg.players.find(p => p.id === state.myId);
+    const me = players.find(p => p.id === state.myId);
     if (me && me.ready) {
       btn.textContent = 'UNREADY';
       btn.classList.add('is-ready');
@@ -1206,8 +1225,19 @@ function connectToServer() {
       case 'startMatch':
         state.inLobby = false;
         hideLobbyScreen();
-        const chatEl = document.getElementById('chat-container');
-        if (chatEl) chatEl.style.setProperty('display', 'flex', 'important');
+        // Reset player to clean match start — no warmup gear carries over
+        state.hp = 100;
+        state.armor = 0;
+        state.ammo = { m4: 0, pistol: 0 };
+        state.reserveAmmo = { m4: 0, pistol: 0 };
+        state.velocityY = 0;
+        camera.position.set(
+          CONFIG.prisonPos.x + (Math.random() - 0.5) * 10,
+          CONFIG.playerHeight,
+          CONFIG.prisonPos.z + (Math.random() - 0.5) * 10
+        );
+        { const chatEl = document.getElementById('chat-container');
+          if (chatEl) chatEl.style.setProperty('display', 'flex', 'important'); }
         renderer.domElement.requestPointerLock();
         break;
       case 'chat':

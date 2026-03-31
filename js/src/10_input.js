@@ -72,13 +72,17 @@ overlay.addEventListener('click', (e) => {
   renderer.domElement.requestPointerLock();
 });
 renderer.domElement.addEventListener('click', () => {
-  if (!document.pointerLockElement && state.phase !== 'lobby') {
+  if (!document.pointerLockElement && (state.phase !== 'lobby' || state.inLobby)) {
     renderer.domElement.requestPointerLock();
   }
 });
 document.addEventListener('pointerlockchange', () => {
   state.locked = !!document.pointerLockElement;
-  if (state.inLobby) return; // lobby screen handles its own overlay state
+  if (state.inLobby) {
+    // Warmup: hide main menu overlay when locked, ignore unlock (lobby panel stays up)
+    if (state.locked) overlay.classList.add('hidden');
+    return;
+  }
   if (state.phase === 'lobby' && !state.locked) {
     overlay.classList.remove('hidden');
   } else if (state.locked) {

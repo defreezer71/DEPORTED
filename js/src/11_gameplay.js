@@ -63,7 +63,7 @@ let spreadAccum = 0;        // Accumulated spread from rapid fire
 let lastShotTime = 0;
 
 function shoot() {
-  if (!state.canFire || state.reloading || state.playerDead || state.phase !== 'playing') return;
+  if (!state.canFire || state.reloading || state.playerDead || (state.phase !== 'playing' && !state.inLobby)) return;
   const wep = CONFIG.weapons[state.currentWeapon];
   if (state.ammo[state.currentWeapon] <= 0) {
     SFX.empty_click();
