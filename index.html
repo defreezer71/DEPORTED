@@ -333,6 +333,21 @@
   }
 
 /* ── LOBBY SCREEN ─────────────────────────────────────────── */
+#click-to-play {
+  position: fixed; inset: 0; z-index: 300;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55); pointer-events: none;
+}
+#click-to-play .ctp-inner {
+  color: #e2c87e; font-family: "Courier New", monospace;
+  font-size: 28px; font-weight: bold; letter-spacing: 6px;
+  text-align: center; text-shadow: 0 0 20px rgba(226,200,126,0.5);
+  animation: ctpPulse 1s ease-in-out infinite alternate;
+}
+#click-to-play .ctp-sub {
+  color: #888; font-size: 13px; letter-spacing: 3px; margin-top: 10px;
+}
+@keyframes ctpPulse { from { opacity: 0.5; } to { opacity: 1; } }
 #lobbyScreen {
   position: fixed; top: 0; right: 0; width: 340px;
   height: 100vh; z-index: 200; display: none;
@@ -594,6 +609,12 @@
 
 
 <!-- LOBBY SCREEN -->
+<div id="click-to-play">
+  <div class="ctp-inner">
+    CLICK TO PLAY
+    <div class="ctp-sub">MATCH IS STARTING</div>
+  </div>
+</div>
 <div id="lobbyScreen">
   <div class="lobby-box">
     <div class="lobby-title">DEPORTED</div>

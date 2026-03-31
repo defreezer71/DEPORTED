@@ -1244,7 +1244,11 @@ function connectToServer() {
         );
         { const chatEl = document.getElementById('chat-container');
           if (chatEl) chatEl.style.setProperty('display', 'flex', 'important'); }
-        renderer.domElement.requestPointerLock();
+        // Can't call requestPointerLock from WS handler (not a user gesture) — flag it
+        // and catch on next canvas click. Show prompt so player knows to click.
+        state.pendingLock = true;
+        { const pl = document.getElementById('click-to-play');
+          if (pl) pl.style.setProperty('display', 'flex', 'important'); }
         break;
       case 'chat':
         addChatMessage(msg.id || 'unknown', msg.text || '');
