@@ -193,7 +193,8 @@ function shoot() {
           clearTimeout(hitmarkerTimeout);
           hitmarkerTimeout = setTimeout(() => hitmarker.classList.remove('show'), 120);
           if (isHead) SFX.headshot(); else SFX.hitmarker();
-          sendShoot(remoteHit.id, dmg, isHead);
+          // No friendly fire during warmup lobby — hitmarker shows but no damage sent
+          if (!state.inLobby) sendShoot(remoteHit.id, dmg, isHead);
         }
       }
     }
