@@ -130,7 +130,7 @@ wss.on('connection', ws => {
     player.lastSeen = Date.now();
 
     if (msg.type === 'move' || msg.type === 'input') {
-      if (room.phase === 'waiting') return;
+      // Allow position updates during waiting phase so players see each other in warmup
       const dx = msg.x - player.x, dz = msg.z - player.z;
       if (Math.sqrt(dx*dx+dz*dz) > 3.5) { console.log('[cheat?]', myId, 'teleport'); return; }
       player.x = msg.x; player.y = msg.y || 0; player.z = msg.z;
