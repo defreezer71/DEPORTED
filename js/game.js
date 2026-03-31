@@ -2925,6 +2925,16 @@ document.addEventListener('mousemove', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  // During warmup lobby: Escape unlocks mouse so player can click Ready Up
+  if (state.inLobby && e.code === 'Escape') {
+    document.exitPointerLock();
+    return;
+  }
+  // During warmup lobby: Enter = Ready Up
+  if (state.inLobby && e.code === 'Enter') {
+    if (window.toggleReady) window.toggleReady();
+    return;
+  }
   if (!state.locked) return;
   switch (e.code) {
     case 'KeyW': state.moveForward = true; break;

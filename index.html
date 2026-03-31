@@ -334,7 +334,7 @@
 
 /* ── LOBBY SCREEN ─────────────────────────────────────────── */
 #lobbyScreen {
-  position: fixed; top: 0; right: 0; width: 300px;
+  position: fixed; top: 0; right: 0; width: 340px;
   height: 100vh; z-index: 200; display: none;
   overflow-y: auto; pointer-events: none;
 }
@@ -342,17 +342,17 @@
 .lobby-box {
   background: rgba(5,5,5,0.93); border-left: 2px solid #e2c87e;
   border-radius: 3px; padding: 40px 52px; min-width: 400px;
-  min-height: 100vh; text-align: center; color: #ddd; padding: 18px 14px; pointer-events: auto;
+  min-height: 100vh; text-align: center; color: #ddd; padding: 18px 14px; pointer-events: auto; box-sizing: border-box; width: 100%;
 }
 .lobby-title { color: #e2c87e; font-size: 11px; font-weight: bold;
   letter-spacing: 5px; margin: 0 0 4px; }
-.lobby-subtitle { color: #555; font-size: 10px; letter-spacing: 3px;
+.lobby-subtitle { color: #888; font-size: 10px; letter-spacing: 3px;
   margin-bottom: 30px; }
-.lobby-code-label { color: #555; font-size: 10px; letter-spacing: 3px;
+.lobby-code-label { color: #888; font-size: 10px; letter-spacing: 3px;
   text-transform: uppercase; }
-.lobby-code { color: #e2c87e; font-size: 28px; font-weight: bold;
+.lobby-code { color: #e2c87e; font-size: 24px; font-weight: bold;
   letter-spacing: 6px; margin: 4px 0 6px; text-shadow: 0 0 10px rgba(226,200,126,0.4); }
-.lobby-code-hint { color: #444; font-size: 11px; margin-bottom: 24px; }
+.lobby-code-hint { color: #777; font-size: 11px; margin-bottom: 24px; }
 .lobby-players { text-align: left; margin-bottom: 10px; }
 .lobby-slot { display: flex; align-items: center; gap: 7px;
   padding: 3px 2px; border-bottom: 1px solid #0f0f0f; }
@@ -361,13 +361,13 @@
   width: 7px; height: 7px; border-radius: 50%; background: #1a1a1a; flex-shrink: 0; transition: background 0.2s; }
 .slot-dot.is-ready { background: #00cc00; box-shadow: 0 0 5px #0c0; }
 .slot-dot.is-bot { background: #161616; }
-.slot-name { font-size: 10px; color: #333; flex: 1; }
+.slot-name { font-size: 10px; color: #555; flex: 1; }
 .slot-name.is-player { color: #aaa; }
 .slot-name.is-me { color: #e2c87e; font-weight: bold; }
 
-.slot-status { font-size: 9px; color: #2a2a2a; }
+.slot-status { font-size: 9px; color: #555; }
 .slot-status.is-ready { color: #0a0; }
-.lobby-bot-line { color: #444; font-size: 12px; margin-bottom: 22px; }
+.lobby-bot-line { color: #666; font-size: 12px; margin-bottom: 22px; }
 .lobby-bot-line span { color: #777; font-weight: bold; }
 #lobbyReadyBtn {
   background: rgba(226,200,126,0.1); color: #e2c87e; border: 1px solid rgba(226,200,126,0.45); padding: 11px 0;
@@ -380,8 +380,8 @@
 #lobbyReadyBtn.is-ready:hover { background: #006600; }
 .lobby-pregame-label { color: #e2c87e; font-size: 14px; font-weight: bold; letter-spacing: 3px;
   border-bottom: 1px solid rgba(226,200,126,0.2); padding-bottom: 10px; margin-bottom: 14px; }
-.lobby-warmup-hint { color: #4a4a4a; font-size: 10px; letter-spacing: 1px; margin-bottom: 10px; }
-.lobby-status { color: #444; font-size: 10px; letter-spacing: 1px; min-height: 14px; margin-top: 6px; }
+.lobby-warmup-hint { color: #666; font-size: 10px; letter-spacing: 1px; margin-bottom: 10px; }
+.lobby-status { color: #777; font-size: 10px; letter-spacing: 1px; min-height: 14px; margin-top: 6px; }
 
 </style>
 
@@ -603,6 +603,7 @@
     <div class="lobby-code" id="lobbyCode">----</div>
     <div class="lobby-code-hint">Share this code with friends</div>
     <div class="lobby-warmup-hint">&#127918; Move &amp; shoot to warm up!</div>
+    <div class="lobby-warmup-hint" style="font-size:9px;color:#555;margin-top:2px">Press ESC to unlock mouse &bull; Enter to Ready Up</div>
     <div class="lobby-players" id="lobbyPlayerList"></div>
     <button id="lobbyReadyBtn" onclick="window.toggleReady()">READY UP</button>
     <div class="lobby-status" id="lobbyStatus"></div>
