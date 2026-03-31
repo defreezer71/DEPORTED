@@ -4413,19 +4413,19 @@ function updateRemotePlayers(playerList) {
     if (!state.remotePlayers[p.id]) {
       // New player — create mesh and snap immediately to real position
       const newMesh = createRemotePlayerMesh(p.id);
-      newMesh.position.set(p.x, p.y - CONFIG.playerHeight, p.z);
+      newMesh.position.set(p.x, p.y, p.z);
       state.remotePlayers[p.id] = {
         mesh: newMesh,
         hp:   p.hp,
         dead: p.dead,
         targetX: p.x,
-        targetY: p.y - CONFIG.playerHeight,
+        targetY: p.y,
         targetZ: p.z,
       };
     }
 
     const rp = state.remotePlayers[p.id];
-    rp.targetX = p.x; rp.targetY = p.y - CONFIG.playerHeight; rp.targetZ = p.z;
+    rp.targetX = p.x; rp.targetY = p.y; rp.targetZ = p.z;
     if (p.yaw !== undefined) rp.targetYaw = p.yaw;
     rp.hp       = p.hp;
     rp.dead     = p.dead;
