@@ -67,11 +67,23 @@ window.toggleMenuMusic = function toggleMenuMusic() {
 }
 
 overlay.addEventListener('click', (e) => {
-  // Don't start game if they clicked the music button
   if (e.target.id === 'music-toggle-btn' || e.target.closest('#music-toggle-btn')) return;
+  if (state.pendingLock) {
+    state.pendingLock = false;
+    const pl = document.getElementById('click-to-play');
+    if (pl) pl.style.setProperty('display', 'none', 'important');
+  }
   renderer.domElement.requestPointerLock();
 });
 renderer.domElement.addEventListener('click', () => {
+  // Always lock on click if match just started (pendingLock set by startMatch handler)
+  if (state.pendingLock) {
+    state.pendingLock = false;
+    const pl = document.getElementById('click-to-play');
+    if (pl) pl.style.setProperty('display', 'none', 'important');
+    renderer.domElement.requestPointerLock();
+    return;
+  }
   if (!document.pointerLockElement && (state.phase !== 'lobby' || state.inLobby)) {
     renderer.domElement.requestPointerLock();
   }
