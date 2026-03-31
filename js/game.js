@@ -4433,6 +4433,12 @@ function showLobbyScreen(code) {
   const codeEl = document.getElementById('lobbyCode');
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
+  // Spawn player at correct floor height inside prison for warmup
+  camera.position.set(
+    CONFIG.prisonPos.x + (Math.random() - 0.5) * 8,
+    CONFIG.playerHeight,
+    CONFIG.prisonPos.z + (Math.random() - 0.5) * 8
+  );
   // Give warmup ammo so players can shoot in prison — resets to 0 on match start
   state.ammo.m4 = 30; state.ammo.pistol = 15;
   state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
