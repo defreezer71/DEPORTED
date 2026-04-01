@@ -4597,6 +4597,8 @@ function connectToServer() {
         if (msg.phase === 'waiting') {
           state.inLobby = true;
           showLobbyScreen(msg.roomCode);
+          const chatW = document.getElementById('chat-container');
+          if (chatW) chatW.style.setProperty('display', 'flex', 'important');
         } else {
           state.inLobby = false;
           const chat = document.getElementById('chat-container');
@@ -4607,6 +4609,16 @@ function connectToServer() {
         updateLobbyUI(msg);
         break;
       case 'startMatch':
+        (function() {
+          var flash = document.createElement('div');
+          flash.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;z-index:9999;pointer-events:none;';
+          var txt = document.createElement('div');
+          txt.style.cssText = 'color:#ffd700;font-size:64px;font-weight:900;letter-spacing:8px;text-shadow:0 0 40px #ffd700,0 0 80px #ffd700;font-family:monospace;';
+          txt.textContent = 'GAME STARTING';
+          flash.appendChild(txt);
+          document.body.appendChild(flash);
+          setTimeout(function() { if (flash.parentNode) flash.parentNode.removeChild(flash); }, 2500);
+        })();
         state.inLobby = false;
         hideLobbyScreen();
         // Reset player to clean match start — no warmup gear carries over
