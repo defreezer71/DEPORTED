@@ -4626,6 +4626,7 @@ function connectToServer() {
         state.armor = 0;
         state.ammo = { m4: 0, pistol: 0 };
         state.reserveAmmo = { m4: 0, pistol: 0 };
+        if (typeof updateHUD === 'function') updateHUD();
         state.velocityY = 0;
         camera.position.set(
           CONFIG.prisonPos.x + (Math.random() - 0.5) * 10,
