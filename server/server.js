@@ -93,7 +93,7 @@ function checkMajority(code) {
   if (total === 0) return;
   if (room.readySet.size >= Math.ceil(total / 2)) {
     room.phase = 'countdown';
-    broadcastToRoom(code, { type: 'startMatch', roomCode: code });
+    broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt: Date.now() + 2500 });
     console.log('[room ' + code + '] startMatch triggered');
   }
 }

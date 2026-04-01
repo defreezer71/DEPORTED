@@ -3794,14 +3794,15 @@ function update() {
   // ── Game phase management ──
   if (state.phase === 'lobby') {
     if (!state.joinSent) sendJoin();
-    if (state.myId && !state.inLobby) {
-      state.phase = 'countdown';
-      state.countdownTime = 10;
+    if (state.myId && !state.inLobby && state.phase !== 'countdown') {
+      // phase is set server-side via startMatch, nothing to do here
     }
   }
 
   if (state.phase === 'countdown') {
-    state.countdownTime -= renderDt;
+    state.countdownTime = state.matchStartAt
+      ? 10 - (Date.now() - state.matchStartAt) / 1000
+      : state.countdownTime - renderDt;
     const num = Math.ceil(state.countdownTime);
     const cdEl = document.getElementById('countdown-num');
     if (num > 0 && num <= 10) {
@@ -4609,6 +4610,9 @@ function connectToServer() {
         updateLobbyUI(msg);
         break;
       case 'startMatch':
+        state.matchStartAt = msg.startAt || (Date.now() + 2500);
+        state.phase = 'countdown';
+        state.countdownTime = 10;
         (function() {
           var flash = document.createElement('div');
           flash.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;z-index:9999;pointer-events:none;';
