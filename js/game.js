@@ -4579,11 +4579,11 @@ function updateLobbyUI(msg) {
           '</div>' +
           '<div class="slot-status ' + rc + '">' + (p.ready ? 'READY' : 'waiting') + '</div>' +
         '</div>';
-      } else if (state.gameMode !== 'pvp') {
-        html += '<div class="lobby-slot">' +
-          '<div class="slot-dot is-bot"></div>' +
-          '<div class="slot-name">bot</div>' +
-          '<div class="slot-status">—</div>' +
+      } else {
+        html += '<div class="lobby-slot lobby-slot-empty">' +
+          '<div class="slot-dot slot-dot-empty"></div>' +
+          '<div class="slot-name slot-name-empty">— open —</div>' +
+          '<div class="slot-status"></div>' +
         '</div>';
       }
     }

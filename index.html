@@ -399,6 +399,9 @@
 
 .slot-status { font-size: 13px; color: #888; }
 .slot-status.is-ready { color: #0c0; }
+.lobby-slot-empty { opacity: 0.25; }
+.slot-dot-empty { background: #222 !important; border: 1px solid #333; }
+.slot-name-empty { color: #444; font-style: italic; letter-spacing: 1px; }
 .lobby-bot-line { color: #666; font-size: 12px; margin-bottom: 22px; }
 .lobby-bot-line span { color: #777; font-weight: bold; }
 #lobbyReadyBtn {
@@ -659,10 +662,10 @@
       <div class="lobby-code" id="lobbyCode">----</div>
       <div class="lobby-code-hint">Share this code with friends</div>
       <div class="lobby-warmup-hint">&#127918; Move &amp; shoot to warm up!</div>
-      <div class="lobby-warmup-hint" style="font-size:13px;color:#aaa;margin-top:2px">ESC to unlock mouse &bull; Hit <span style="color:#e2c87e">Enter</span> or click to Ready Up</div>
     </div>
     <div class="lobby-players" id="lobbyPlayerList"></div>
     <div class="lobby-footer">
+      <div style="font-size:12px;color:#aaa;text-align:center;margin-bottom:8px;letter-spacing:1px">ESC to unlock mouse &bull; Hit <span style="color:#e2c87e">Enter</span> or click to Ready Up</div>
       <button id="lobbyReadyBtn" onclick="window.toggleReady()">READY UP</button>
       <div class="lobby-status" id="lobbyStatus"></div>
     </div>
