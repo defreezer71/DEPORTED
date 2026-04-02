@@ -1125,6 +1125,7 @@ function updateLobbyUI(msg) {
   const btn      = document.getElementById('lobbyReadyBtn');
   const TOTAL_SLOTS = 21;
   const players = msg.players || [];
+  state.lobbyPlayerCount = players.length;
 
   if (listEl) {
     let html = '';
@@ -1261,13 +1262,17 @@ function connectToServer() {
           // Start fill countdown display
           if (state.fillEndsAt) {
             clearInterval(state._fillInterval);
+            state.lobbyPlayerCount = state.lobbyPlayerCount || 1;
             state._fillInterval = setInterval(function() {
+              const statusEl = document.getElementById('lobbyStatus');
+              if (!statusEl || !state.inLobby) return;
+              if ((state.lobbyPlayerCount || 1) < 2) {
+                statusEl.textContent = 'Waiting for players to join...';
+                return;
+              }
               const rem = Math.max(0, Math.ceil((state.fillEndsAt - Date.now()) / 1000));
               const m = Math.floor(rem / 60), s = rem % 60;
-              const statusEl = document.getElementById('lobbyStatus');
-              if (statusEl && state.inLobby) {
-                statusEl.textContent = 'Match starts in ' + m + ':' + String(s).padStart(2,'0') + (rem === 0 ? ' — Starting!' : '');
-              }
+              statusEl.textContent = 'Match starts in ' + m + ':' + String(s).padStart(2,'0') + (rem === 0 ? ' — Starting!' : '');
               if (rem === 0) clearInterval(state._fillInterval);
             }, 500);
           }
