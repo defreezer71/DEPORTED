@@ -373,7 +373,7 @@
 #lobbyScreen.visible { display: block; }
 .lobby-box {
   background: rgba(5,5,5,0.93); border-left: 2px solid #e2c87e;
-  border-radius: 3px;
+  border-radius: 3px; display: flex; flex-direction: column; height: 100vh;
   min-height: 100vh; text-align: center; color: #ddd; padding: 18px 14px; pointer-events: auto; box-sizing: border-box; width: 100%;
 }
 .lobby-title { color: #e2c87e; font-size: 13px; font-weight: bold;
@@ -385,7 +385,7 @@
 .lobby-code { color: #e2c87e; font-size: 24px; font-weight: bold;
   letter-spacing: 6px; margin: 4px 0 6px; text-shadow: 0 0 10px rgba(226,200,126,0.4); }
 .lobby-code-hint { color: #aaa; font-size: 15px; margin-bottom: 24px; }
-.lobby-players { text-align: left; margin-bottom: 10px; }
+.lobby-players { text-align: left; flex: 1; overflow-y: auto; margin: 8px 0; }
 .lobby-slot { display: flex; align-items: center; gap: 7px;
   padding: 3px 2px; border-bottom: 1px solid #0f0f0f; }
 .lobby-slot:last-child { border-bottom: none; }
@@ -414,6 +414,8 @@
   border-bottom: 1px solid rgba(226,200,126,0.2); padding-bottom: 10px; margin-bottom: 14px; }
 .lobby-warmup-hint { color: #999; font-size: 14px; letter-spacing: 1px; margin-bottom: 10px; }
 .lobby-status { color: #aaa; font-size: 14px; letter-spacing: 1px; min-height: 14px; margin-top: 6px; }
+.lobby-header { flex-shrink: 0; }
+.lobby-footer { flex-shrink: 0; padding-bottom: 12px; }
 
 </style>
 
@@ -649,18 +651,21 @@
 </div>
 <div id="lobbyScreen">
   <div class="lobby-box">
-    <div class="lobby-title">DEPORTED</div>
-    <div class="lobby-pregame-label">PRE GAME LOBBY</div>
-    <div class="lobby-subtitle" id="lobbyModeLabel">BATTLE ROYALE — CODED ROOM</div>
-    <div class="lobby-code-label">ROOM CODE</div>
-    <div class="lobby-code" id="lobbyCode">----</div>
-    <div class="lobby-code-hint">Share this code with friends</div>
-    <div class="lobby-warmup-hint">&#127918; Move &amp; shoot to warm up!</div>
-    <div class="lobby-warmup-hint" style="font-size:13px;color:#aaa;margin-top:2px">ESC to unlock mouse &bull; Enter or click to Ready Up</div>
+    <div class="lobby-header">
+      <div class="lobby-title">DEPORTED</div>
+      <div class="lobby-pregame-label">PRE GAME LOBBY</div>
+      <div class="lobby-subtitle" id="lobbyModeLabel">WAITING FOR PLAYERS...</div>
+      <div class="lobby-code-label">ROOM CODE</div>
+      <div class="lobby-code" id="lobbyCode">----</div>
+      <div class="lobby-code-hint">Share this code with friends</div>
+      <div class="lobby-warmup-hint">&#127918; Move &amp; shoot to warm up!</div>
+      <div class="lobby-warmup-hint" style="font-size:13px;color:#aaa;margin-top:2px">ESC to unlock mouse &bull; Hit <span style="color:#e2c87e">Enter</span> or click to Ready Up</div>
+    </div>
     <div class="lobby-players" id="lobbyPlayerList"></div>
-    <button id="lobbyReadyBtn" onclick="window.toggleReady()">READY UP</button>
-    <div style="font-size:14px;color:#aaa;letter-spacing:1px;margin-top:4px;text-align:center">Press <span style="color:#e2c87e">Enter</span> to ready up</div>
-    <div class="lobby-status" id="lobbyStatus"></div>
+    <div class="lobby-footer">
+      <button id="lobbyReadyBtn" onclick="window.toggleReady()">READY UP</button>
+      <div class="lobby-status" id="lobbyStatus"></div>
+    </div>
   </div>
 </div>
 

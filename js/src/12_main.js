@@ -923,7 +923,7 @@ window.startPvPMatch = function() {
   const lobbyEl = document.getElementById("lobbyScreen");
   if (lobbyEl) lobbyEl.classList.add("visible");
   const modeEl = document.getElementById("lobbyModeLabel");
-  if (modeEl) modeEl.textContent = "REAL PLAYERS — WAITING FOR LOBBY";
+  if (modeEl) modeEl.textContent = "WAITING FOR PLAYERS...";
   const statusEl = document.getElementById("lobbyStatus");
   if (statusEl) statusEl.textContent = "Connecting...";
   renderer.domElement.requestPointerLock();
