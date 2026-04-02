@@ -96,8 +96,8 @@ function checkMajority(code) {
   const room = rooms[code];
   if (!room || room.phase !== 'waiting') return;
   const total = Object.keys(room.players).length;
-  if (total === 0) return;
-  if (total === 1 || room.readySet.size >= Math.ceil(total / 2)) {
+  if (total < 2) return;
+  if (room.readySet.size >= Math.ceil(total * 0.51)) {
     room.phase = 'countdown';
     broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt: Date.now() + 2500 });
     console.log('[room ' + code + '] startMatch triggered (players: ' + total + ')');

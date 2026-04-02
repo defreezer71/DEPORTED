@@ -419,6 +419,7 @@
 .lobby-status { color: #aaa; font-size: 14px; letter-spacing: 1px; min-height: 14px; margin-top: 6px; }
 .lobby-header { flex-shrink: 0; }
 .lobby-footer { flex-shrink: 0; padding-bottom: 12px; }
+.lobby-majority-hint { color: #888; font-size: 11px; letter-spacing: 0.5px; text-align: center; padding: 6px 4px 10px; border-top: 1px solid #1a1a1a; }
 
 </style>
 
@@ -664,6 +665,7 @@
       <div class="lobby-warmup-hint">&#127918; Move &amp; shoot to warm up!</div>
     </div>
     <div class="lobby-players" id="lobbyPlayerList"></div>
+    <div class="lobby-majority-hint">If 51% of players ready up, the match starts immediately</div>
     <div class="lobby-footer">
       <div style="font-size:12px;color:#aaa;text-align:center;margin-bottom:8px;letter-spacing:1px">ESC to unlock mouse &bull; Hit <span style="color:#e2c87e">Enter</span> or click to Ready Up</div>
       <button id="lobbyReadyBtn" onclick="window.toggleReady()">READY UP</button>

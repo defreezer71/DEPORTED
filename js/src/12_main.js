@@ -1154,7 +1154,7 @@ function updateLobbyUI(msg) {
   if (statusEl) {
     const readyCount = players.filter(p => p.ready).length;
     const total = players.length;
-    const need  = Math.ceil(total / 2);
+    const need  = Math.ceil(total * 0.51);
     statusEl.textContent = readyCount + ' / ' + total + ' ready — need ' + need + ' to start';
   }
 
