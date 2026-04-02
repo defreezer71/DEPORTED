@@ -901,7 +901,26 @@ updateHUD();
 buildCollisionCache();
 if (CONFIG.newPhysics) physInit();  // Seed capsule from camera position
 window._state = state;
-try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
+// Server connection only started when player picks Real Players mode
+window.startBotMatch = function() {
+  state.gameMode = "bot";
+  const ov = document.getElementById("overlay");
+  if (ov) ov.classList.add("hidden");
+  state.phase = "countdown";
+  state.matchStartAt = Date.now();
+  renderer.domElement.requestPointerLock();
+};
+window.showPvPOptions = function() {
+  const el = document.getElementById("pvp-options");
+  if (!el) return;
+  el.style.display = (el.style.display === "flex") ? "none" : "flex";
+};
+window.startPvPMatch = function() {
+  state.gameMode = "pvp";
+  const ov = document.getElementById("overlay");
+  if (ov) ov.classList.add("hidden");
+  try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
+};
 update();
 
 document.getElementById('go-restart').addEventListener('click', () => location.reload());
