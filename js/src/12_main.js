@@ -917,8 +917,31 @@ window.showPvPOptions = function() {
 };
 window.startPvPMatch = function() {
   state.gameMode = "pvp";
+  // Kill all bots — PvP is real players only
+  if (typeof bots !== "undefined") {
+    bots.forEach(function(b) {
+      b.alive = false;
+      if (b.mesh) b.mesh.colorWrite = false;
+    });
+  }
   const ov = document.getElementById("overlay");
   if (ov) ov.classList.add("hidden");
+  const lobbyEl = document.getElementById("lobbyScreen");
+  if (lobbyEl) lobbyEl.classList.add("visible");
+  const modeEl = document.getElementById("lobbyModeLabel");
+  if (modeEl) modeEl.textContent = "REAL PLAYERS — WAITING FOR LOBBY";
+  const statusEl = document.getElementById("lobbyStatus");
+  if (statusEl) statusEl.textContent = "Connecting...";
+  renderer.domElement.requestPointerLock();
+  state.phase = "lobby";
+  state.inLobby = true;
+  camera.position.set(
+    CONFIG.prisonPos.x + (Math.random() - 0.5) * 8,
+    CONFIG.playerHeight,
+    CONFIG.prisonPos.z + (Math.random() - 0.5) * 8
+  );
+  state.ammo.m4 = 30; state.ammo.pistol = 15;
+  state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
   try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
 };
 update();
@@ -1088,20 +1111,6 @@ function showLobbyScreen(code) {
   const codeEl = document.getElementById('lobbyCode');
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
-  // Spawn player at correct floor height inside prison for warmup
-  camera.position.set(
-    CONFIG.prisonPos.x + (Math.random() - 0.5) * 8,
-    CONFIG.playerHeight,
-    CONFIG.prisonPos.z + (Math.random() - 0.5) * 8
-  );
-  // Give warmup ammo so players can shoot in prison — resets to 0 on match start
-  state.ammo.m4 = 30; state.ammo.pistol = 15;
-  state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
-  // Hide main menu overlay so the 3D world is visible
-  const ov = document.getElementById('overlay');
-  if (ov) ov.classList.add('hidden');
-  // Request pointer lock so player can move immediately
-  renderer.domElement.requestPointerLock();
 }
 
 function hideLobbyScreen() {
@@ -1130,7 +1139,7 @@ function updateLobbyUI(msg) {
           '</div>' +
           '<div class="slot-status ' + rc + '">' + (p.ready ? 'READY' : 'waiting') + '</div>' +
         '</div>';
-      } else {
+      } else if (state.gameMode !== 'pvp') {
         html += '<div class="lobby-slot">' +
           '<div class="slot-dot is-bot"></div>' +
           '<div class="slot-name">bot</div>' +
@@ -1235,12 +1244,26 @@ function connectToServer() {
       case 'joined':
         state.myId = msg.id;
         state.roomCode = msg.roomCode;
+        state.fillEndsAt = msg.fillEndsAt || null;
         showRoomCode(msg.roomCode);
         if (msg.phase === 'waiting') {
           state.inLobby = true;
           showLobbyScreen(msg.roomCode);
           const chatW = document.getElementById('chat-container');
           if (chatW) chatW.style.setProperty('display', 'flex', 'important');
+          // Start fill countdown display
+          if (state.fillEndsAt) {
+            clearInterval(state._fillInterval);
+            state._fillInterval = setInterval(function() {
+              const rem = Math.max(0, Math.ceil((state.fillEndsAt - Date.now()) / 1000));
+              const m = Math.floor(rem / 60), s = rem % 60;
+              const statusEl = document.getElementById('lobbyStatus');
+              if (statusEl && state.inLobby) {
+                statusEl.textContent = 'Match starts in ' + m + ':' + String(s).padStart(2,'0') + (rem === 0 ? ' — Starting!' : '');
+              }
+              if (rem === 0) clearInterval(state._fillInterval);
+            }, 500);
+          }
         } else {
           state.inLobby = false;
           const chat = document.getElementById('chat-container');
