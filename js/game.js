@@ -4607,8 +4607,11 @@ function updateLobbyUI(msg) {
 }
 
 window.toggleReady = function() {
+  console.log('[ready] ws:', state.ws && state.ws.readyState, '| myId:', state.myId, '| joinSent:', state.joinSent);
+  if (!state.myId) { console.warn('[ready] not joined yet'); return; }
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify({ type: 'ready' }));
+    console.log('[ready] sent');
   }
 };
 
@@ -4659,7 +4662,8 @@ function connectToServer() {
   state.ws.onopen = () => {
     console.log('WS connected — waiting for player to click play');
     state.wsReady = true;
-    // Join is sent when the player actually clicks play (see sendJoin)
+    // In pvp mode, send join immediately on connect
+    if (state.gameMode === 'pvp') sendJoin();
   };
 
   state.ws.onmessage = (event) => {
