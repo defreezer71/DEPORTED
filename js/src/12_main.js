@@ -906,6 +906,7 @@ window.startBotMatch = function() {
   state.gameMode = "bot";
   const ov = document.getElementById("overlay");
   if (ov) ov.classList.add("hidden");
+  if (typeof spawnBots === 'function') spawnBots();
   state.phase = "countdown";
   state.matchStartAt = Date.now();
   renderer.domElement.requestPointerLock();
@@ -917,13 +918,6 @@ window.showPvPOptions = function() {
 };
 window.startPvPMatch = function() {
   state.gameMode = "pvp";
-  // Kill all bots — PvP is real players only
-  if (typeof bots !== "undefined") {
-    bots.forEach(function(b) {
-      b.alive = false;
-      if (b.mesh) b.mesh.colorWrite = false;
-    });
-  }
   const ov = document.getElementById("overlay");
   if (ov) ov.classList.add("hidden");
   const lobbyEl = document.getElementById("lobbyScreen");

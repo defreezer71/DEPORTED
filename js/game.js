@@ -1223,14 +1223,16 @@ function createBot(x, z, name) {
   return bot;
 }
 
-// Spawn all bots inside prison — spread out, staggered exit
-for (let i = 0; i < 20; i++) {
-  const row = Math.floor(i / 5);
-  const col = i % 5;
-  const px = CONFIG.prisonPos.x - CONFIG.prisonSize / 2 + 5 + col * ((CONFIG.prisonSize - 10) / 4);
-  const pz = CONFIG.prisonPos.z - CONFIG.prisonSize / 2 + 5 + row * ((CONFIG.prisonSize - 10) / 3);
-  const bot = createBot(px, pz, BOT_NAMES[i] || 'Bot');
-  bot.exitDelay = i * 0.4;
+// Bots only spawn in Auto Join (bot match) mode — called from startBotMatch()
+function spawnBots() {
+  for (let i = 0; i < 20; i++) {
+    const row = Math.floor(i / 5);
+    const col = i % 5;
+    const px = CONFIG.prisonPos.x - CONFIG.prisonSize / 2 + 5 + col * ((CONFIG.prisonSize - 10) / 4);
+    const pz = CONFIG.prisonPos.z - CONFIG.prisonSize / 2 + 5 + row * ((CONFIG.prisonSize - 10) / 3);
+    const bot = createBot(px, pz, BOT_NAMES[i] || 'Bot');
+    bot.exitDelay = i * 0.4;
+  }
 }
 
 function updateBots(dt) {
@@ -4343,6 +4345,7 @@ window.startBotMatch = function() {
   state.gameMode = "bot";
   const ov = document.getElementById("overlay");
   if (ov) ov.classList.add("hidden");
+  if (typeof spawnBots === 'function') spawnBots();
   state.phase = "countdown";
   state.matchStartAt = Date.now();
   renderer.domElement.requestPointerLock();
@@ -4354,13 +4357,6 @@ window.showPvPOptions = function() {
 };
 window.startPvPMatch = function() {
   state.gameMode = "pvp";
-  // Kill all bots — PvP is real players only
-  if (typeof bots !== "undefined") {
-    bots.forEach(function(b) {
-      b.alive = false;
-      if (b.mesh) b.mesh.colorWrite = false;
-    });
-  }
   const ov = document.getElementById("overlay");
   if (ov) ov.classList.add("hidden");
   const lobbyEl = document.getElementById("lobbyScreen");
