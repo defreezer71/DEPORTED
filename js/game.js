@@ -4103,7 +4103,7 @@ function update() {
   }
 
   if (state.matchTime >= state.waterRiseStart) {
-    if (!state.waterRising) {
+    if (!state.waterRising && !state.erupted) {
       state.waterRising = true;
       water.visible = true;
     }
@@ -4213,12 +4213,14 @@ function update() {
 
   // Smoke
   for (const s of smokeParticles) {
+    const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
+    const spread = 1 + riseT * 0.07;
     _smokeDummy.position.set(
-      s.ox + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 2.5,
-      s.baseY + Math.sin(clock.elapsedTime * s.speed + s.phase) * 2,
-      s.oz + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 2.5
+      s.ox * spread + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 1.5,
+      CONFIG.volcanoHeight + 2 + riseT,
+      s.oz * spread + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 1.5
     );
-    _smokeDummy.scale.setScalar(s.size);
+    _smokeDummy.scale.setScalar(s.size * (1 + riseT * 0.035));
     _smokeDummy.updateMatrix();
     smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
   }
