@@ -3571,7 +3571,7 @@ let physicsAccumulator = 0;
 // ── Instanced Ash Cloud Pool — 1 draw call for ALL ash particles ──
 const ASH_POOL_SIZE = 300;
 const ashGeo = new THREE.SphereGeometry(1, 5, 4);
-const ashMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.7, color: 0x444444 });
+const ashMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.7, color: 0x444444, depthWrite: false });
 const ashMesh = new THREE.InstancedMesh(ashGeo, ashMat, ASH_POOL_SIZE);
 ashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 ashMesh.frustumCulled = false;
