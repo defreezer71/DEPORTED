@@ -291,10 +291,7 @@ function damageBot(bot, dmg, isHead) {
       });
     }, 200);
 
-    // Drop loot pile
-    const types = ['ammo_m4', 'ammo_pistol', 'health', 'armor'];
-    const drop = types[Math.floor(Math.random() * types.length)];
-    spawnLoot(bot.group.position.x, bot.group.position.z, drop);
+
   }
 }
 
