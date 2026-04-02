@@ -2972,9 +2972,9 @@ renderer.domElement.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   state.locked = !!document.pointerLockElement;
-  if (state.inLobby) {
-    // Warmup: hide main menu overlay when locked, ignore unlock (lobby panel stays up)
-    if (state.locked) overlay.classList.add('hidden');
+  // In lobby or pvp mode — never show main menu overlay on ESC
+  if (state.inLobby || state.gameMode === 'pvp') {
+    overlay.classList.add('hidden');
     return;
   }
   if (state.phase === 'lobby' && !state.locked) {
