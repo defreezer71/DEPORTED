@@ -118,7 +118,19 @@ wss.on('connection', ws => {
         x: -75+Math.cos(a)*r, y: 0, z: 75+Math.sin(a)*r,
         hp: 100, armor: 0, dead: false, lastSeen: Date.now()
       };
-      ws.send(JSON.stringify({ type:'joined', id:myId, roomCode:code, phase:room.phase, isAuto }));
+      // Start 3-min fill timer when first player joins a waiting room
+      if (room.phase === 'waiting' && !room.fillTimer && Object.keys(room.players).length === 1) {
+        room.fillEndsAt = Date.now() + 3 * 60 * 1000;
+        room.fillTimer = setTimeout(() => {
+          if (rooms[code] && rooms[code].phase === 'waiting') {
+            rooms[code].phase = 'countdown';
+            broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt: Date.now() + 2500 });
+            console.log('[room ' + code + '] 3-min fill timer fired — auto-starting');
+          }
+        }, 3 * 60 * 1000);
+        console.log('[room ' + code + '] fill timer started');
+      }
+      ws.send(JSON.stringify({ type:'joined', id:myId, roomCode:code, phase:room.phase, isAuto, fillEndsAt: room.fillEndsAt || null }));
       broadcastLobbyState(code);
       console.log('[room ' + code + '] ' + myId + ' joined, phase=' + room.phase);
       return;

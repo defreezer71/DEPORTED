@@ -74,6 +74,23 @@
     animation: pulse 2s ease-in-out infinite;
   }
   @keyframes pulse { 0%,100%{opacity:0.4} 50%{opacity:1} }
+  .menu-btn {
+    display: block; width: 400px; padding: 13px 20px;
+    font-family: 'Segoe UI', sans-serif; font-size: 14px; font-weight: 700;
+    letter-spacing: 2px; text-transform: uppercase; cursor: pointer;
+    border-radius: 3px; border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.06); color: #fff;
+    transition: all 0.18s; text-align: left;
+  }
+  .menu-btn:hover:not(:disabled) { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.38); }
+  .menu-btn:disabled { opacity: 0.32; cursor: not-allowed; pointer-events: none; }
+  .menu-btn-bot { border-color: rgba(80,200,80,0.45); }
+  .menu-btn-bot:hover { background: rgba(80,200,80,0.10) !important; border-color: rgba(80,200,80,0.7) !important; }
+  .menu-btn-pvp { border-color: rgba(226,200,126,0.5); }
+  .menu-btn-pvp:hover { background: rgba(226,200,126,0.09) !important; border-color: rgba(226,200,126,0.75) !important; }
+  .menu-btn-btc { border-color: rgba(247,147,26,0.28); color: rgba(255,255,255,0.35); }
+  .menu-btn-sub { font-size: 11px; opacity: 0.6; font-weight: 400;
+    text-transform: none; letter-spacing: 0; margin-left: 4px; }
 
   #hud {
     position: fixed; bottom: 0; left: 0; right: 0;
@@ -527,14 +544,29 @@
       <div class="tip">💡 Sprint ability for first 15 seconds of match.</div>
     </div>
     <div class="music-btn" id="music-toggle-btn" onclick="toggleMenuMusic()">♪ &nbsp; Play Theme Song</div>
-    <div style="margin:10px 0 6px;display:flex;gap:8px;justify-content:center;align-items:center">
+    <div style="margin-top:28px;display:flex;flex-direction:column;gap:10px;align-items:center">
+      <button class="menu-btn menu-btn-bot" onclick="event.stopPropagation();window.startBotMatch()">
+        🤖 &nbsp; AUTO JOIN
+        <span class="menu-btn-sub">— vs Bots · Instant Start</span>
+      </button>
+      <button class="menu-btn menu-btn-pvp" onclick="event.stopPropagation();window.showPvPOptions()">
+        ⚔️ &nbsp; REAL PLAYERS
+        <span class="menu-btn-sub">— Up to 21 · 3 Min Lobby</span>
+      </button>
+      <button class="menu-btn menu-btn-btc" disabled>
+        ₿ &nbsp; MONEY MATCH
+        <span class="menu-btn-sub">— Coming Soon</span>
+      </button>
+    </div>
+    <div id="pvp-options" style="display:none;margin-top:10px;flex-direction:column;gap:8px;align-items:center">
       <input id="room-input" maxlength="4" placeholder="Room code (optional)"
         style="background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.25);color:#fff;
                padding:7px 12px;font-size:1em;letter-spacing:3px;text-transform:uppercase;
-               border-radius:4px;width:160px;text-align:center;outline:none"
+               border-radius:4px;width:210px;text-align:center;outline:none"
         oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onclick="event.stopPropagation()" />
+      <button class="menu-btn menu-btn-pvp" style="width:210px;text-align:center"
+        onclick="event.stopPropagation();window.startPvPMatch()">▶ &nbsp; JOIN LOBBY</button>
     </div>
-    <div class="click-start">▶ &nbsp; Click to Play</div>
   </div>
 </div>
 
