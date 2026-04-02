@@ -3625,9 +3625,9 @@ function updateAshClouds(dt) {
       continue;
     }
 
-    ashVel[i].y *= 0.998;
-    ashVel[i].x *= 0.99;
-    ashVel[i].z *= 0.99;
+    ashVel[i].y *= Math.pow(0.96, dt);
+    ashVel[i].x *= Math.pow(0.65, dt);
+    ashVel[i].z *= Math.pow(0.65, dt);
     ashPos[i].addScaledVector(ashVel[i], dt);
     ashSize[i] += ashGrowRate[i] * dt;
     ashLife[i] -= dt;
@@ -4212,6 +4212,7 @@ function update() {
   }
 
   // Smoke
+  smokeInst.visible = !state.erupted;
   for (const s of smokeParticles) {
     const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
     const spread = 1 + riseT * 0.07;
