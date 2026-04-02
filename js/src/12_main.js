@@ -1105,6 +1105,13 @@ function showLobbyScreen(code) {
   const codeEl = document.getElementById('lobbyCode');
   if (el) el.classList.add('visible');
   if (codeEl) codeEl.textContent = code || '----';
+  const showCode = !!state.joinedWithCode;
+  const codeLabelEl = document.querySelector('.lobby-code-label');
+  const codeHintEl  = document.querySelector('.lobby-code-hint');
+  const d = showCode ? '' : 'none';
+  if (codeEl)       codeEl.style.display       = d;
+  if (codeLabelEl)  codeLabelEl.style.display   = d;
+  if (codeHintEl)   codeHintEl.style.display    = d;
 }
 
 function hideLobbyScreen() {
@@ -1184,6 +1191,7 @@ function sendJoin() {
     gameMode: state.gameMode || 'bot',
   }));
   state.joinSent = true;
+  state.joinedWithCode = !!requestedRoom;
   console.log('Join sent — room:', requestedRoom || '(auto)');
 }
 
