@@ -3597,19 +3597,22 @@ function spawnAshCloud(size, upVel, life) {
   for (let i = 0; i < ASH_POOL_SIZE; i++) {
     if (ashActive[i]) continue;
     ashActive[i]   = true;
-    ashSize[i]     = size;
-    ashGrowRate[i] = 0.3 + Math.random() * 0.8;
+    ashSize[i]     = size * 1.8;
+    ashGrowRate[i] = 1.2 + Math.random() * 2.5;
     ashLife[i]     = life;
     ashMaxLife[i]  = life + 5;
+    const spawnAngle = Math.random() * Math.PI * 2;
+    const spawnRadius = Math.random() * 18;
     ashPos[i].set(
-      (Math.random() - 0.5) * 12,
+      Math.cos(spawnAngle) * spawnRadius,
       CONFIG.volcanoHeight + Math.random() * 3,
-      (Math.random() - 0.5) * 12
+      Math.sin(spawnAngle) * spawnRadius
     );
+    const lateralSpeed = 4 + Math.random() * 10;
     ashVel[i].set(
-      (Math.random() - 0.5) * 2,
+      Math.cos(spawnAngle) * lateralSpeed * 0.5 + (Math.random() - 0.5) * 6,
       upVel,
-      (Math.random() - 0.5) * 2
+      Math.sin(spawnAngle) * lateralSpeed * 0.5 + (Math.random() - 0.5) * 6
     );
     const col = ashColorObjs[Math.floor(Math.random() * ashColorObjs.length)];
     ashMesh.instanceColor.setXYZ(i, col.r, col.g, col.b);
