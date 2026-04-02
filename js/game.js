@@ -4624,6 +4624,7 @@ function sendJoin() {
     type: 'join',
     name: 'Player' + Math.floor(Math.random() * 1000),
     roomCode: requestedRoom || undefined,
+    gameMode: state.gameMode || 'bot',
   }));
   state.joinSent = true;
   console.log('Join sent — room:', requestedRoom || '(auto)');

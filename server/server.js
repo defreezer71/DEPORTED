@@ -18,6 +18,12 @@ function findAutoRoom() {
   return null;
 }
 
+function findPvpRoom() {
+  for (const [code, room] of Object.entries(rooms)) {
+    if (!room.isAuto && room.phase === 'waiting' && Object.keys(room.players).length < 21) return code;
+  }
+  return null;
+}
 function makeRoom(code, isAuto) {
   rooms[code] = {
     code, isAuto,
@@ -107,8 +113,17 @@ wss.on('connection', ws => {
     if (msg.type === 'join') {
       myId = msg.id || ('p' + Math.random().toString(36).slice(2,7));
       const reqCode = msg.roomCode ? msg.roomCode.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4) : null;
-      const isAuto = !reqCode;
-      const code = isAuto ? (findAutoRoom() || generateCode()) : reqCode;
+      const isPvp = (msg.gameMode === 'pvp');
+      const isAuto = !reqCode && !isPvp;
+      let code;
+      if (reqCode) {
+        code = reqCode;
+      } else if (isAuto) {
+        code = findAutoRoom() || generateCode();
+      } else {
+        // PvP — find or create a waiting room
+        code = findPvpRoom() || generateCode();
+      }
       myRoom = code;
       if (!rooms[code]) makeRoom(code, isAuto);
       const room = rooms[code];
