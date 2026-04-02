@@ -112,7 +112,7 @@ const sunMesh = new THREE.Mesh(
 sunMesh.position.set(80, 140, -60);
 scene.add(sunMesh);
 
-const camera = new THREE.PerspectiveCamera(CONFIG.normalFov, window.innerWidth / window.innerHeight, 0.1, 600);
+const camera = new THREE.PerspectiveCamera(CONFIG.normalFov, window.innerWidth / window.innerHeight, 0.1, 2000);
 camera.position.set(CONFIG.prisonPos.x, CONFIG.playerHeight, CONFIG.prisonPos.z);
 const weaponScene = new THREE.Scene();
 const weaponAmbient = new THREE.AmbientLight(0xffffff, 0.8);
