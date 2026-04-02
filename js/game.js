@@ -3574,6 +3574,7 @@ const ashGeo = new THREE.SphereGeometry(1, 5, 4);
 const ashMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.7, color: 0x444444 });
 const ashMesh = new THREE.InstancedMesh(ashGeo, ashMat, ASH_POOL_SIZE);
 ashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+ashMesh.frustumCulled = false;
 scene.add(ashMesh);
 
 const ashActive    = new Array(ASH_POOL_SIZE).fill(false);
