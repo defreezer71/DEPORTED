@@ -638,13 +638,7 @@ function update() {
     state.hazePlane = haze;
   }
 
-  if (state.erupted) {
-    state.ashTimer = (state.ashTimer || 0) + renderDt;
-    if (state.ashTimer > 0.07) {
-      state.ashTimer = 0;
-      spawnAshCloud(2.5 + Math.random() * 5, 8 + Math.random() * 18, 10 + Math.random() * 14);
-    }
-  }
+  // ash spawner disabled — eruption uses smokeParticles system instead
 
   updateAshClouds(renderDt);
 
@@ -778,16 +772,24 @@ function update() {
   }
 
   // Smoke
-  smokeInst.visible = !state.erupted;
+  smokeInst.visible = true;
+  if (state.erupted) {
+    smokeMat.color.setHex(0x111111);
+    smokeMat.opacity = 0.85;
+  } else {
+    smokeMat.color.setHex(0x999999);
+    smokeMat.opacity = 0.22;
+  }
   for (const s of smokeParticles) {
-    const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
-    const spread = 1 + riseT * 0.07;
+    const colHeight = state.erupted ? 160 : 65;
+    const riseT = ((clock.elapsedTime * s.speed * (state.erupted ? 12 : 5) + s.phase * 15) % colHeight);
+    const spread = state.erupted ? (2 + riseT * 0.18) : (1 + riseT * 0.07);
     _smokeDummy.position.set(
-      s.ox * spread + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 1.5,
+      s.ox * spread + Math.sin(clock.elapsedTime * 0.3 + s.phase) * (state.erupted ? 4 : 1.5),
       CONFIG.volcanoHeight + 2 + riseT,
-      s.oz * spread + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 1.5
+      s.oz * spread + Math.cos(clock.elapsedTime * 0.2 + s.phase) * (state.erupted ? 4 : 1.5)
     );
-    _smokeDummy.scale.setScalar(s.size * (1 + riseT * 0.035));
+    _smokeDummy.scale.setScalar(s.size * (state.erupted ? 3.5 + riseT * 0.08 : 1 + riseT * 0.035));
     _smokeDummy.updateMatrix();
     smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
   }
