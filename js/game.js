@@ -4131,7 +4131,7 @@ function update() {
     state.hazePlane = haze;
   }
 
-  // ash spawner disabled — eruption uses smokeParticles system instead
+  if (state.erupted) updateEruptionPoints(renderDt);
 
   updateAshClouds(renderDt);
 
