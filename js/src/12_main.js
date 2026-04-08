@@ -138,54 +138,70 @@ ashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 ashMesh.frustumCulled = false;
 ashMesh.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 150, 0), 800);
 
-// ── Eruption Points Column — 1 draw call, auto-billboards ──
-const ERUPT_COUNT = 250;
+// ── Eruption — single unified cone system ──
+const ERUPT_COUNT = 500;
+const ERUPT_MAX_H = 155;
+
 const eruptCanvas = document.createElement('canvas');
 eruptCanvas.width = eruptCanvas.height = 64;
 const eruptCtx = eruptCanvas.getContext('2d');
 const eruptGrad = eruptCtx.createRadialGradient(32,32,0,32,32,32);
-eruptGrad.addColorStop(0, 'rgba(30,30,30,1)');
-eruptGrad.addColorStop(0.5, 'rgba(20,20,20,0.6)');
-eruptGrad.addColorStop(1, 'rgba(0,0,0,0)');
+eruptGrad.addColorStop(0,    'rgba(8,8,8,1)');
+eruptGrad.addColorStop(0.55, 'rgba(10,10,10,1)');
+eruptGrad.addColorStop(0.78, 'rgba(5,5,5,0.5)');
+eruptGrad.addColorStop(1,    'rgba(0,0,0,0)');
 eruptCtx.fillStyle = eruptGrad;
 eruptCtx.fillRect(0,0,64,64);
 const eruptTex = new THREE.CanvasTexture(eruptCanvas);
-const eruptGeo = new THREE.BufferGeometry();
-const eruptPositions = new Float32Array(ERUPT_COUNT * 3);
-const eruptPhases = new Float32Array(ERUPT_COUNT);
-const eruptSpeeds = new Float32Array(ERUPT_COUNT);
-const eruptRadii = new Float32Array(ERUPT_COUNT);
-for (let i = 0; i < ERUPT_COUNT; i++) {
-  eruptPhases[i] = Math.random() * Math.PI * 2;
-  eruptSpeeds[i] = 18 + Math.random() * 22;
-  eruptRadii[i] = Math.random() * 10;
-  eruptPositions[i*3]   = (Math.random()-0.5) * eruptRadii[i] * 2;
-  eruptPositions[i*3+1] = CONFIG.volcanoHeight + Math.random() * 120;
-  eruptPositions[i*3+2] = (Math.random()-0.5) * eruptRadii[i] * 2;
+
+const eruptPos   = new Float32Array(ERUPT_COUNT * 3);
+const eruptPhase = new Float32Array(ERUPT_COUNT);
+const eruptSpeed = new Float32Array(ERUPT_COUNT);
+
+function _resetErupt(i, atBase) {
+  eruptPhase[i] = Math.random() * Math.PI * 2;
+  eruptSpeed[i] = 14 + Math.random() * 7;
+  eruptPos[i*3+1] = atBase ? (3 + Math.random() * 6) : (3 + Math.random() * ERUPT_MAX_H);
+  eruptPos[i*3]   = (Math.random()-0.5) * 3;
+  eruptPos[i*3+2] = (Math.random()-0.5) * 3;
 }
-eruptGeo.setAttribute('position', new THREE.BufferAttribute(eruptPositions, 3));
+for (let i = 0; i < ERUPT_COUNT; i++) _resetErupt(i, false);
+
+const eruptGeo = new THREE.BufferGeometry();
+eruptGeo.setAttribute('position', new THREE.BufferAttribute(eruptPos, 3));
+eruptGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 78, 0), 800);
+
 const eruptMat = new THREE.PointsMaterial({
-  size: 22, map: eruptTex, transparent: true, depthWrite: false,
-  opacity: 0.9, sizeAttenuation: true
+  size: 24, map: eruptTex, transparent: true,
+  depthWrite: false, depthTest: true, opacity: 0.92, sizeAttenuation: true
 });
+
 const eruptPoints = new THREE.Points(eruptGeo, eruptMat);
 eruptPoints.frustumCulled = false;
+eruptPoints.position.set(0, CONFIG.volcanoHeight, 0);
 eruptPoints.visible = false;
 scene.add(eruptPoints);
+
+let _eruptFadeT = 0;
+
 function updateEruptionPoints(dt) {
   eruptPoints.visible = true;
-  const pos = eruptGeo.attributes.position.array;
+  _eruptFadeT = Math.min(1, _eruptFadeT + dt / 0.8);
+  eruptMat.opacity = 0.92 * _eruptFadeT;
+
   const t = clock.elapsedTime;
   for (let i = 0; i < ERUPT_COUNT; i++) {
-    pos[i*3+1] += eruptSpeeds[i] * dt;
-    const frac = (pos[i*3+1] - CONFIG.volcanoHeight) / 140;
-    const radius = eruptRadii[i] * (1 + frac * 2.5);
-    pos[i*3]   = Math.cos(eruptPhases[i] + t * 0.3) * radius;
-    pos[i*3+2] = Math.sin(eruptPhases[i] + t * 0.2) * radius;
-    if (pos[i*3+1] > CONFIG.volcanoHeight + 140) {
-      pos[i*3+1] = CONFIG.volcanoHeight + Math.random() * 8;
-      eruptPhases[i] = Math.random() * Math.PI * 2;
+    eruptPos[i*3+1] += eruptSpeed[i] * dt;
+    if (eruptPos[i*3+1] > ERUPT_MAX_H) {
+      // Reset to random height — keeps uniform density, zero gaps ever
+      eruptPos[i*3+1] = Math.random() * ERUPT_MAX_H;
+      eruptPhase[i] = Math.random() * Math.PI * 2;
     }
+    const frac   = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
+    // Exponential bloom: stays tight at base, explodes into wide umbrella at top
+    const radius = 2 + Math.pow(frac, 2.2) * 75;
+    eruptPos[i*3]   = Math.cos(eruptPhase[i] + t * 0.20) * radius;
+    eruptPos[i*3+2] = Math.sin(eruptPhase[i] + t * 0.15) * radius;
   }
   eruptGeo.attributes.position.needsUpdate = true;
 }
@@ -212,8 +228,8 @@ function spawnAshCloud(size, upVel, life) {
   for (let i = 0; i < ASH_POOL_SIZE; i++) {
     if (ashActive[i]) continue;
     ashActive[i]   = true;
-    ashSize[i]     = size * 1.8;
-    ashGrowRate[i] = 1.2 + Math.random() * 2.5;
+    ashSize[i]     = size * 1.2;
+    ashGrowRate[i] = 0.3 + Math.random() * 0.5;
     ashLife[i]     = life;
     ashMaxLife[i]  = life + 5;
     const heightFrac = Math.random();
@@ -221,7 +237,7 @@ function spawnAshCloud(size, upVel, life) {
     const spawnRadius = (4 + heightFrac * 22) * Math.random();
     ashPos[i].set(
       Math.cos(spawnAngle) * spawnRadius,
-      CONFIG.volcanoHeight + heightFrac * 80,
+      CONFIG.volcanoHeight + 12 + heightFrac * 68,
       Math.sin(spawnAngle) * spawnRadius
     );
     ashVel[i].set(
@@ -273,7 +289,7 @@ function updateAshClouds(dt) {
 
   ashMesh.instanceMatrix.needsUpdate = true;
   ashMesh.instanceColor.needsUpdate = true;
-  ashMat.opacity = 0.65;
+  ashMat.opacity = 0.18;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -620,11 +636,21 @@ function update() {
   const eruptionTime = state.waterRiseStart - 15;
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
+    state.eruptionStartTime = state.matchTime;
+    // Pre-distribute across full column for continuous stream — fade in fast
+    _eruptFadeT = 0;
+    for (let i = 0; i < ERUPT_COUNT; i++) {
+      eruptPhase[i] = Math.random() * Math.PI * 2;
+      eruptSpeed[i] = 14 + Math.random() * 7;
+      eruptPos[i*3+1] = Math.random() * ERUPT_MAX_H;
+      eruptPos[i*3] = (Math.random()-0.5) * 2;
+      eruptPos[i*3+2] = (Math.random()-0.5) * 2;
+    }
     waterWarning.textContent = '⚠ VOLCANO ERUPTING — WATER RISING IN 15 SECONDS ⚠';
     waterWarning.style.fontSize = '28px';
     waterWarning.classList.add('show');
     setTimeout(() => waterWarning.classList.remove('show'), 5000);
-    for (let i = 0; i < 152; i++) spawnAshCloud(3 + Math.random() * 6, 14 + Math.random() * 28, 12 + Math.random() * 15);
+    // ash cloud spawning disabled — eruptPoints handles the column visuals
     {
       const ctx = ensureAudio();
       const t0 = ctx.currentTime;
@@ -685,7 +711,7 @@ function update() {
       });
     }
     const hazeGeo = new THREE.PlaneGeometry(CONFIG.islandSize * 1.5, CONFIG.islandSize * 1.5);
-    const hazeMat = new THREE.MeshBasicMaterial({ color: 0x777777, transparent: true, opacity: 0, side: THREE.DoubleSide });
+    const hazeMat = new THREE.MeshBasicMaterial({ color: 0x777777, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false });
     const haze = new THREE.Mesh(hazeGeo, hazeMat);
     haze.rotation.x = -Math.PI / 2; haze.position.y = 45;
     scene.add(haze);
@@ -827,6 +853,7 @@ function update() {
 
   // Smoke
   smokeInst.visible = !state.erupted;
+  ashMesh.visible = !state.erupted;
   for (const s of smokeParticles) {
     const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
     const spread = 1 + riseT * 0.07;
