@@ -3560,6 +3560,11 @@ const fwd = new THREE.Vector3();
 const rgt = new THREE.Vector3();
 let minimapTimer = 0;
 let perfFrames = 0, perfLastTime = 0;
+let headBobPhase = 0;
+let landingBobY = 0, landingBobVel = 0;
+let wasGrounded = true;
+let landingCooldown = 0;
+let weaponJumpY = 0, weaponJumpVel = 0;
 
 // ── Fixed timestep physics ──
 // Physics always steps at exactly 64Hz regardless of render framerate.
@@ -4328,8 +4333,38 @@ function update() {
     bubbleGroup.visible = false;
   }
 
-  // Weapon bob + reload animation
+  // ── Head bob ──
   const isMoving = smoothedMove.lengthSq() > 0.01;
+  if (state.isGrounded && isMoving && !state.ads) {
+    headBobPhase += renderDt * 8;
+  } else {
+    headBobPhase += renderDt * 1.5;
+  }
+  const headBobY = (state.isGrounded && isMoving && !state.ads)
+    ? Math.sin(headBobPhase) * 0.015
+    : 0;
+
+  // ── Jump / landing pitch kick (spring) ──
+  const justLeftGround = !state.isGrounded && wasGrounded;
+  const justLanded     = state.isGrounded  && !wasGrounded;
+  wasGrounded = state.isGrounded;
+  landingCooldown = Math.max(0, landingCooldown - renderDt);
+  if (justLeftGround && landingCooldown === 0) {
+    landingBobVel  = -0.5;    // slight upward pitch tug on takeoff
+    weaponJumpVel  = -0.05;   // weapon lags behind — dips down on takeoff
+    landingCooldown = 0.4;
+  }
+  if (justLanded && landingCooldown === 0) {
+    landingBobVel  = 0.361;   // forward pitch kick on landing
+    weaponJumpVel  = -0.07;   // weapon bounces down on landing
+    landingCooldown = 0.4;
+  }
+  landingBobY += landingBobVel * renderDt;
+  landingBobVel += (-landingBobY * 200 - landingBobVel * 18) * renderDt;
+  weaponJumpY += weaponJumpVel * renderDt;
+  weaponJumpVel += (-weaponJumpY * 80 - weaponJumpVel * 12) * renderDt;
+
+  // Weapon bob + reload animation
   weaponBobPhase += renderDt * (isMoving ? 10 : 1.5);
   const restPos = state.currentWeapon === 'm4' ? new THREE.Vector3(0.25, -0.22, -0.38) : new THREE.Vector3(0.2, -0.2, -0.3);
   let targetPos;
@@ -4353,6 +4388,7 @@ function update() {
       targetPos.y += Math.sin(weaponBobPhase * 0.3) * 0.002;
     }
   }
+  targetPos.y += weaponJumpY;
   const lerpSpeed = state.reloadPhase ? 6 : 12;
   weaponGroup.position.lerp(targetPos, renderDt * lerpSpeed);
   if (!state.reloadPhase) {
@@ -4361,6 +4397,10 @@ function update() {
     weaponGroup.rotation.x += (-0.3 - weaponGroup.rotation.x) * renderDt * 6;
   }
   weaponGroup.rotation.y += (0 - weaponGroup.rotation.y) * renderDt * 10;
+  // Strafe sway — weapon tilts into the direction of lateral movement
+  const strafeAmt = state.moveLeft ? 1 : state.moveRight ? -1 : 0;
+  const targetSwayZ = state.ads ? 0 : strafeAmt * 0.069;
+  weaponGroup.rotation.z += (targetSwayZ - weaponGroup.rotation.z) * renderDt * 7;
   updateMuzzleFlash(renderDt);
 
   // FOV
@@ -4394,12 +4434,20 @@ function update() {
       `FPS: ${fps} | Tris: ${(tris/1000).toFixed(1)}k | Calls: ${calls}`;
   }
 
+  // Apply head bob (position) + landing pitch kick (rotation) for this frame only
   camera.position.add(state.shakeOffset);
+  camera.position.y += headBobY;
+  euler.set(state.pitch + landingBobY, state.yaw, 0, 'YXZ');
+  camera.quaternion.setFromEuler(euler);
   renderer.clear();
   renderer.render(scene, camera);
   renderer.clearDepth();
   renderer.render(weaponScene, weaponCamera);
+  camera.position.y -= headBobY;
   camera.position.sub(state.shakeOffset);
+  // Restore physics quaternion
+  euler.set(state.pitch, state.yaw, 0, 'YXZ');
+  camera.quaternion.setFromEuler(euler);
 }
 
 window.addEventListener('resize', () => {
