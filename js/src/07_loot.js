@@ -66,6 +66,7 @@ function spawnLoot(x, z, type) {
 // ═══════════════════════════════════════════════════════════
 // AMMO DEPOTS — 4 corner sheds with interactive crates
 // ═══════════════════════════════════════════════════════════
+const windowPanes = []; // glass panes that block bullets
 const depotCorners = [
   { x:  half - 6, z:  half - 6, open: 'east'  },
   { x: -half + 6, z:  half - 6, open: 'west'  },
@@ -92,7 +93,7 @@ const depotCrates = [];
 
 depotCorners.forEach(({ x, z, open }) => {
   const h = getTerrainHeight(x, z);
-  const sw = 8.25, sd = 6.25, sh = 4.5, wt = 0.22;
+  const sw = 8.25, sd = 6.25, sh = 5.85, wt = 0.22;
 
   // ── Floor — raised wood deck ──
   const floor = new THREE.Mesh(new THREE.BoxGeometry(sw + 0.15, 0.22, sd + 0.15), floorMat);
@@ -106,6 +107,17 @@ depotCorners.forEach(({ x, z, open }) => {
   }
 
   // ── Walls ──
+  // Window dimensions — defined early so back-wall cutout can use them
+  const backAxis = open === 'east' ? 'west' : 'east';
+  const wallPX   = open === 'east' ? x - sw / 2 : x + sw / 2;
+  const winW     = sd * 0.50, winH = 0.45;
+  const winCY    = h + sh * 0.72;
+  const winBot   = winCY - winH / 2;
+  const winTop   = winCY + winH / 2;
+  const btmH     = winBot - h;
+  const topH     = h + sh - winTop;
+  const sideZ    = (sd - winW) / 2;
+
   const allWalls = [
     { px: 0,     pz: -sd/2, w: sw,  d: wt, axis: 'north' },
     { px: 0,     pz:  sd/2, w: sw,  d: wt, axis: 'south' },
@@ -113,7 +125,7 @@ depotCorners.forEach(({ x, z, open }) => {
     { px:  sw/2, pz: 0,     w: wt,  d: sd, axis: 'east'  },
   ];
   allWalls.forEach(({ px, pz, w, d, axis }) => {
-    if (axis === open) return;
+    if (axis === open || axis === backAxis) return;
     const wall = new THREE.Mesh(new THREE.BoxGeometry(w, sh, d), shedMat);
     wall.position.set(x + px, h + sh / 2, z + pz);
     wall.castShadow = true; wall.receiveShadow = true;
@@ -151,6 +163,32 @@ depotCorners.forEach(({ x, z, open }) => {
     }
   });
 
+  // ── Back wall — 4 pieces around window opening ──
+  const bwPieces = [
+    [wallPX, h + btmH / 2,              z,                    wt, btmH,  sd    ],  // bottom
+    [wallPX, winTop + topH / 2,          z,                    wt, topH,  sd    ],  // top
+    [wallPX, winCY,                      z - winW / 2 - sideZ / 2, wt, winH, sideZ],  // left
+    [wallPX, winCY,                      z + winW / 2 + sideZ / 2, wt, winH, sideZ],  // right
+  ];
+  bwPieces.forEach(([bx2, by2, bz2, bw2, bh2, bd2]) => {
+    const bwm = new THREE.Mesh(new THREE.BoxGeometry(bw2, bh2, bd2), shedMat);
+    bwm.position.set(bx2, by2, bz2);
+    bwm.castShadow = true; bwm.receiveShadow = true;
+    scene.add(bwm); collidables.push(bwm);
+  });
+  // Base strip and corner posts for back wall
+  const bwBase = new THREE.Mesh(new THREE.BoxGeometry(wt + 0.07, 0.22, sd + 0.07), shedDark);
+  bwBase.position.set(wallPX, h + 0.11, z); scene.add(bwBase);
+  const bwPostH = sh + 0.14;
+  for (const s of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, bwPostH, 0.18), shedDark);
+    post.position.set(wallPX, h + bwPostH / 2, z + s * (sd / 2 - 0.06));
+    scene.add(post);
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.09, 0.26), metalMat);
+    cap.position.set(wallPX, h + bwPostH + 0.045, z + s * (sd / 2 - 0.06));
+    scene.add(cap);
+  }
+
   // ── Open-face door frame with warning chevrons ──
   const openAxis = allWalls.find(aw => aw.axis === open);
   if (openAxis) {
@@ -181,20 +219,24 @@ depotCorners.forEach(({ x, z, open }) => {
     scene.add(hdr);
   }
 
-  // ── Supply sign on interior back wall ──
-  const signWallX = open === 'east' ? x - sw / 2 + 0.15 : x + sw / 2 - 0.15;
-  const signBg = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.60, sd * 0.58), new THREE.MeshLambertMaterial({ color: 0x111111 }));
-  signBg.position.set(signWallX, h + sh * 0.68, z);
-  scene.add(signBg);
-  const signFg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.52, sd * 0.55), new THREE.MeshLambertMaterial({ color: 0xdd7700 }));
-  signFg.position.set(signWallX + (open === 'east' ? 0.01 : -0.01), h + sh * 0.68, z);
-  scene.add(signFg);
-  // Sign stripe details (dark horizontal bars to suggest text)
-  for (let row = -1; row <= 1; row++) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, sd * 0.38), new THREE.MeshLambertMaterial({ color: 0x111111 }));
-    bar.position.set(signWallX + (open === 'east' ? 0.02 : -0.02), h + sh * 0.68 + row * 0.15, z);
-    scene.add(bar);
-  }
+  // ── Window on interior back wall ──
+  const signWallX = open === 'east' ? wallPX + 0.12 : wallPX - 0.12;
+  const frameTh = 0.13;
+  const glassMat = new THREE.MeshPhongMaterial({ color: 0x88aacc, transparent: true, opacity: 0.28, shininess: 120, depthWrite: false });
+  const glassPane = new THREE.Mesh(new THREE.BoxGeometry(0.06, winH - frameTh * 2, winW - frameTh * 2), glassMat);
+  glassPane.position.set(signWallX, winCY, z);
+  scene.add(glassPane);
+  windowPanes.push(glassPane);
+  [
+    [signWallX, winCY + winH / 2 - frameTh / 2, z,            0.20, frameTh,      winW + 0.05],
+    [signWallX, winCY - winH / 2 + frameTh / 2, z,            0.20, frameTh,      winW + 0.05],
+    [signWallX, winCY,                           z - winW / 2, 0.20, winH + 0.05,  frameTh    ],
+    [signWallX, winCY,                           z + winW / 2, 0.20, winH + 0.05,  frameTh    ],
+  ].forEach(([fx, fy, fz, fd, fh, fw]) => {
+    const piece = new THREE.Mesh(new THREE.BoxGeometry(fd, fh, fw), shedDark);
+    piece.position.set(fx, fy, fz);
+    scene.add(piece);
+  });
 
   // ── Corrugated metal roof ──
   const ridgeH = 1.1;
@@ -303,54 +345,63 @@ depotCorners.forEach(({ x, z, open }) => {
     plaque.position.set(bx, iconY + 0.028, bz); scene.add(plaque);
 
     if (icon === 'ammo_large') {
-      const brass   = new THREE.MeshPhongMaterial({ color: 0xc8960c, shininess: 45 });
-      const tip_m   = new THREE.MeshPhongMaterial({ color: 0xd4a017, shininess: 55 });
-      const case_m  = new THREE.MeshPhongMaterial({ color: 0x8b6914, shininess: 35 });
-      const primMat = new THREE.MeshPhongMaterial({ color: 0xaaaaaa, shininess: 65 });
-      const cas  = new THREE.Mesh(new THREE.CylinderGeometry(0.10,  0.095, 0.33, 12), case_m);
-      cas.position.set(bx, iconY + 0.22, bz); scene.add(cas);
-      const bod  = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.10,  0.22, 12), brass);
-      bod.position.set(bx, iconY + 0.50, bz); scene.add(bod);
-      const tipp = new THREE.Mesh(new THREE.ConeGeometry(0.076, 0.19, 12), tip_m);
-      tipp.position.set(bx, iconY + 0.71, bz); scene.add(tipp);
-      const prim = new THREE.Mesh(new THREE.CylinderGeometry(0.098, 0.098, 0.045, 12), primMat);
-      prim.position.set(bx, iconY + 0.06, bz); scene.add(prim);
+      // Rifle round — slim, green military tip (M4 / AK calibre), scaled 80%
+      const brass    = new THREE.MeshPhongMaterial({ color: 0xc8960c, shininess: 45 });
+      const case_m   = new THREE.MeshPhongMaterial({ color: 0x8b6914, shininess: 35 });
+      const greenTip = new THREE.MeshPhongMaterial({ color: 0x336622, shininess: 55 });
+      const primMat  = new THREE.MeshPhongMaterial({ color: 0xaaaaaa, shininess: 65 });
+      const cas  = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.068, 0.32, 12), case_m);
+      cas.position.set(bx, iconY + 0.20, bz); scene.add(cas);
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.072, 0.08, 12), brass);
+      neck.position.set(bx, iconY + 0.40, bz); scene.add(neck);
+      const bod  = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.24, 12), brass);
+      bod.position.set(bx, iconY + 0.56, bz); scene.add(bod);
+      const tipp = new THREE.Mesh(new THREE.ConeGeometry(0.052, 0.19, 12), greenTip);
+      tipp.position.set(bx, iconY + 0.78, bz); scene.add(tipp);
+      const prim = new THREE.Mesh(new THREE.CylinderGeometry(0.070, 0.070, 0.032, 12), primMat);
+      prim.position.set(bx, iconY + 0.05, bz); scene.add(prim);
     }
     else if (icon === 'ammo_small') {
-      const brass = new THREE.MeshPhongMaterial({ color: 0xb8860b, shininess: 45 });
-      const silv  = new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 65 });
-      for (const ox of [-0.14, 0.14]) {
-        const cas  = new THREE.Mesh(new THREE.CylinderGeometry(0.066, 0.062, 0.25, 10), brass);
-        cas.position.set(bx + ox, iconY + 0.20, bz); scene.add(cas);
-        const bod  = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.066, 0.16, 10), silv);
-        bod.position.set(bx + ox, iconY + 0.41, bz); scene.add(bod);
-        const tipp = new THREE.Mesh(new THREE.ConeGeometry(0.052, 0.13, 10), silv);
-        tipp.position.set(bx + ox, iconY + 0.57, bz); scene.add(tipp);
-      }
+      // Pistol round — single, short, fat, round-nose silver tip (handgun calibre)
+      const brass = new THREE.MeshPhongMaterial({ color: 0xb06010, shininess: 40 });
+      const silv  = new THREE.MeshPhongMaterial({ color: 0xdddddd, shininess: 75 });
+      const cas  = new THREE.Mesh(new THREE.CylinderGeometry(0.080, 0.075, 0.22, 10), brass);
+      cas.position.set(bx, iconY + 0.17, bz); scene.add(cas);
+      const bod  = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.080, 0.10, 10), silv);
+      bod.position.set(bx, iconY + 0.33, bz); scene.add(bod);
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), silv);
+      dome.position.set(bx, iconY + 0.38, bz); scene.add(dome);
     }
     else if (icon === 'armor') {
       const shBlue  = new THREE.MeshPhongMaterial({ color: 0x1a44cc, shininess: 32 });
       const shLight = new THREE.MeshPhongMaterial({ color: 0x7799ff, shininess: 55 });
+      const ag = new THREE.Group();
+      ag.position.set(bx, iconY, bz);
+      ag.rotation.y = open === 'east' ? Math.PI / 2 : -Math.PI / 2;
+      scene.add(ag);
       const shBody = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.38, 0.11), shBlue);
-      shBody.position.set(bx, iconY + 0.34, bz); scene.add(shBody);
+      shBody.position.set(0, 0.34, 0); ag.add(shBody);
       const shL = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.25, 0.11), shBlue);
-      shL.rotation.z = 0.42; shL.position.set(bx - 0.26, iconY + 0.42, bz); scene.add(shL);
+      shL.rotation.z = 0.42; shL.position.set(-0.26, 0.42, 0); ag.add(shL);
       const shR = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.25, 0.11), shBlue);
-      shR.rotation.z = -0.42; shR.position.set(bx + 0.26, iconY + 0.42, bz); scene.add(shR);
+      shR.rotation.z = -0.42; shR.position.set(0.26, 0.42, 0); ag.add(shR);
       const shPt = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.24, 4), shBlue);
-      shPt.rotation.y = Math.PI / 4;
-      shPt.position.set(bx, iconY + 0.11, bz); scene.add(shPt);
+      shPt.rotation.y = Math.PI / 4; shPt.position.set(0, 0.11, 0); ag.add(shPt);
       const shEmb = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.28, 0.12), shLight);
-      shEmb.position.set(bx, iconY + 0.35, bz); scene.add(shEmb);
+      shEmb.position.set(0, 0.35, 0); ag.add(shEmb);
     }
     else if (icon === 'health') {
       const crossRed = new THREE.MeshPhongMaterial({ color: 0xdd1111, shininess: 22 });
+      const hg = new THREE.Group();
+      hg.position.set(bx, iconY, bz);
+      hg.rotation.y = open === 'east' ? Math.PI / 2 : -Math.PI / 2;
+      scene.add(hg);
       const border = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.60, 0.09), white);
-      border.position.set(bx, iconY + 0.28, bz - 0.01); scene.add(border);
+      border.position.set(0, 0.28, -0.01); hg.add(border);
       const hb = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.18, 0.11), crossRed);
-      hb.position.set(bx, iconY + 0.28, bz + 0.01); scene.add(hb);
+      hb.position.set(0, 0.28, 0.01); hg.add(hb);
       const vb = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.56, 0.11), crossRed);
-      vb.position.set(bx, iconY + 0.28, bz + 0.01); scene.add(vb);
+      vb.position.set(0, 0.28, 0.01); hg.add(vb);
     }
   });
 });

@@ -157,9 +157,16 @@ function shoot() {
   // Check full range so volcano behind player origin is still caught
   const blockDist = shotBlockedByVolcano(shotOrigin, dir, Math.max(targetDist, CONFIG.volcanoRadius * 2.2));
 
+  // Check window panes — glass blocks bullets
+  const paneHits = raycaster.intersectObjects(windowPanes, false);
+  const paneDist = paneHits.length > 0 ? paneHits[0].distance : Infinity;
+
   if (intersects.length > 0) {
     const hit = intersects[0];
-    if (blockDist !== null && blockDist < hit.distance) {
+    if (paneDist < hit.distance) {
+      // Shot stopped by window glass
+      spawnImpact(paneHits[0].point, paneHits[0].face ? paneHits[0].face.normal : new THREE.Vector3(0, 1, 0));
+    } else if (blockDist !== null && blockDist < hit.distance) {
       // Shot stopped by volcano terrain
       spawnImpact(
         new THREE.Vector3(shotOrigin.x + dir.x * blockDist, shotOrigin.y + dir.y * blockDist, shotOrigin.z + dir.z * blockDist),
@@ -198,6 +205,9 @@ function shoot() {
         }
       }
     }
+  } else if (paneDist < Infinity) {
+    // Shot hit window glass with no target behind it
+    spawnImpact(paneHits[0].point, paneHits[0].face ? paneHits[0].face.normal : new THREE.Vector3(0, 1, 0));
   }
 
   updateHUD();
@@ -261,7 +271,7 @@ function pickupLoot() {
     if (type === 'depot_ammo_m4')    { state.reserveAmmo.m4     += 10; SFX.pickup(); }
     if (type === 'depot_ammo_pistol'){ state.reserveAmmo.pistol  += 10; SFX.pickup(); }
     if (type === 'depot_armor')      { state.armor = 100;               SFX.pickup(); }
-    if (type === 'depot_health')     { state.health = Math.min(100, state.health + 50); updateHUD(); SFX.pickup(); }
+    if (type === 'depot_health')     { state.hp = 100; updateHUD(); SFX.pickup(); }
     updateHUD();
     return;
   }

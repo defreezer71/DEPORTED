@@ -748,7 +748,7 @@ function update() {
   }
 
   if (state.matchTime >= state.waterRiseStart) {
-    if (!state.waterRising && !state.erupted) {
+    if (!state.waterRising) {
       state.waterRising = true;
       water.visible = true;
     }
