@@ -18,7 +18,7 @@ const CONFIG = {
   cliffThickness: 10,
   waterBaseLevel: 0.05,
 
-  prisonPos: { x: -75, z: 75 },
+  prisonPos: { x: -105, z: 105 },
   prisonSize: 23,           // 15% larger
   prisonWallHeight: 10,
 
@@ -155,59 +155,20 @@ scene.add(sun);
 scene.add(new THREE.HemisphereLight(0x4488ff, 0x2d7a0a, 0.7));
 
 // ═══════════════════════════════════════════════════════════
-// TERRAIN — Meandering stream as carved depression
+// TERRAIN
 // ═══════════════════════════════════════════════════════════
 const half = CONFIG.islandSize / 2;
 
-// ── STREAM: circular ring with NO north bulge. Waterfall connects via explicit channel. ──
-const streamHalfWidth = 5;
-const streamBaseRadius = 82;
-const streamSegments = 80;
-const streamPoints = [];
-for (let i = 0; i <= streamSegments; i++) {
-  const angle = (i / streamSegments) * Math.PI * 2;
-  const meander = Math.sin(angle * 3) * 8 + Math.sin(angle * 7) * 3 + Math.cos(angle * 5) * 4;
-  const r = streamBaseRadius + meander;
-  streamPoints.push({ x: Math.cos(angle) * r, z: Math.sin(angle) * r });
-}
 
-const wfTargetX = 0;
-const wfWallZ = -half;
-
-let wfChannelEndZ = -streamBaseRadius;
-{
-  let bestDist = Infinity;
-  for (let i = 0; i < streamPoints.length; i++) {
-    const dx = Math.abs(streamPoints[i].x);
-    if (dx < 12 && streamPoints[i].z < 0) {
-      const dz = streamPoints[i].z;
-      if (dz < -20 && dx < bestDist) { bestDist = dx; wfChannelEndZ = dz; }
-    }
-  }
-  wfChannelEndZ += streamHalfWidth;
-}
-
-function distToStream(x, z) {
-  let minDist = Infinity;
-  for (let i = 0; i < streamPoints.length - 1; i++) {
-    const p = streamPoints[i], q = streamPoints[i + 1];
-    const dx = q.x - p.x, dz = q.z - p.z;
-    const len2 = dx * dx + dz * dz;
-    const t = Math.max(0, Math.min(1, ((x - p.x) * dx + (z - p.z) * dz) / len2));
-    const dist = Math.sqrt((x - p.x - t*dx) ** 2 + (z - p.z - t*dz) ** 2);
-    if (dist < minDist) minDist = dist;
-  }
-  return minDist;
-}
-
+// Used by jungle placement to keep trees out of the canal zone
+const _CANAL_R = 85, _CANAL_W = 1.25;
 function isInStream(x, z) {
-  return distToStream(x, z) < streamHalfWidth;
-}
-
-function getStreamDepth(x, z) {
-  const d = distToStream(x, z);
-  if (d > streamHalfWidth) return 0;
-  return (1 - (d / streamHalfWidth) ** 2) * 0.06;
+  const w = _CANAL_W + 6; // extra buffer keeps trees/bushes clear of canal edges
+  if (Math.abs(z + _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true; // North
+  if (Math.abs(x - _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true; // East
+  if (Math.abs(z - _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true; // South
+  if (Math.abs(x + _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true; // West
+  return false;
 }
 
 function getVolcanoHeight(x, z) {
@@ -227,10 +188,19 @@ function getTerrainHeight(x, z) {
   if (Math.abs(x) > half || Math.abs(z) > half) return -5;
   const vh = getVolcanoHeight(x, z);
   if (vh > 0.5) return vh;
-  const streamDep = getStreamDepth(x, z);
-  const noiseFactor = streamDep > 0 ? Math.max(0, 1 - streamDep * 2) : 1;
-  const baseH = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3 * noiseFactor;
-  return baseH - streamDep;
+  const raw = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3;
+
+  // Flatten terrain within 10 units of each canal side so the canal walls
+  // never float above or sink into a terrain ridge/valley.
+  const R = _CANAL_R, buf = 10;
+  const dS = (Math.abs(x) <= R + buf) ? Math.abs(z + R) : 999;
+  const dN = (Math.abs(x) <= R + buf) ? Math.abs(z - R) : 999;
+  const dE = (Math.abs(z) <= R + buf) ? Math.abs(x - R) : 999;
+  const dW = (Math.abs(z) <= R + buf) ? Math.abs(x + R) : 999;
+  const dist = Math.min(dS, dN, dE, dW);
+  if (dist >= buf) return raw;
+  const t = dist / buf;
+  return raw * t * t * (3 - 2 * t);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -252,9 +222,6 @@ for (let i = 0; i < gPosAttr.count; i++) {
   const x = gPosAttr.getX(i);
   const y = gPosAttr.getY(i);
   const h = getTerrainHeight(x, y);
-  const dist = Math.sqrt(x * x + y * y);
-  const inStream = isInStream(x, y);
-
   let r, g, b;
   if (h > 2) {
     const t = Math.min(h / CONFIG.volcanoHeight, 1);
@@ -282,12 +249,6 @@ for (let i = 0; i < gPosAttr.count; i++) {
     r = baseR + (oxR - baseR) * midBlend + (ashR - oxR) * ashBlend * midBlend + (lavaR - ashR) * lavaBlend + vN5 * 0.5;
     g = baseG + (oxG - baseG) * midBlend + (ashG - oxG) * ashBlend * midBlend + (lavaG - ashG) * lavaBlend + vN5 * 0.2;
     b = baseB + (oxB - baseB) * midBlend + (ashB - oxB) * ashBlend * midBlend + (lavaB - ashB) * lavaBlend;
-  } else if (inStream) {
-    const d = distToStream(x, y);
-    const t = d / streamHalfWidth;
-    r = 0.04 + t * 0.14;
-    g = 0.18 + t * 0.20;
-    b = 0.55 - t * 0.22;
   } else {
     const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.09;
     const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.045;
@@ -310,6 +271,149 @@ const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ vertexC
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
+
+// ── Raised canal — square corners, axis-aligned sides ──
+{
+  const CANAL_R    = 85;
+  const canalH     = 0.77;
+  const canalOuter = 1.25;
+  const wallThick  = 0.29;
+  const canalInner = canalOuter - wallThick;
+  const _s = 2.5;
+
+  const _waterMat = new THREE.MeshLambertMaterial({
+    color: 0x1e78c8, transparent: true, opacity: 0.82, side: THREE.DoubleSide,
+  });
+  const _wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide });
+
+  const addQuad = (arr, idx, x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3) => {
+    const b = arr.length / 3;
+    arr.push(x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3);
+    idx.push(b, b+1, b+2, b+1, b+3, b+2);
+  };
+
+  function mkPts(x0,z0,x1,z1) {
+    const dx=x1-x0, dz=z1-z0, dist=Math.sqrt(dx*dx+dz*dz);
+    const n = Math.max(2, Math.ceil(dist/_s)+1);
+    return Array.from({length:n},(_,i)=>({x:x0+dx*i/(n-1), z:z0+dz*i/(n-1)}));
+  }
+
+  function segNorm(seg) {
+    const dx=seg[seg.length-1].x-seg[0].x, dz=seg[seg.length-1].z-seg[0].z;
+    const l=Math.sqrt(dx*dx+dz*dz)||1;
+    return {nx:-dz/l, nz:dx/l};
+  }
+
+  // Miter between two normals — bisects the joint and scales to keep wall width consistent
+  function miter(n1, n2) {
+    const mx=n1.nx+n2.nx, mz=n1.nz+n2.nz;
+    const ml=Math.sqrt(mx*mx+mz*mz);
+    if (ml<0.001) return n1;
+    const dot=(mx/ml)*n1.nx+(mz/ml)*n1.nz;
+    const s=Math.min(1/Math.max(dot,0.25),4);
+    return {nx:(mx/ml)*s, nz:(mz/ml)*s};
+  }
+
+  const C=CANAL_R;
+  const segments = [
+    mkPts(-C,-C,  C,-C),
+    mkPts( C,-C,  C, C),
+    mkPts( C, C, -C, C),
+    mkPts(-C, C, -C,-C),
+  ];
+
+  const NS = segments.length;
+  const norms = segments.map(segNorm);
+  // At each junction, use a miter that correctly bridges the two adjacent segments
+  const startM = segments.map((_,i) => miter(norms[(i-1+NS)%NS], norms[i]));
+  const endM   = segments.map((_,i) => miter(norms[i], norms[(i+1)%NS]));
+
+  const allWaterV=[], allWaterI=[];
+
+  for (let si=0; si<NS; si++) {
+    const seg=segments[si], sn=norms[si];
+    const wv=[], wi=[];
+
+    for (let i=0; i<seg.length-1; i++) {
+      const p=seg[i], q=seg[i+1];
+      // Junction endpoints use miter; interior points use straight segment normal
+      const mp = (i===0)            ? startM[si] : sn;
+      const mq = (i===seg.length-2) ? endM[si]   : sn;
+      const yB=-1.0, yT=canalH, fY=0.08;
+
+      // Island-side wall (inner face of canal)
+      addQuad(wv,wi, p.x+mp.nx*canalOuter,yB,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yB,q.z+mq.nz*canalOuter,
+                     p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
+      addQuad(wv,wi, p.x+mp.nx*canalInner,yB,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yB,q.z+mq.nz*canalInner,
+                     p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner);
+      addQuad(wv,wi, p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner,
+                     p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
+
+      // Exterior wall
+      addQuad(wv,wi, p.x-mp.nx*canalOuter,yB,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yB,q.z-mq.nz*canalOuter,
+                     p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
+      addQuad(wv,wi, p.x-mp.nx*canalInner,yB,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yB,q.z-mq.nz*canalInner,
+                     p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner);
+      addQuad(wv,wi, p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner,
+                     p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
+
+      // Concrete floor
+      addQuad(wv,wi, p.x-mp.nx*canalInner,fY,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,fY,q.z-mq.nz*canalInner,
+                     p.x+mp.nx*canalInner,fY,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,fY,q.z+mq.nz*canalInner);
+
+      // Water
+      const ww=canalInner-0.05, yw=canalH*0.75;
+      addQuad(allWaterV,allWaterI, p.x-mp.nx*ww,yw,p.z-mp.nz*ww, q.x-mq.nx*ww,yw,q.z-mq.nz*ww,
+                                   p.x+mp.nx*ww,yw,p.z+mp.nz*ww, q.x+mq.nx*ww,yw,q.z+mq.nz*ww);
+    }
+
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(wv),3));
+    g.setIndex(wi);
+    g.computeVertexNormals();
+    // Visual only — collision handled by axis-aligned strips below
+    scene.add(new THREE.Mesh(g,_wallMat));
+  }
+
+  // Collision — two thin walls per side (inner + outer) with an open gap between.
+  // Players walk up to the inner wall (must jump over, top at 0.77 > STEP_HEIGHT 0.45).
+  // Once airborne and past the inner wall, they land in the gap where getTerrainHeight
+  // returns -0.8, sinking to the canal floor. Outer wall prevents escaping off-island.
+  const cHgt = 1.0 + canalH;            // original wall height
+  const cY   = cHgt / 2 - 1.0;         // box top at canalH (0.77) above ground
+  const cInn = C - canalOuter;          // 83.75 — inner face radius
+  const cOut = C + canalOuter;          // 86.25 — outer face radius
+  const wC   = 0.5;                     // collision wall thickness (wider than visual for safety)
+  const iLen = cInn * 2;               // inner walls stop at adjacent canal zone — no corner overlap
+  const oLen = cOut * 2 + wC;          // outer walls span full perimeter including corners
+  [
+    // South inner / outer
+    [0,          -(cInn + wC/2), iLen,  wC  ],
+    [0,          -(cOut - wC/2), oLen,  wC  ],
+    // East inner / outer
+    [cInn + wC/2,  0,            wC,   iLen ],
+    [cOut - wC/2,  0,            wC,   oLen ],
+    // North inner / outer
+    [0,           cInn + wC/2,   iLen,  wC  ],
+    [0,           cOut - wC/2,   oLen,  wC  ],
+    // West inner / outer
+    [-(cInn + wC/2), 0,          wC,   iLen ],
+    [-(cOut - wC/2), 0,          wC,   oLen ],
+  ].forEach(([x, z, w, d]) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, cHgt, d), new THREE.MeshBasicMaterial());
+    m.position.set(x, cY, z);
+    m.visible = false;
+    scene.add(m);
+    collidables.push(m);
+  });
+
+  const waterGeo=new THREE.BufferGeometry();
+  waterGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allWaterV),3));
+  waterGeo.setIndex(allWaterI);
+  waterGeo.computeVertexNormals();
+  window.streamWater=new THREE.Mesh(waterGeo,_waterMat);
+  scene.add(window.streamWater);
+}
 
 // Crater marking
 const crater = new THREE.Mesh(
@@ -485,8 +589,9 @@ const prisonMetal     = new THREE.MeshLambertMaterial({ color: 0x38383a });
 const prisonRust      = new THREE.MeshLambertMaterial({ color: 0x6b4030 });
 const prisonCap       = new THREE.MeshLambertMaterial({ color: 0x505048 });
 
-// Invisible collider material — colorWrite: false keeps it hidden
-// but lets Box3.setFromObject() measure it correctly
+// Invisible collider material — meshes using this are NOT added to the scene.
+// updateMatrixWorld(true) is called after positioning so Box3.setFromObject()
+// gets a correct world transform without issuing any draw calls.
 const colliderMat = new THREE.MeshBasicMaterial({
   transparent: true, opacity: 0,
   depthWrite: false, colorWrite: false
@@ -522,7 +627,7 @@ function createPrisonWall(x, z, w, h, d) {
   const cd = d < w ? d + 0.5 : d;
   const collider = new THREE.Mesh(new THREE.BoxGeometry(cw, h, cd), colliderMat);
   collider.position.set(x, h / 2, z);
-  scene.add(collider);
+  collider.updateMatrixWorld(true);
   collidables.push(collider);
 
   return mesh;
@@ -650,7 +755,7 @@ towerCorners.forEach(tc => {
   // Invisible collider for tower
   const towerCollider = new THREE.Mesh(new THREE.BoxGeometry(3.9, towerH, 3.9), colliderMat);
   towerCollider.position.set(tc.x, towerH / 2, tc.z);
-  scene.add(towerCollider);
+  towerCollider.updateMatrixWorld(true);
   collidables.push(towerCollider);
 
   for (const cx of [-1, 1]) for (const cz of [-1, 1]) {
@@ -760,9 +865,9 @@ function canPlaceAt(x, z) {
   return true;
 }
 
-// Shared invisible collider material — colorWrite:false is required so that
-// THREE.Box3().setFromObject() can still compute a real bounding box.
-// Using visible:false breaks setFromObject and returns an empty/zero-size box.
+// Shared invisible collider material — meshes using this are NOT added to the scene.
+// Instead, updateMatrixWorld(true) is called after positioning so that Box3.setFromObject()
+// and Raycaster both get a correct world transform without issuing any draw calls.
 const invisibleColliderMat = new THREE.MeshBasicMaterial({
   transparent: true,
   opacity: 0,
@@ -858,7 +963,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       invisibleColliderMat
     );
     trunkCol.position.set(x, h + trunkH / 2, z);
-    scene.add(trunkCol);
+    trunkCol.updateMatrixWorld(true);
     collidables.push(trunkCol);
 
     // Trunk BULLET hitbox — tight to visual trunk cylinder
@@ -867,7 +972,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       invisibleColliderMat
     );
     trunkHit.position.set(x, h + trunkH / 2, z);
-    scene.add(trunkHit);
+    trunkHit.updateMatrixWorld(true);
     targets.push(trunkHit);
 
     // Canopy BULLET hitbox — tight to visual squashed sphere
@@ -876,7 +981,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       invisibleColliderMat
     );
     canopyHit.position.set(x, h + trunkH + canopyR * 0.35, z);
-    scene.add(canopyHit);
+    canopyHit.updateMatrixWorld(true);
     targets.push(canopyHit);
   });
 
@@ -943,14 +1048,14 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
         invisibleColliderMat
       );
       bushCol.position.set(x, h + ht * 0.5, z);
-      scene.add(bushCol);
+      bushCol.updateMatrixWorld(true);
       collidables.push(bushCol);
       const bushHit = new THREE.Mesh(
         new THREE.BoxGeometry(w * 0.85, ht, w * 0.85),
         invisibleColliderMat
       );
       bushHit.position.set(x, h + ht * 0.5, z);
-      scene.add(bushHit);
+      bushHit.updateMatrixWorld(true);
       targets.push(bushHit);
     } else {
       // Decorative small bush — no collider, walkthrough
@@ -1040,7 +1145,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     );
     collider.position.set(x, h + sz * 0.5, z);
     collider.rotation.y = 0;
-    scene.add(collider);
+    collider.updateMatrixWorld(true);
     collidables.push(collider);
 
     // Bullet hitbox — same as collider
@@ -1050,7 +1155,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     );
     crateHit.position.set(x, h + sz * 0.5, z);
     crateHit.rotation.y = yRot;
-    scene.add(crateHit);
+    crateHit.updateMatrixWorld(true);
     targets.push(crateHit);
   });
 
@@ -1071,24 +1176,18 @@ const vBase = new THREE.Mesh(
   invisibleColliderMat
 );
 vBase.position.set(0, CONFIG.volcanoHeight * 0.275, 0);
-scene.add(vBase);
-bulletBlockers.push(vBase);
 
 const vMid = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.65, CONFIG.volcanoRadius * 1.0, CONFIG.volcanoHeight * 0.45, 16),
   invisibleColliderMat
 );
 vMid.position.set(0, CONFIG.volcanoHeight * 0.60, 0);
-scene.add(vMid);
-bulletBlockers.push(vMid);
 
 const vTop = new THREE.Mesh(
   new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.22, CONFIG.volcanoRadius * 0.60, CONFIG.volcanoHeight * 0.35, 12),
   invisibleColliderMat
 );
 vTop.position.set(0, CONFIG.volcanoHeight * 0.875, 0);
-scene.add(vTop);
-bulletBlockers.push(vTop);
 
 for (let i = 0; i < 25; i++) {
   const angle = seededRand() * Math.PI * 2;
@@ -1135,7 +1234,7 @@ for (let i = 0; i < 25; i++) {
   );
   crateHit.position.set(x, h + sz * 0.5, z);
   crateHit.rotation.set(0, yRot, 0);
-  scene.add(crateHit);
+  crateHit.updateMatrixWorld(true);
   targets.push(crateHit);
 
   // Use visible crate mesh as player collider — invisible colliders can have BB issues
@@ -2323,6 +2422,7 @@ function _depenetrate(pos, radius, height) {
       pos.z += oz * Math.sign(dz || 1);
     }
   }
+
 }
 
 // ── Horizontal sweep-and-slide ──
@@ -3007,7 +3107,11 @@ overlay.addEventListener('click', (e) => {
     state.pendingLock = false;
     const pl = document.getElementById('click-to-play');
     if (pl) pl.style.setProperty('display', 'none', 'important');
+    renderer.domElement.requestPointerLock();
+    return;
   }
+  // Only re-acquire pointer lock if a game mode is active (not on main menu)
+  if (!state.gameMode) return;
   renderer.domElement.requestPointerLock();
 });
 renderer.domElement.addEventListener('click', () => {
@@ -3439,13 +3543,10 @@ function drawMinimap() {
   mCtx.arc(cx, cy, CONFIG.volcanoRadius * scale, 0, Math.PI * 2);
   mCtx.fillStyle = '#5a4a3a'; mCtx.fill();
 
-  // Stream (draw meandering path)
-  mCtx.beginPath();
-  mCtx.moveTo(cx + streamPoints[0].x * scale, cy + streamPoints[0].z * scale);
-  for (let i = 1; i < streamPoints.length; i++) {
-    mCtx.lineTo(cx + streamPoints[i].x * scale, cy + streamPoints[i].z * scale);
-  }
-  mCtx.strokeStyle = '#1199dd'; mCtx.lineWidth = 2; mCtx.stroke();
+  // Canal (square)
+  mCtx.strokeStyle = '#1199dd'; mCtx.lineWidth = 3;
+  const _cr = _CANAL_R * scale;
+  mCtx.strokeRect(cx - _cr, cy - _cr, _cr * 2, _cr * 2);
 
   // Water flood level — show as blue fill covering submerged areas
   if (state.waterRising && state.waterLevel > 0.5) {
@@ -3834,8 +3935,7 @@ function physicsStep(fixedDt) {
   state.physicsTime += fixedDt;
 
   // Speed modifiers
-  const sprintActive = state.sprintTimer > 0;
-  if (sprintActive) state.sprintTimer = Math.max(0, state.sprintTimer - fixedDt);
+  const sprintActive = false;
 
   // Compute water level from physicsTime — deterministic, framerate-independent
   let physicsWaterLevel = -0.3;
@@ -3853,9 +3953,17 @@ function physicsStep(fixedDt) {
     }
   }
   const isSwimming = state.waterRising && physicsWaterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
+  const _cp = camera.position, _cR = 85, _cW = 1.25;
+  const _feetY = CONFIG.newPhysics ? phys.pos.y : (_cp.y - state.smoothCameraHeight);
+  const inCanalXZ = (Math.abs(_cp.z + _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
+                    (Math.abs(_cp.z - _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
+                    (Math.abs(_cp.x - _cR) < _cW && Math.abs(_cp.z) < _cR + _cW) ||
+                    (Math.abs(_cp.x + _cR) < _cW && Math.abs(_cp.z) < _cR + _cW);
+  const inCanal = inCanalXZ && _feetY < 0.77;
+  state.inCanal = inCanal;
   let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
   if (isSwimming)      speed *= 0.55;
-  if (sprintActive)    speed *= 1.5;
+  if (inCanal)         speed *= 1.5;
   if (state.crouching) speed *= CONFIG.crouchSpeedMult;
 
   if (CONFIG.newPhysics) {
@@ -3975,12 +4083,8 @@ function update() {
     physicsAccumulator -= FIXED_DT;
   }
 
-  // Sprint HUD
-  if (state.phase === 'playing' || state.phase === 'countdown') {
-    const _sa = state.sprintTimer > 0;
-    if (streamBoostEl) streamBoostEl.style.display = _sa ? "block" : "none";
-    if (sprintCdEl && _sa) sprintCdEl.textContent = Math.ceil(state.sprintTimer);
-  }
+  // Canal boost HUD
+  if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
   if (!state.locked) {
     if (state.phase === 'lobby') {
@@ -4071,16 +4175,13 @@ function update() {
     updateBots(renderDt);
   }
 
-  const sprintActive = state.sprintTimer > 0;
-  if (streamBoostEl) streamBoostEl.style.display = sprintActive ? "block" : "none";
-  if (sprintCdEl && sprintActive) sprintCdEl.textContent = Math.ceil(state.sprintTimer);
+  if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
   // Gate swing animation
   if (state.gateOpening && gateOpenProgress < 1) {
     gateOpenProgress += renderDt * 0.5;
     if (gateOpenProgress > 1) {
       gateOpenProgress = 1;
-      if (state.sprintTimer === 0) state.sprintTimer = 15;
     }
     const angle = gateOpenProgress * Math.PI * 0.45;
     gatePivotL.rotation.y = angle;
@@ -4392,6 +4493,18 @@ function update() {
     });
   } else {
     bubbleGroup.visible = false;
+  }
+
+  // ── Stream water shimmer ──
+  if (window.streamWater) {
+    const st = clock.elapsedTime;
+    const shimmer = Math.sin(st * 1.1) * 0.03 + Math.sin(st * 2.9) * 0.015;
+    window.streamWater.material.color.setRGB(
+      0.10 + shimmer * 0.4,
+      0.44 + shimmer * 0.8,
+      0.78 + shimmer * 0.5
+    );
+    window.streamWater.material.opacity = 0.72 + Math.sin(st * 0.8) * 0.08;
   }
 
   // ── Head bob ──
@@ -4853,9 +4966,33 @@ function showRoomCode(code) {
   el.style.display = 'block';
 }
 
+// ── Unpack binary world snapshot from server ──
+// Format: [0x01][count] then per player: 6-byte id | flags | hp | armor | uint16 yaw | float32 x,y,z
+function unpackWorld(ab) {
+  const dv = new DataView(ab);
+  const count = dv.getUint8(1);
+  const players = [];
+  let off = 2;
+  for (let i = 0; i < count; i++) {
+    let id = '';
+    for (let b = 0; b < 6; b++) { const c = dv.getUint8(off + b); if (c) id += String.fromCharCode(c); }
+    off += 6;
+    const flags  = dv.getUint8(off++);
+    const hp     = dv.getUint8(off++);
+    const armor  = dv.getUint8(off++);
+    const yaw    = dv.getUint16(off, true) / 65535 * Math.PI * 2; off += 2;
+    const x      = dv.getFloat32(off, true); off += 4;
+    const y      = dv.getFloat32(off, true); off += 4;
+    const z      = dv.getFloat32(off, true); off += 4;
+    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2) });
+  }
+  return players;
+}
+
 function connectToServer() {
   console.log('Connecting to wss://deported.onrender.com');
   state.ws = new WebSocket('wss://deported.onrender.com');
+  state.ws.binaryType = 'arraybuffer';
 
   state.ws.onopen = () => {
     console.log('WS connected — waiting for player to click play');
@@ -4865,6 +5002,16 @@ function connectToServer() {
   };
 
   state.ws.onmessage = (event) => {
+    // Binary world snapshot
+    if (event.data instanceof ArrayBuffer) {
+      const dv = new DataView(event.data);
+      if (dv.getUint8(0) === 0x01) {
+        state.lastWorldAt = Date.now();
+        updateRemotePlayers(unpackWorld(event.data));
+      }
+      return;
+    }
+
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
 
@@ -4955,14 +5102,9 @@ function connectToServer() {
       case 'chat':
         addChatMessage(msg.id || 'unknown', msg.text || '');
         break;
-      case 'world':
-        state.lastServerTick = msg.tick;
-        state.lastWorldAt = Date.now();
-        updateRemotePlayers(msg.players);
-        if (msg.events && msg.events.length) {
-          for (const evt of msg.events) {
-            if (evt.type === 'hit') applyHitEvent(evt);
-          }
+      case 'events':
+        for (const evt of msg.events) {
+          if (evt.type === 'hit') applyHitEvent(evt);
         }
         break;
 
@@ -4997,28 +5139,30 @@ function connectToServer() {
   };
 }
 
-// Send input snapshot to server every physics tick
+// ── Send binary input packet to server ──
+// Format: [0x02][seq uint16][x,y,z,yaw,pitch float32][keys uint8] = 24 bytes
+const _inputBuf = new ArrayBuffer(24);
+const _inputDV  = new DataView(_inputBuf);
+_inputDV.setUint8(0, 0x02);
+
 function sendInputToServer() {
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.myId) return;
-  state.inputSeq++;
-  state.ws.send(JSON.stringify({
-    type:     'input',
-    seq:      state.inputSeq,
-    yaw:      state.yaw,
-    pitch:    state.pitch,
-    x:        camera.position.x,
-    y:        camera.position.y,
-    z:        camera.position.z,
-    keys: {
-      w:     state.moveForward  ? 1 : 0,
-      s:     state.moveBack     ? 1 : 0,
-      a:     state.moveLeft     ? 1 : 0,
-      d:     state.moveRight    ? 1 : 0,
-      shift: state.crouching    ? 1 : 0,
-      jump:  0,
-    },
-    shooting: state.shooting || false,
-  }));
+  state.inputSeq = (state.inputSeq + 1) & 0xffff;
+  _inputDV.setUint16(1,  state.inputSeq,       true);
+  _inputDV.setFloat32(3, camera.position.x,    true);
+  _inputDV.setFloat32(7, camera.position.y,    true);
+  _inputDV.setFloat32(11, camera.position.z,   true);
+  _inputDV.setFloat32(15, state.yaw   || 0,    true);
+  _inputDV.setFloat32(19, state.pitch || 0,    true);
+  const keys =
+    (state.moveForward ? 1  : 0) |
+    (state.moveBack    ? 2  : 0) |
+    (state.moveLeft    ? 4  : 0) |
+    (state.moveRight   ? 8  : 0) |
+    (state.crouching   ? 16 : 0) |
+    (state.shooting    ? 64 : 0);
+  _inputDV.setUint8(23, keys);
+  state.ws.send(_inputBuf);
 }
 
 // Heartbeat — keeps connection alive when tab is backgrounded
@@ -5027,19 +5171,13 @@ setInterval(sendInputToServer, 50);
 // Stale connection watchdog — Render's proxy can silently drop WS connections
 // without firing onclose. If no world snapshot arrives in 5s, force reconnect.
 setInterval(() => {
-  if (!state.myId) return; // not connected yet
+  if (!state.myId) return;
   const age = Date.now() - (state.lastWorldAt || Date.now());
   if (age > 5000) {
     console.warn('[watchdog] No world snapshot for ' + (age/1000).toFixed(1) + 's — reconnecting');
     if (state.ws) state.ws.close();
-    state.lastWorldAt = Date.now(); // reset so we don't fire again immediately
+    state.lastWorldAt = Date.now();
   }
 }, 2000);
-
-setInterval(() => {
-  if (state.ws && state.ws.readyState === WebSocket.OPEN && state.myId) {
-    state.ws.send(JSON.stringify({ type: "input", seq: state.inputSeq, yaw: state.yaw || 0, pitch: state.pitch || 0, keys: { w:0,s:0,a:0,d:0,shift:0,jump:0 }, shooting: false }));
-  }
-}, 5000);
 
 window.addEventListener('DOMContentLoaded', function() { setupChat(); });

@@ -1,56 +1,17 @@
-// TERRAIN — Meandering stream as carved depression
+// TERRAIN
 // ═══════════════════════════════════════════════════════════
 const half = CONFIG.islandSize / 2;
 
-// ── STREAM: circular ring with NO north bulge. Waterfall connects via explicit channel. ──
-const streamHalfWidth = 5;
-const streamBaseRadius = 82;
-const streamSegments = 80;
-const streamPoints = [];
-for (let i = 0; i <= streamSegments; i++) {
-  const angle = (i / streamSegments) * Math.PI * 2;
-  const meander = Math.sin(angle * 3) * 8 + Math.sin(angle * 7) * 3 + Math.cos(angle * 5) * 4;
-  const r = streamBaseRadius + meander;
-  streamPoints.push({ x: Math.cos(angle) * r, z: Math.sin(angle) * r });
-}
 
-const wfTargetX = 0;
-const wfWallZ = -half;
-
-let wfChannelEndZ = -streamBaseRadius;
-{
-  let bestDist = Infinity;
-  for (let i = 0; i < streamPoints.length; i++) {
-    const dx = Math.abs(streamPoints[i].x);
-    if (dx < 12 && streamPoints[i].z < 0) {
-      const dz = streamPoints[i].z;
-      if (dz < -20 && dx < bestDist) { bestDist = dx; wfChannelEndZ = dz; }
-    }
-  }
-  wfChannelEndZ += streamHalfWidth;
-}
-
-function distToStream(x, z) {
-  let minDist = Infinity;
-  for (let i = 0; i < streamPoints.length - 1; i++) {
-    const p = streamPoints[i], q = streamPoints[i + 1];
-    const dx = q.x - p.x, dz = q.z - p.z;
-    const len2 = dx * dx + dz * dz;
-    const t = Math.max(0, Math.min(1, ((x - p.x) * dx + (z - p.z) * dz) / len2));
-    const dist = Math.sqrt((x - p.x - t*dx) ** 2 + (z - p.z - t*dz) ** 2);
-    if (dist < minDist) minDist = dist;
-  }
-  return minDist;
-}
-
+// Used by jungle placement to keep trees out of the canal zone
+const _CANAL_R = 85, _CANAL_W = 1.25;
 function isInStream(x, z) {
-  return distToStream(x, z) < streamHalfWidth;
-}
-
-function getStreamDepth(x, z) {
-  const d = distToStream(x, z);
-  if (d > streamHalfWidth) return 0;
-  return (1 - (d / streamHalfWidth) ** 2) * 0.06;
+  const w = _CANAL_W + 6; // extra buffer keeps trees/bushes clear of canal edges
+  if (Math.abs(z + _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true; // North
+  if (Math.abs(x - _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true; // East
+  if (Math.abs(z - _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true; // South
+  if (Math.abs(x + _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true; // West
+  return false;
 }
 
 function getVolcanoHeight(x, z) {
@@ -70,10 +31,19 @@ function getTerrainHeight(x, z) {
   if (Math.abs(x) > half || Math.abs(z) > half) return -5;
   const vh = getVolcanoHeight(x, z);
   if (vh > 0.5) return vh;
-  const streamDep = getStreamDepth(x, z);
-  const noiseFactor = streamDep > 0 ? Math.max(0, 1 - streamDep * 2) : 1;
-  const baseH = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3 * noiseFactor;
-  return baseH - streamDep;
+  const raw = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3;
+
+  // Flatten terrain within 10 units of each canal side so the canal walls
+  // never float above or sink into a terrain ridge/valley.
+  const R = _CANAL_R, buf = 10;
+  const dS = (Math.abs(x) <= R + buf) ? Math.abs(z + R) : 999;
+  const dN = (Math.abs(x) <= R + buf) ? Math.abs(z - R) : 999;
+  const dE = (Math.abs(z) <= R + buf) ? Math.abs(x - R) : 999;
+  const dW = (Math.abs(z) <= R + buf) ? Math.abs(x + R) : 999;
+  const dist = Math.min(dS, dN, dE, dW);
+  if (dist >= buf) return raw;
+  const t = dist / buf;
+  return raw * t * t * (3 - 2 * t);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -95,9 +65,6 @@ for (let i = 0; i < gPosAttr.count; i++) {
   const x = gPosAttr.getX(i);
   const y = gPosAttr.getY(i);
   const h = getTerrainHeight(x, y);
-  const dist = Math.sqrt(x * x + y * y);
-  const inStream = isInStream(x, y);
-
   let r, g, b;
   if (h > 2) {
     const t = Math.min(h / CONFIG.volcanoHeight, 1);
@@ -125,12 +92,6 @@ for (let i = 0; i < gPosAttr.count; i++) {
     r = baseR + (oxR - baseR) * midBlend + (ashR - oxR) * ashBlend * midBlend + (lavaR - ashR) * lavaBlend + vN5 * 0.5;
     g = baseG + (oxG - baseG) * midBlend + (ashG - oxG) * ashBlend * midBlend + (lavaG - ashG) * lavaBlend + vN5 * 0.2;
     b = baseB + (oxB - baseB) * midBlend + (ashB - oxB) * ashBlend * midBlend + (lavaB - ashB) * lavaBlend;
-  } else if (inStream) {
-    const d = distToStream(x, y);
-    const t = d / streamHalfWidth;
-    r = 0.04 + t * 0.14;
-    g = 0.18 + t * 0.20;
-    b = 0.55 - t * 0.22;
   } else {
     const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.09;
     const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.045;
@@ -153,6 +114,149 @@ const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ vertexC
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
+
+// ── Raised canal — square corners, axis-aligned sides ──
+{
+  const CANAL_R    = 85;
+  const canalH     = 0.77;
+  const canalOuter = 1.25;
+  const wallThick  = 0.29;
+  const canalInner = canalOuter - wallThick;
+  const _s = 2.5;
+
+  const _waterMat = new THREE.MeshLambertMaterial({
+    color: 0x1e78c8, transparent: true, opacity: 0.82, side: THREE.DoubleSide,
+  });
+  const _wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide });
+
+  const addQuad = (arr, idx, x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3) => {
+    const b = arr.length / 3;
+    arr.push(x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3);
+    idx.push(b, b+1, b+2, b+1, b+3, b+2);
+  };
+
+  function mkPts(x0,z0,x1,z1) {
+    const dx=x1-x0, dz=z1-z0, dist=Math.sqrt(dx*dx+dz*dz);
+    const n = Math.max(2, Math.ceil(dist/_s)+1);
+    return Array.from({length:n},(_,i)=>({x:x0+dx*i/(n-1), z:z0+dz*i/(n-1)}));
+  }
+
+  function segNorm(seg) {
+    const dx=seg[seg.length-1].x-seg[0].x, dz=seg[seg.length-1].z-seg[0].z;
+    const l=Math.sqrt(dx*dx+dz*dz)||1;
+    return {nx:-dz/l, nz:dx/l};
+  }
+
+  // Miter between two normals — bisects the joint and scales to keep wall width consistent
+  function miter(n1, n2) {
+    const mx=n1.nx+n2.nx, mz=n1.nz+n2.nz;
+    const ml=Math.sqrt(mx*mx+mz*mz);
+    if (ml<0.001) return n1;
+    const dot=(mx/ml)*n1.nx+(mz/ml)*n1.nz;
+    const s=Math.min(1/Math.max(dot,0.25),4);
+    return {nx:(mx/ml)*s, nz:(mz/ml)*s};
+  }
+
+  const C=CANAL_R;
+  const segments = [
+    mkPts(-C,-C,  C,-C),
+    mkPts( C,-C,  C, C),
+    mkPts( C, C, -C, C),
+    mkPts(-C, C, -C,-C),
+  ];
+
+  const NS = segments.length;
+  const norms = segments.map(segNorm);
+  // At each junction, use a miter that correctly bridges the two adjacent segments
+  const startM = segments.map((_,i) => miter(norms[(i-1+NS)%NS], norms[i]));
+  const endM   = segments.map((_,i) => miter(norms[i], norms[(i+1)%NS]));
+
+  const allWaterV=[], allWaterI=[];
+
+  for (let si=0; si<NS; si++) {
+    const seg=segments[si], sn=norms[si];
+    const wv=[], wi=[];
+
+    for (let i=0; i<seg.length-1; i++) {
+      const p=seg[i], q=seg[i+1];
+      // Junction endpoints use miter; interior points use straight segment normal
+      const mp = (i===0)            ? startM[si] : sn;
+      const mq = (i===seg.length-2) ? endM[si]   : sn;
+      const yB=-1.0, yT=canalH, fY=0.08;
+
+      // Island-side wall (inner face of canal)
+      addQuad(wv,wi, p.x+mp.nx*canalOuter,yB,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yB,q.z+mq.nz*canalOuter,
+                     p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
+      addQuad(wv,wi, p.x+mp.nx*canalInner,yB,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yB,q.z+mq.nz*canalInner,
+                     p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner);
+      addQuad(wv,wi, p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner,
+                     p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
+
+      // Exterior wall
+      addQuad(wv,wi, p.x-mp.nx*canalOuter,yB,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yB,q.z-mq.nz*canalOuter,
+                     p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
+      addQuad(wv,wi, p.x-mp.nx*canalInner,yB,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yB,q.z-mq.nz*canalInner,
+                     p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner);
+      addQuad(wv,wi, p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner,
+                     p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
+
+      // Concrete floor
+      addQuad(wv,wi, p.x-mp.nx*canalInner,fY,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,fY,q.z-mq.nz*canalInner,
+                     p.x+mp.nx*canalInner,fY,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,fY,q.z+mq.nz*canalInner);
+
+      // Water
+      const ww=canalInner-0.05, yw=canalH*0.75;
+      addQuad(allWaterV,allWaterI, p.x-mp.nx*ww,yw,p.z-mp.nz*ww, q.x-mq.nx*ww,yw,q.z-mq.nz*ww,
+                                   p.x+mp.nx*ww,yw,p.z+mp.nz*ww, q.x+mq.nx*ww,yw,q.z+mq.nz*ww);
+    }
+
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(wv),3));
+    g.setIndex(wi);
+    g.computeVertexNormals();
+    // Visual only — collision handled by axis-aligned strips below
+    scene.add(new THREE.Mesh(g,_wallMat));
+  }
+
+  // Collision — two thin walls per side (inner + outer) with an open gap between.
+  // Players walk up to the inner wall (must jump over, top at 0.77 > STEP_HEIGHT 0.45).
+  // Once airborne and past the inner wall, they land in the gap where getTerrainHeight
+  // returns -0.8, sinking to the canal floor. Outer wall prevents escaping off-island.
+  const cHgt = 1.0 + canalH;            // original wall height
+  const cY   = cHgt / 2 - 1.0;         // box top at canalH (0.77) above ground
+  const cInn = C - canalOuter;          // 83.75 — inner face radius
+  const cOut = C + canalOuter;          // 86.25 — outer face radius
+  const wC   = 0.5;                     // collision wall thickness (wider than visual for safety)
+  const iLen = cInn * 2;               // inner walls stop at adjacent canal zone — no corner overlap
+  const oLen = cOut * 2 + wC;          // outer walls span full perimeter including corners
+  [
+    // South inner / outer
+    [0,          -(cInn + wC/2), iLen,  wC  ],
+    [0,          -(cOut - wC/2), oLen,  wC  ],
+    // East inner / outer
+    [cInn + wC/2,  0,            wC,   iLen ],
+    [cOut - wC/2,  0,            wC,   oLen ],
+    // North inner / outer
+    [0,           cInn + wC/2,   iLen,  wC  ],
+    [0,           cOut - wC/2,   oLen,  wC  ],
+    // West inner / outer
+    [-(cInn + wC/2), 0,          wC,   iLen ],
+    [-(cOut - wC/2), 0,          wC,   oLen ],
+  ].forEach(([x, z, w, d]) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, cHgt, d), new THREE.MeshBasicMaterial());
+    m.position.set(x, cY, z);
+    m.visible = false;
+    scene.add(m);
+    collidables.push(m);
+  });
+
+  const waterGeo=new THREE.BufferGeometry();
+  waterGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allWaterV),3));
+  waterGeo.setIndex(allWaterI);
+  waterGeo.computeVertexNormals();
+  window.streamWater=new THREE.Mesh(waterGeo,_waterMat);
+  scene.add(window.streamWater);
+}
 
 // Crater marking
 const crater = new THREE.Mesh(

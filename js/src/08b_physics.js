@@ -99,6 +99,7 @@ function _depenetrate(pos, radius, height) {
       pos.z += oz * Math.sign(dz || 1);
     }
   }
+
 }
 
 // ── Horizontal sweep-and-slide ──

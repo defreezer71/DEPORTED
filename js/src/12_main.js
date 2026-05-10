@@ -334,8 +334,7 @@ function physicsStep(fixedDt) {
   state.physicsTime += fixedDt;
 
   // Speed modifiers
-  const sprintActive = state.sprintTimer > 0;
-  if (sprintActive) state.sprintTimer = Math.max(0, state.sprintTimer - fixedDt);
+  const sprintActive = false;
 
   // Compute water level from physicsTime — deterministic, framerate-independent
   let physicsWaterLevel = -0.3;
@@ -353,9 +352,17 @@ function physicsStep(fixedDt) {
     }
   }
   const isSwimming = state.waterRising && physicsWaterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
+  const _cp = camera.position, _cR = 85, _cW = 1.25;
+  const _feetY = CONFIG.newPhysics ? phys.pos.y : (_cp.y - state.smoothCameraHeight);
+  const inCanalXZ = (Math.abs(_cp.z + _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
+                    (Math.abs(_cp.z - _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
+                    (Math.abs(_cp.x - _cR) < _cW && Math.abs(_cp.z) < _cR + _cW) ||
+                    (Math.abs(_cp.x + _cR) < _cW && Math.abs(_cp.z) < _cR + _cW);
+  const inCanal = inCanalXZ && _feetY < 0.77;
+  state.inCanal = inCanal;
   let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
   if (isSwimming)      speed *= 0.55;
-  if (sprintActive)    speed *= 1.5;
+  if (inCanal)         speed *= 1.5;
   if (state.crouching) speed *= CONFIG.crouchSpeedMult;
 
   if (CONFIG.newPhysics) {
@@ -475,12 +482,8 @@ function update() {
     physicsAccumulator -= FIXED_DT;
   }
 
-  // Sprint HUD
-  if (state.phase === 'playing' || state.phase === 'countdown') {
-    const _sa = state.sprintTimer > 0;
-    if (streamBoostEl) streamBoostEl.style.display = _sa ? "block" : "none";
-    if (sprintCdEl && _sa) sprintCdEl.textContent = Math.ceil(state.sprintTimer);
-  }
+  // Canal boost HUD
+  if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
   if (!state.locked) {
     if (state.phase === 'lobby') {
@@ -571,16 +574,13 @@ function update() {
     updateBots(renderDt);
   }
 
-  const sprintActive = state.sprintTimer > 0;
-  if (streamBoostEl) streamBoostEl.style.display = sprintActive ? "block" : "none";
-  if (sprintCdEl && sprintActive) sprintCdEl.textContent = Math.ceil(state.sprintTimer);
+  if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
   // Gate swing animation
   if (state.gateOpening && gateOpenProgress < 1) {
     gateOpenProgress += renderDt * 0.5;
     if (gateOpenProgress > 1) {
       gateOpenProgress = 1;
-      if (state.sprintTimer === 0) state.sprintTimer = 15;
     }
     const angle = gateOpenProgress * Math.PI * 0.45;
     gatePivotL.rotation.y = angle;
@@ -892,6 +892,18 @@ function update() {
     });
   } else {
     bubbleGroup.visible = false;
+  }
+
+  // ── Stream water shimmer ──
+  if (window.streamWater) {
+    const st = clock.elapsedTime;
+    const shimmer = Math.sin(st * 1.1) * 0.03 + Math.sin(st * 2.9) * 0.015;
+    window.streamWater.material.color.setRGB(
+      0.10 + shimmer * 0.4,
+      0.44 + shimmer * 0.8,
+      0.78 + shimmer * 0.5
+    );
+    window.streamWater.material.opacity = 0.72 + Math.sin(st * 0.8) * 0.08;
   }
 
   // ── Head bob ──
@@ -1353,9 +1365,33 @@ function showRoomCode(code) {
   el.style.display = 'block';
 }
 
+// ── Unpack binary world snapshot from server ──
+// Format: [0x01][count] then per player: 6-byte id | flags | hp | armor | uint16 yaw | float32 x,y,z
+function unpackWorld(ab) {
+  const dv = new DataView(ab);
+  const count = dv.getUint8(1);
+  const players = [];
+  let off = 2;
+  for (let i = 0; i < count; i++) {
+    let id = '';
+    for (let b = 0; b < 6; b++) { const c = dv.getUint8(off + b); if (c) id += String.fromCharCode(c); }
+    off += 6;
+    const flags  = dv.getUint8(off++);
+    const hp     = dv.getUint8(off++);
+    const armor  = dv.getUint8(off++);
+    const yaw    = dv.getUint16(off, true) / 65535 * Math.PI * 2; off += 2;
+    const x      = dv.getFloat32(off, true); off += 4;
+    const y      = dv.getFloat32(off, true); off += 4;
+    const z      = dv.getFloat32(off, true); off += 4;
+    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2) });
+  }
+  return players;
+}
+
 function connectToServer() {
   console.log('Connecting to wss://deported.onrender.com');
   state.ws = new WebSocket('wss://deported.onrender.com');
+  state.ws.binaryType = 'arraybuffer';
 
   state.ws.onopen = () => {
     console.log('WS connected — waiting for player to click play');
@@ -1365,6 +1401,16 @@ function connectToServer() {
   };
 
   state.ws.onmessage = (event) => {
+    // Binary world snapshot
+    if (event.data instanceof ArrayBuffer) {
+      const dv = new DataView(event.data);
+      if (dv.getUint8(0) === 0x01) {
+        state.lastWorldAt = Date.now();
+        updateRemotePlayers(unpackWorld(event.data));
+      }
+      return;
+    }
+
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
 
@@ -1455,14 +1501,9 @@ function connectToServer() {
       case 'chat':
         addChatMessage(msg.id || 'unknown', msg.text || '');
         break;
-      case 'world':
-        state.lastServerTick = msg.tick;
-        state.lastWorldAt = Date.now();
-        updateRemotePlayers(msg.players);
-        if (msg.events && msg.events.length) {
-          for (const evt of msg.events) {
-            if (evt.type === 'hit') applyHitEvent(evt);
-          }
+      case 'events':
+        for (const evt of msg.events) {
+          if (evt.type === 'hit') applyHitEvent(evt);
         }
         break;
 
@@ -1497,28 +1538,30 @@ function connectToServer() {
   };
 }
 
-// Send input snapshot to server every physics tick
+// ── Send binary input packet to server ──
+// Format: [0x02][seq uint16][x,y,z,yaw,pitch float32][keys uint8] = 24 bytes
+const _inputBuf = new ArrayBuffer(24);
+const _inputDV  = new DataView(_inputBuf);
+_inputDV.setUint8(0, 0x02);
+
 function sendInputToServer() {
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN || !state.myId) return;
-  state.inputSeq++;
-  state.ws.send(JSON.stringify({
-    type:     'input',
-    seq:      state.inputSeq,
-    yaw:      state.yaw,
-    pitch:    state.pitch,
-    x:        camera.position.x,
-    y:        camera.position.y,
-    z:        camera.position.z,
-    keys: {
-      w:     state.moveForward  ? 1 : 0,
-      s:     state.moveBack     ? 1 : 0,
-      a:     state.moveLeft     ? 1 : 0,
-      d:     state.moveRight    ? 1 : 0,
-      shift: state.crouching    ? 1 : 0,
-      jump:  0,
-    },
-    shooting: state.shooting || false,
-  }));
+  state.inputSeq = (state.inputSeq + 1) & 0xffff;
+  _inputDV.setUint16(1,  state.inputSeq,       true);
+  _inputDV.setFloat32(3, camera.position.x,    true);
+  _inputDV.setFloat32(7, camera.position.y,    true);
+  _inputDV.setFloat32(11, camera.position.z,   true);
+  _inputDV.setFloat32(15, state.yaw   || 0,    true);
+  _inputDV.setFloat32(19, state.pitch || 0,    true);
+  const keys =
+    (state.moveForward ? 1  : 0) |
+    (state.moveBack    ? 2  : 0) |
+    (state.moveLeft    ? 4  : 0) |
+    (state.moveRight   ? 8  : 0) |
+    (state.crouching   ? 16 : 0) |
+    (state.shooting    ? 64 : 0);
+  _inputDV.setUint8(23, keys);
+  state.ws.send(_inputBuf);
 }
 
 // Heartbeat — keeps connection alive when tab is backgrounded
@@ -1527,19 +1570,13 @@ setInterval(sendInputToServer, 50);
 // Stale connection watchdog — Render's proxy can silently drop WS connections
 // without firing onclose. If no world snapshot arrives in 5s, force reconnect.
 setInterval(() => {
-  if (!state.myId) return; // not connected yet
+  if (!state.myId) return;
   const age = Date.now() - (state.lastWorldAt || Date.now());
   if (age > 5000) {
     console.warn('[watchdog] No world snapshot for ' + (age/1000).toFixed(1) + 's — reconnecting');
     if (state.ws) state.ws.close();
-    state.lastWorldAt = Date.now(); // reset so we don't fire again immediately
+    state.lastWorldAt = Date.now();
   }
 }, 2000);
-
-setInterval(() => {
-  if (state.ws && state.ws.readyState === WebSocket.OPEN && state.myId) {
-    state.ws.send(JSON.stringify({ type: "input", seq: state.inputSeq, yaw: state.yaw || 0, pitch: state.pitch || 0, keys: { w:0,s:0,a:0,d:0,shift:0,jump:0 }, shooting: false }));
-  }
-}, 5000);
 
 window.addEventListener('DOMContentLoaded', function() { setupChat(); });
