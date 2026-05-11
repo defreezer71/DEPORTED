@@ -163,22 +163,24 @@ const eruptPos   = new Float32Array(ERUPT_COUNT * 3);
 const eruptPhase = new Float32Array(ERUPT_COUNT);
 const eruptSpeed = new Float32Array(ERUPT_COUNT);
 
-function _resetErupt(i, atBase) {
-  eruptPhase[i] = Math.random() * Math.PI * 2;
-  eruptSpeed[i] = 14 + Math.random() * 7;
-  eruptPos[i*3+1] = atBase ? (3 + Math.random() * 6) : (3 + Math.random() * ERUPT_MAX_H);
-  eruptPos[i*3]   = (Math.random()-0.5) * 3;
-  eruptPos[i*3+2] = (Math.random()-0.5) * 3;
+function _resetErupt(i) {
+  eruptPhase[i]   = Math.random() * Math.PI * 2;
+  eruptSpeed[i]   = 22 + Math.random() * 14;
+  eruptPos[i*3+1] = Math.random() * 4;  // always spawn at mouth
+  eruptPos[i*3]   = (Math.random() - 0.5) * 2;
+  eruptPos[i*3+2] = (Math.random() - 0.5) * 2;
 }
-for (let i = 0; i < ERUPT_COUNT; i++) _resetErupt(i, false);
+for (let i = 0; i < ERUPT_COUNT; i++) _resetErupt(i);
+
+let _plumeCeiling = 0;  // grows upward from 0 → ERUPT_MAX_H over ~17s
 
 const eruptGeo = new THREE.BufferGeometry();
 eruptGeo.setAttribute('position', new THREE.BufferAttribute(eruptPos, 3));
 eruptGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 78, 0), 800);
 
 const eruptMat = new THREE.PointsMaterial({
-  size: 24, map: eruptTex, transparent: true,
-  depthWrite: false, depthTest: true, opacity: 0.92, sizeAttenuation: true
+  size: 26, map: eruptTex, transparent: true,
+  depthWrite: false, depthTest: true, opacity: 0.88, sizeAttenuation: true
 });
 
 const eruptPoints = new THREE.Points(eruptGeo, eruptMat);
@@ -191,22 +193,41 @@ let _eruptFadeT = 0;
 
 function updateEruptionPoints(dt) {
   eruptPoints.visible = true;
+  // Seed ceiling just above mouth on first call so particles aren't immediately killed
+  if (_plumeCeiling === 0) _plumeCeiling = 5;
+  // Ceiling climbs at 11.9 units/s — reaches full height (~150) in ~13 seconds
+  _plumeCeiling = Math.min(ERUPT_MAX_H, _plumeCeiling + 11.9 * dt);
+
   _eruptFadeT = Math.min(1, _eruptFadeT + dt / 0.8);
-  eruptMat.opacity = 0.92 * _eruptFadeT;
+  eruptMat.opacity = 0.88 * _eruptFadeT;
 
   const t = clock.elapsedTime;
   for (let i = 0; i < ERUPT_COUNT; i++) {
-    eruptPos[i*3+1] += eruptSpeed[i] * dt;
-    if (eruptPos[i*3+1] > ERUPT_MAX_H) {
-      // Reset to random height — keeps uniform density, zero gaps ever
-      eruptPos[i*3+1] = Math.random() * ERUPT_MAX_H;
-      eruptPhase[i] = Math.random() * Math.PI * 2;
+    const frac = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
+    eruptPos[i*3+1] += eruptSpeed[i] * (1 - frac * 0.65) * dt;
+
+    // Reset to mouth if particle hits the rising ceiling or overshoots max
+    if (eruptPos[i*3+1] > _plumeCeiling) {
+      _resetErupt(i);
     }
-    const frac   = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
-    // Exponential bloom: stays tight at base, explodes into wide umbrella at top
-    const radius = 2 + Math.pow(frac, 2.2) * 75;
-    eruptPos[i*3]   = Math.cos(eruptPhase[i] + t * 0.20) * radius;
-    eruptPos[i*3+2] = Math.sin(eruptPhase[i] + t * 0.15) * radius;
+
+    const f  = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
+    const h  = eruptPos[i*3+1];
+    const ph = eruptPhase[i];
+    const maxR = 2 + Math.pow(f, 1.8) * 65;
+
+    // Three turbulence layers — each height gets a different phase offset (h * k)
+    // so vertical slices of the plume move independently, creating the enveloping look
+    const lx = Math.cos(ph * 0.7 + t * 0.12) * 0.55 + Math.sin(ph * 1.2 + t * 0.09) * 0.35;
+    const lz = Math.sin(ph * 0.7 + t * 0.12) * 0.55 + Math.cos(ph * 1.2 + t * 0.09) * 0.35;
+    const mx = Math.cos(ph * 2.1 + t * 0.40 + h * 0.025) * 0.45;
+    const mz = Math.sin(ph * 2.1 + t * 0.40 + h * 0.025) * 0.45;
+    const sx = Math.cos(ph * 3.8 + t * 0.90 + h * 0.055) * 0.20;
+    const sz = Math.sin(ph * 3.8 + t * 0.90 + h * 0.055) * 0.20;
+
+    // Don't normalize — let combined magnitude vary (0.2–1.6× maxR) for lumpy edges
+    eruptPos[i*3]   = (lx + mx + sx) * maxR;
+    eruptPos[i*3+2] = (lz + mz + sz) * maxR;
   }
   eruptGeo.attributes.position.needsUpdate = true;
 }
@@ -736,8 +757,8 @@ function update() {
     sunMesh.material.color.setHex(dimFactor > 0.6 ? 0xFFEE00 : 0xCC8800);
   }
 
-  if (state.erupted && state.matchTime < eruptionTime + 5 && !state.playerDead) {
-    const shakeIntensity = 0.12 * (1 - (state.matchTime - eruptionTime) / 5);
+  if (state.erupted && state.matchTime < eruptionTime + 4 && !state.playerDead) {
+    const shakeIntensity = 0.18 * (1 - (state.matchTime - eruptionTime) / 4);
     state.shakeOffset.set(
       (Math.random() - 0.5) * shakeIntensity,
       (Math.random() - 0.5) * shakeIntensity * 0.5,
