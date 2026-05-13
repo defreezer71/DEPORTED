@@ -645,23 +645,10 @@ function update() {
       rp.mesh.rotation.y += dy * Math.min(1, renderDt * 20);
     }
 
-    // Crouch animation
-    const parts = rp.mesh.userData.parts;
-    if (parts) {
-      const cr = rp.crouching || false;
-      const legSY = cr ? 0.55 : 1.0;
-      const tY    = cr ? -0.90 : -0.65;
-      const lgY   = cr ? -0.90 : -1.15;
-      const btY   = cr ? -1.20 : -1.57;
-      const sp = Math.min(1, renderDt * 10);
-      parts.lLeg.scale.y     += (legSY - parts.lLeg.scale.y)     * sp;
-      parts.rLeg.scale.y     += (legSY - parts.rLeg.scale.y)     * sp;
-      parts.torso.position.y += (tY    - parts.torso.position.y) * sp;
-      parts.lLeg.position.y  += (lgY   - parts.lLeg.position.y)  * sp;
-      parts.rLeg.position.y  += (lgY   - parts.rLeg.position.y)  * sp;
-      parts.lBoot.position.y += (btY   - parts.lBoot.position.y) * sp;
-      parts.rBoot.position.y += (btY   - parts.rBoot.position.y) * sp;
-    }
+    // Crouch — smoothly lower the whole group when opponent is crouching
+    const crouchTarget = rp.crouching ? -0.5 : 0;
+    rp.crouchY += (crouchTarget - rp.crouchY) * Math.min(1, renderDt * 10);
+    rp.mesh.position.y += rp.crouchY;
   }
 
   // Debug overlay - remote player distances
@@ -1137,103 +1124,101 @@ document.addEventListener('click', () => {
 
 var WS_URL = 'wss://deported.onrender.com';
 
-// Humanoid remote player model — group origin = camera eye height.
-// All parts offset downward so feet land at world ground level.
+// ── Merge an array of part descriptors into a single BufferGeometry with vertex colors.
+// Each part: { geo, color (hex int), pos [x,y,z], rot [x,y,z] (optional) }
+// Vertex colors make this forward-compatible with texture-atlas skins — just overlay a UV map later.
+const _mergeDummy = new THREE.Object3D();
+function _buildMergedGeo(partDefs) {
+  let totalVerts = 0;
+  const processed = [];
+  for (const p of partDefs) {
+    const g = p.geo.clone().toNonIndexed();
+    _mergeDummy.position.set(p.pos[0], p.pos[1], p.pos[2]);
+    _mergeDummy.rotation.set(p.rot ? p.rot[0] : 0, p.rot ? p.rot[1] : 0, p.rot ? p.rot[2] : 0);
+    _mergeDummy.scale.set(1, 1, 1);
+    _mergeDummy.updateMatrix();
+    g.applyMatrix4(_mergeDummy.matrix); // bakes position+rotation into vertex positions & normals
+    totalVerts += g.attributes.position.count;
+    processed.push({ g, c: new THREE.Color(p.color) });
+  }
+  const posArr = new Float32Array(totalVerts * 3);
+  const norArr = new Float32Array(totalVerts * 3);
+  const colArr = new Float32Array(totalVerts * 3);
+  let off = 0;
+  for (const { g, c } of processed) {
+    const n = g.attributes.position.count;
+    posArr.set(g.attributes.position.array, off * 3);
+    norArr.set(g.attributes.normal.array,   off * 3);
+    for (let i = 0; i < n; i++) {
+      colArr[(off + i) * 3]     = c.r;
+      colArr[(off + i) * 3 + 1] = c.g;
+      colArr[(off + i) * 3 + 2] = c.b;
+    }
+    off += n;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+  geo.setAttribute('normal',   new THREE.BufferAttribute(norArr, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(colArr, 3));
+  return geo;
+}
+
+// Shared single material for all remote players — vertex colors carry per-player/part tinting.
+const _remotePlayerMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const _remoteHitboxMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+
+// Humanoid remote player — 2 draw calls per player (1 merged visual + 1 invisible hitbox).
+// Group origin = camera eye height; all geometry offsets downward so feet meet world ground.
 function createRemotePlayerMesh(id) {
   const group = new THREE.Group();
+  const hue = (parseInt(id.slice(-4), 16) || 0) % 360;
 
-  // Per-player hue from ID so each player has a distinct color
-  const hue     = (parseInt(id.slice(-4), 16) || 0) % 360;
-  const bodyMat   = new THREE.MeshLambertMaterial({ color: new THREE.Color('hsl(' + hue + ',60%,40%)') });
-  const legMat    = new THREE.MeshLambertMaterial({ color: 0x1a2a44 });
-  const skinMat   = new THREE.MeshLambertMaterial({ color: 0xf0c080 });
-  const bootMat   = new THREE.MeshLambertMaterial({ color: 0x111111 });
-  const helmetMat = new THREE.MeshLambertMaterial({ color: new THREE.Color('hsl(' + hue + ',40%,25%)') });
-  const gunMat    = new THREE.MeshLambertMaterial({ color: 0x222222 });
-  const stockMat  = new THREE.MeshLambertMaterial({ color: 0x3a2a1a });
-  // colorWrite:false = invisible to camera but still raycasted (safe vs visible:false)
-  const hitboxMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+  const bodyHex   = new THREE.Color('hsl(' + hue + ',60%,40%)').getHex();
+  const helmetHex = new THREE.Color('hsl(' + hue + ',40%,25%)').getHex();
 
-  // ── INVISIBLE HEAD HITBOX — tagged isHead, slightly oversized for reliable registration ──
-  const hitbox = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 4), hitboxMat);
+  const mergedGeo = _buildMergedGeo([
+    // Head
+    { geo: new THREE.SphereGeometry(0.17, 8, 6),              color: 0xf0c080, pos: [0,     -0.10,  0]              },
+    // Helmet dome
+    { geo: new THREE.CylinderGeometry(0.20, 0.21, 0.15, 8),   color: helmetHex, pos: [0,     0.03,   0]             },
+    // Visor
+    { geo: new THREE.BoxGeometry(0.30, 0.05, 0.09),            color: 0x111111, pos: [0,     -0.05, -0.21]           },
+    // Neck
+    { geo: new THREE.CylinderGeometry(0.07, 0.08, 0.12, 6),   color: 0xf0c080, pos: [0,     -0.33,  0]              },
+    // Torso
+    { geo: new THREE.BoxGeometry(0.42, 0.52, 0.22),            color: bodyHex,  pos: [0,     -0.65,  0]              },
+    // Left arm
+    { geo: new THREE.CylinderGeometry(0.065, 0.055, 0.48, 6), color: bodyHex,  pos: [-0.28, -0.68,  0], rot: [0, 0,  0.15] },
+    // Right arm
+    { geo: new THREE.CylinderGeometry(0.065, 0.055, 0.48, 6), color: bodyHex,  pos: [0.28,  -0.68,  0], rot: [0, 0, -0.15] },
+    // Gun body
+    { geo: new THREE.BoxGeometry(0.06, 0.08, 0.52),            color: 0x222222, pos: [0.36,  -0.72, -0.17]           },
+    // Gun stock
+    { geo: new THREE.BoxGeometry(0.05, 0.13, 0.17),            color: 0x3a2a1a, pos: [0.36,  -0.76,  0.15]           },
+    // Balaclava front
+    { geo: new THREE.BoxGeometry(0.26, 0.15, 0.05),            color: 0x1a1a1a, pos: [0,     -0.20, -0.14]           },
+    // Balaclava side L
+    { geo: new THREE.BoxGeometry(0.05, 0.15, 0.10),            color: 0x1a1a1a, pos: [-0.13, -0.20, -0.08]           },
+    // Balaclava side R
+    { geo: new THREE.BoxGeometry(0.05, 0.15, 0.10),            color: 0x1a1a1a, pos: [0.13,  -0.20, -0.08]           },
+    // Left leg
+    { geo: new THREE.CylinderGeometry(0.09, 0.08, 0.65, 6),   color: 0x1a2a44, pos: [-0.11, -1.15,  0]              },
+    // Right leg
+    { geo: new THREE.CylinderGeometry(0.09, 0.08, 0.65, 6),   color: 0x1a2a44, pos: [0.11,  -1.15,  0]              },
+    // Left boot
+    { geo: new THREE.BoxGeometry(0.13, 0.12, 0.20),            color: 0x111111, pos: [-0.11, -1.57,  0.03]           },
+    // Right boot
+    { geo: new THREE.BoxGeometry(0.13, 0.12, 0.20),            color: 0x111111, pos: [0.11,  -1.57,  0.03]           },
+  ]);
+
+  group.add(new THREE.Mesh(mergedGeo, _remotePlayerMat));
+
+  // Invisible hitbox — separate so it stays at the fixed head position for raycasting
+  const hitbox = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 4), _remoteHitboxMat);
   hitbox.position.y = -0.10;
   hitbox.userData.isHead = true;
   group.add(hitbox);
 
-  // ── HEAD (visual only — hitbox above handles all raycasting) ──
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 6), skinMat);
-  head.position.y = -0.10;
-  group.add(head);
-
-  // ── COMBAT HELMET — wide dome + front visor only ──
-  const helmetDome = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.21, 0.15, 8), helmetMat);
-  helmetDome.position.set(0, 0.03, 0);
-  group.add(helmetDome);
-  const visorMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.05, 0.09), visorMat);
-  visor.position.set(0, -0.05, -0.21);
-  group.add(visor);
-
-  // ── NECK ──
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.12, 6), skinMat);
-  neck.position.y = -0.33;
-  group.add(neck);
-
-  // ── TORSO ──
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.52, 0.22), bodyMat);
-  torso.position.y = -0.65;
-  group.add(torso);
-
-  // ── ARMS ──
-  const armGeo = new THREE.CylinderGeometry(0.065, 0.055, 0.48, 6);
-  const lArm = new THREE.Mesh(armGeo, bodyMat);
-  lArm.position.set(-0.28, -0.68, 0);
-  lArm.rotation.z = 0.15;
-  group.add(lArm);
-  const rArm = new THREE.Mesh(armGeo, bodyMat);
-  rArm.position.set(0.28, -0.68, 0);
-  rArm.rotation.z = -0.15;
-  group.add(rArm);
-
-  // ── WEAPON SILHOUETTE on right side (M4 proportions) ──
-  const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.52), gunMat);
-  gunBody.position.set(0.36, -0.72, -0.17);
-  group.add(gunBody);
-  const gunStock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.13, 0.17), stockMat);
-  gunStock.position.set(0.36, -0.76, 0.15);
-  group.add(gunStock);
-
-  // ── LEGS ──
-  const legGeo = new THREE.CylinderGeometry(0.09, 0.08, 0.65, 6);
-  const lLeg = new THREE.Mesh(legGeo, legMat);
-  lLeg.position.set(-0.11, -1.15, 0);
-  group.add(lLeg);
-  const rLeg = new THREE.Mesh(legGeo, legMat);
-  rLeg.position.set(0.11, -1.15, 0);
-  group.add(rLeg);
-
-  // ── BOOTS ──
-  const bootGeo = new THREE.BoxGeometry(0.13, 0.12, 0.20);
-  const lBoot = new THREE.Mesh(bootGeo, bootMat);
-  lBoot.position.set(-0.11, -1.57, 0.03);
-  group.add(lBoot);
-  const rBoot = new THREE.Mesh(bootGeo, bootMat);
-  rBoot.position.set(0.11, -1.57, 0.03);
-  group.add(rBoot);
-
-  // ── BALACLAVA — covers lower face, wraps sides ──
-  const balaMatLocal = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-  const balaFront = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.15, 0.05), balaMatLocal);
-  balaFront.position.set(0, -0.20, -0.14);
-  group.add(balaFront);
-  const balaSideL = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.10), balaMatLocal);
-  balaSideL.position.set(-0.13, -0.20, -0.08);
-  group.add(balaSideL);
-  const balaSideR = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.10), balaMatLocal);
-  balaSideR.position.set(0.13, -0.20, -0.08);
-  group.add(balaSideR);
-  // Store named part refs so the render loop can animate crouch per-frame
-  group.userData.parts = { lLeg, rLeg, lBoot, rBoot, torso };
   group.userData.id = id;
   scene.add(group);
   return group;
@@ -1257,7 +1242,7 @@ function updateRemotePlayers(playerList) {
     if (!state.remotePlayers[p.id]) {
       const newMesh = createRemotePlayerMesh(p.id);
       newMesh.position.set(p.x, p.y, p.z);
-      state.remotePlayers[p.id] = { mesh: newMesh, hp: p.hp, dead: p.dead, snapshots: [] };
+      state.remotePlayers[p.id] = { mesh: newMesh, hp: p.hp, dead: p.dead, snapshots: [], crouchY: 0 };
     }
 
     const rp = state.remotePlayers[p.id];
