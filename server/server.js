@@ -30,28 +30,49 @@ function makeRoom(code, isAuto) {
     phase: isAuto ? 'countdown' : 'waiting',
     players: {}, readySet: new Set(), events: [], tick: null
   };
-  rooms[code].tick = setInterval(() => tickRoom(code), 50);
+  rooms[code].tick = setInterval(() => tickRoom(code), 16); // 60Hz
   return rooms[code];
+}
+
+// ── Binary world snapshot ──
+// Format: [0x01][count] then per player: 6-byte id | flags | hp | armor | uint16 yaw | int16 x,y,z (×100, 1cm precision)
+// Total: 2 + N*17 bytes (vs 2 + N*23 with float32 — fits 60Hz in same bandwidth envelope as 20Hz float32)
+const POS_SCALE = 100;
+function packWorldSnapshot(room) {
+  const players = Object.values(room.players);
+  const buf = Buffer.allocUnsafe(2 + players.length * 17);
+  buf[0] = 0x01;
+  buf[1] = players.length;
+  let off = 2;
+  for (const p of players) {
+    const id = (p.id || '').slice(0, 6);
+    for (let i = 0; i < 6; i++) buf[off + i] = i < id.length ? id.charCodeAt(i) : 0;
+    off += 6;
+    buf[off++] = (p.dead ? 1 : 0) | (p.crouch ? 2 : 0);
+    buf[off++] = Math.max(0, Math.min(255, p.hp | 0));
+    buf[off++] = Math.max(0, Math.min(255, (p.armor || 0) | 0));
+    const yawNorm = ((p.yaw || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    buf.writeUInt16LE(Math.round(yawNorm / (Math.PI * 2) * 65535), off); off += 2;
+    buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((p.x || 0) * POS_SCALE))), off); off += 2;
+    buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((p.y || 0) * POS_SCALE))), off); off += 2;
+    buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round((p.z || 0) * POS_SCALE))), off); off += 2;
+  }
+  return buf;
 }
 
 function tickRoom(code) {
   const room = rooms[code];
   if (!room) return;
   const now = Date.now();
-  const snapshot = {
-    type: 'world',
-    players: Object.values(room.players).map(p => ({
-      id: p.id, x: p.x, y: p.y, z: p.z,
-      hp: p.hp, armor: p.armor, dead: p.dead, name: p.name,
-      yaw: p.yaw || 0, crouch: p.crouch || false
-    })),
-    events: room.events.splice(0),
-    phase: room.phase
-  };
-  const str = JSON.stringify(snapshot);
+  const events = room.events.splice(0);
+  const worldBuf = packWorldSnapshot(room);
+  const eventsStr = events.length ? JSON.stringify({ type: 'events', events }) : null;
   for (const [id, p] of Object.entries(room.players)) {
     if (now - p.lastSeen > 10000) { removePlayer(code, id); continue; }
-    if (p.ws.readyState === WebSocket.OPEN) p.ws.send(str);
+    if (p.ws.readyState === WebSocket.OPEN) {
+      p.ws.send(worldBuf);
+      if (eventsStr) p.ws.send(eventsStr);
+    }
   }
 }
 
@@ -107,7 +128,26 @@ function checkMajority(code) {
 wss.on('connection', ws => {
   let myId = null, myRoom = null;
 
-  ws.on('message', raw => {
+  ws.on('message', (raw, isBinary) => {
+    // ── Binary input packet (type 0x02, 24 bytes) ──
+    if (isBinary) {
+      if (!myId || !myRoom || !rooms[myRoom] || !rooms[myRoom].players[myId]) return;
+      const buf = raw;
+      if (buf[0] !== 0x02 || buf.length < 24) return;
+      const player = rooms[myRoom].players[myId];
+      player.lastSeen = Date.now();
+      const x = buf.readFloatLE(3);
+      const y = buf.readFloatLE(7);
+      const z = buf.readFloatLE(11);
+      const dx = x - player.x, dz = z - player.z;
+      if (Math.sqrt(dx*dx+dz*dz) > 3.5) { console.log('[cheat?]', myId, 'teleport'); return; }
+      player.x = x; player.y = y; player.z = z;
+      player.yaw = buf.readFloatLE(15);
+      const keys = buf[23];
+      player.crouch = !!(keys & 16);
+      return;
+    }
+
     let msg; try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'join') {

@@ -610,37 +610,57 @@ function update() {
 
   if (!state.playerDead) updateBots(renderDt);
 
-  // Interpolate remote player meshes — position, yaw, crouch
+  // Snapshot interpolation — render each remote player at (now - INTERP_DELAY),
+  // smoothly interpolating between two real received snapshots. No rubber-banding.
+  const INTERP_DELAY = 100; // ms behind real-time
+  const renderTime = Date.now() - INTERP_DELAY;
+
   for (const id in state.remotePlayers) {
     const rp = state.remotePlayers[id];
-    if (rp.targetX === undefined) continue;
-    const t = Math.min(1, renderDt * 15);
-    rp.mesh.position.x += (rp.targetX - rp.mesh.position.x) * t;
-    rp.mesh.position.y += (rp.targetY - rp.mesh.position.y) * t;
-    rp.mesh.position.z += (rp.targetZ - rp.mesh.position.z) * t;
-    // Smooth yaw — shortest-path lerp to avoid 180-degree spin
-    if (rp.targetYaw !== undefined) {
-      let dy = rp.targetYaw - rp.mesh.rotation.y;
+    const snaps = rp.snapshots;
+    if (!snaps || snaps.length === 0) continue;
+
+    // Find the two snapshots that bracket renderTime
+    let s0 = snaps[0], s1 = snaps[snaps.length - 1];
+    for (let si = 0; si < snaps.length - 1; si++) {
+      if (snaps[si].t <= renderTime && snaps[si + 1].t >= renderTime) {
+        s0 = snaps[si]; s1 = snaps[si + 1]; break;
+      }
+    }
+
+    const alpha = (s1.t === s0.t) ? 1 : Math.max(0, Math.min(1, (renderTime - s0.t) / (s1.t - s0.t)));
+    rp.mesh.position.x = s0.x + (s1.x - s0.x) * alpha;
+    rp.mesh.position.y = s0.y + (s1.y - s0.y) * alpha;
+    rp.mesh.position.z = s0.z + (s1.z - s0.z) * alpha;
+
+    // Shortest-path yaw interpolation between snapshots
+    if (s0.yaw !== undefined && s1.yaw !== undefined) {
+      let dySnap = s1.yaw - s0.yaw;
+      while (dySnap >  Math.PI) dySnap -= Math.PI * 2;
+      while (dySnap < -Math.PI) dySnap += Math.PI * 2;
+      const targetYaw = s0.yaw + dySnap * alpha;
+      let dy = targetYaw - rp.mesh.rotation.y;
       while (dy >  Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
-      rp.mesh.rotation.y += dy * Math.min(1, renderDt * 12);
+      rp.mesh.rotation.y += dy * Math.min(1, renderDt * 20);
     }
-    // Crouch animation — smoothly compress legs and drop torso
+
+    // Crouch animation
     const parts = rp.mesh.userData.parts;
     if (parts) {
       const cr = rp.crouching || false;
-      const legSY  = cr ? 0.55 : 1.0;
-      const tY     = cr ? -0.90 : -0.65;
-      const lgY    = cr ? -0.90 : -1.15;
-      const btY    = cr ? -1.20 : -1.57;
+      const legSY = cr ? 0.55 : 1.0;
+      const tY    = cr ? -0.90 : -0.65;
+      const lgY   = cr ? -0.90 : -1.15;
+      const btY   = cr ? -1.20 : -1.57;
       const sp = Math.min(1, renderDt * 10);
-      parts.lLeg.scale.y    += (legSY - parts.lLeg.scale.y)    * sp;
-      parts.rLeg.scale.y    += (legSY - parts.rLeg.scale.y)    * sp;
-      parts.torso.position.y += (tY  - parts.torso.position.y) * sp;
-      parts.lLeg.position.y  += (lgY - parts.lLeg.position.y)  * sp;
-      parts.rLeg.position.y  += (lgY - parts.rLeg.position.y)  * sp;
-      parts.lBoot.position.y += (btY - parts.lBoot.position.y) * sp;
-      parts.rBoot.position.y += (btY - parts.rBoot.position.y) * sp;
+      parts.lLeg.scale.y     += (legSY - parts.lLeg.scale.y)     * sp;
+      parts.rLeg.scale.y     += (legSY - parts.rLeg.scale.y)     * sp;
+      parts.torso.position.y += (tY    - parts.torso.position.y) * sp;
+      parts.lLeg.position.y  += (lgY   - parts.lLeg.position.y)  * sp;
+      parts.rLeg.position.y  += (lgY   - parts.rLeg.position.y)  * sp;
+      parts.lBoot.position.y += (btY   - parts.lBoot.position.y) * sp;
+      parts.rBoot.position.y += (btY   - parts.rBoot.position.y) * sp;
     }
   }
 
@@ -1228,35 +1248,30 @@ function removeRemotePlayer(id) {
 
 function updateRemotePlayers(playerList) {
   const seen = new Set();
+  const now = Date.now();
 
   for (const p of playerList) {
-    if (p.id === state.myId) continue;   // skip self
+    if (p.id === state.myId) continue;
     seen.add(p.id);
 
     if (!state.remotePlayers[p.id]) {
-      // New player — create mesh and snap immediately to real position
       const newMesh = createRemotePlayerMesh(p.id);
       newMesh.position.set(p.x, p.y, p.z);
-      state.remotePlayers[p.id] = {
-        mesh: newMesh,
-        hp:   p.hp,
-        dead: p.dead,
-        targetX: p.x,
-        targetY: p.y,
-        targetZ: p.z,
-      };
+      state.remotePlayers[p.id] = { mesh: newMesh, hp: p.hp, dead: p.dead, snapshots: [] };
     }
 
     const rp = state.remotePlayers[p.id];
-    rp.targetX = p.x; rp.targetY = p.y; rp.targetZ = p.z;
-    if (p.yaw !== undefined) rp.targetYaw = p.yaw;
-    rp.hp       = p.hp;
-    rp.dead     = p.dead;
+    rp.hp = p.hp;
+    rp.dead = p.dead;
     rp.crouching = p.crouch || false;
     rp.mesh.visible = !p.dead;
+
+    rp.snapshots.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
+    // Keep ~600ms of history; always retain at least 2 for interpolation
+    const cutoff = now - 600;
+    while (rp.snapshots.length > 2 && rp.snapshots[0].t < cutoff) rp.snapshots.shift();
   }
 
-  // Remove players no longer in snapshot
   for (const id of Object.keys(state.remotePlayers)) {
     if (!seen.has(id)) removeRemotePlayer(id);
   }
@@ -1387,7 +1402,8 @@ function showRoomCode(code) {
 }
 
 // ── Unpack binary world snapshot from server ──
-// Format: [0x01][count] then per player: 6-byte id | flags | hp | armor | uint16 yaw | float32 x,y,z
+// Format: [0x01][count] then per player: 6-byte id | flags | hp | armor | uint16 yaw | int16 x,y,z (×100)
+const _UNPACK_SCALE = 1 / 100;
 function unpackWorld(ab) {
   const dv = new DataView(ab);
   const count = dv.getUint8(1);
@@ -1397,13 +1413,13 @@ function unpackWorld(ab) {
     let id = '';
     for (let b = 0; b < 6; b++) { const c = dv.getUint8(off + b); if (c) id += String.fromCharCode(c); }
     off += 6;
-    const flags  = dv.getUint8(off++);
-    const hp     = dv.getUint8(off++);
-    const armor  = dv.getUint8(off++);
-    const yaw    = dv.getUint16(off, true) / 65535 * Math.PI * 2; off += 2;
-    const x      = dv.getFloat32(off, true); off += 4;
-    const y      = dv.getFloat32(off, true); off += 4;
-    const z      = dv.getFloat32(off, true); off += 4;
+    const flags = dv.getUint8(off++);
+    const hp    = dv.getUint8(off++);
+    const armor = dv.getUint8(off++);
+    const yaw   = dv.getUint16(off, true) / 65535 * Math.PI * 2; off += 2;
+    const x     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
+    const y     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
+    const z     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
     players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2) });
   }
   return players;
