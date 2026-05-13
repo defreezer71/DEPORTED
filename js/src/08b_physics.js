@@ -185,6 +185,22 @@ function _physStep(fixedDt, inputDir, speed) {
   // Vertical movement
   phys.pos.y += phys.vel.y * fixedDt;
 
+  // Ceiling — stop upward movement when head enters a collidable from below.
+  // Without this, jumping near/under tree canopies lets the player clip inside.
+  if (phys.vel.y > 0) {
+    const headY = phys.pos.y + height;
+    for (const entry of collidableCache) {
+      const bb = entry.bb;
+      if (headY > bb.min.y && headY < bb.max.y && phys.pos.y < bb.min.y &&
+          phys.pos.x > bb.min.x - radius && phys.pos.x < bb.max.x + radius &&
+          phys.pos.z > bb.min.z - radius && phys.pos.z < bb.max.z + radius) {
+        phys.pos.y = bb.min.y - height;
+        phys.vel.y = 0;
+        break;
+      }
+    }
+  }
+
   // Floor: terrain + any object top we might be standing on
   let floorY = getTerrainHeight(phys.pos.x, phys.pos.z);
   for (const entry of collidableCache) {

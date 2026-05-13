@@ -165,7 +165,7 @@ const eruptSpeed = new Float32Array(ERUPT_COUNT);
 
 function _resetErupt(i) {
   eruptPhase[i]   = Math.random() * Math.PI * 2;
-  eruptSpeed[i]   = 22 + Math.random() * 14;
+  eruptSpeed[i]   = 26.6 + Math.random() * 16.9;  // +10% again
   eruptPos[i*3+1] = Math.random() * 4;  // always spawn at mouth
   eruptPos[i*3]   = (Math.random() - 0.5) * 2;
   eruptPos[i*3+2] = (Math.random() - 0.5) * 2;
@@ -195,8 +195,8 @@ function updateEruptionPoints(dt) {
   eruptPoints.visible = true;
   // Seed ceiling just above mouth on first call so particles aren't immediately killed
   if (_plumeCeiling === 0) _plumeCeiling = 5;
-  // Ceiling climbs at 11.9 units/s — reaches full height (~150) in ~13 seconds
-  _plumeCeiling = Math.min(ERUPT_MAX_H, _plumeCeiling + 11.9 * dt);
+  // Ceiling climbs at 14.4 units/s (+10% again) — reaches full height (~150) in ~11 seconds
+  _plumeCeiling = Math.min(ERUPT_MAX_H, _plumeCeiling + 14.4 * dt);
 
   _eruptFadeT = Math.min(1, _eruptFadeT + dt / 0.8);
   eruptMat.opacity = 0.88 * _eruptFadeT;
@@ -214,7 +214,7 @@ function updateEruptionPoints(dt) {
     const f  = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
     const h  = eruptPos[i*3+1];
     const ph = eruptPhase[i];
-    const maxR = 2 + Math.pow(f, 1.8) * 65;
+    const maxR = 2 + Math.pow(f, 1.3) * 120;  // wider crown — covers more sky
 
     // Three turbulence layers — each height gets a different phase offset (h * k)
     // so vertical slices of the plume move independently, creating the enveloping look
@@ -336,15 +336,18 @@ function physicsStep(fixedDt) {
   euler.set(state.pitch, state.yaw, 0, 'YXZ');
   camera.quaternion.setFromEuler(euler);
 
-  // Build world-space move vector from camera facing + input booleans
+  // Build world-space move vector from camera facing + input booleans.
+  // Strafe (A/D) is scaled by strafeSpeedMult so lateral movement is slightly slower
+  // than forward movement, matching CS/Krunker feel. Diagonal speed is capped at 1.
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   rgt.crossVectors(fwd, new THREE.Vector3(0, -1, 0)).normalize();
+  const fwdInput  = (state.moveForward ? 1 : 0) - (state.moveBack  ? 1 : 0);
+  const sideInput = (state.moveLeft    ? 1 : 0) - (state.moveRight ? 1 : 0);
   moveVec.set(0, 0, 0);
-  if (state.moveForward) moveVec.add(fwd);
-  if (state.moveBack)    moveVec.sub(fwd);
-  if (state.moveLeft)    moveVec.add(rgt);
-  if (state.moveRight)   moveVec.sub(rgt);
-  if (moveVec.lengthSq() > 0) moveVec.normalize();
+  moveVec.addScaledVector(fwd, fwdInput);
+  moveVec.addScaledVector(rgt, sideInput * CONFIG.strafeSpeedMult);
+  const mLen = moveVec.length();
+  if (mLen > 1) moveVec.divideScalar(mLen);
 
   // Smoothed move vector — fixedDt is constant so smoothFactor is constant.
   // This means the lerp rate is perfectly frame-rate independent.
@@ -373,13 +376,15 @@ function physicsStep(fixedDt) {
     }
   }
   const isSwimming = state.waterRising && physicsWaterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
-  const _cp = camera.position, _cR = 85, _cW = 1.25;
+  // _cW must be < 0.96 (inner wall radius) so standing on the wall top doesn't count
+  const _cp = camera.position, _cR = 85, _cW = 0.80;
   const _feetY = CONFIG.newPhysics ? phys.pos.y : (_cp.y - state.smoothCameraHeight);
   const inCanalXZ = (Math.abs(_cp.z + _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
                     (Math.abs(_cp.z - _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
                     (Math.abs(_cp.x - _cR) < _cW && Math.abs(_cp.z) < _cR + _cW) ||
                     (Math.abs(_cp.x + _cR) < _cW && Math.abs(_cp.z) < _cR + _cW);
-  const inCanal = inCanalXZ && _feetY < 0.77;
+  // _feetY < 0.60 excludes players standing on top of the canal walls (wall top = 0.77)
+  const inCanal = inCanalXZ && _feetY < 0.60;
   state.inCanal = inCanal;
   let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
   if (isSwimming)      speed *= 0.55;
@@ -390,7 +395,7 @@ function physicsStep(fixedDt) {
     // ═══════════════════════════════════════════════════
     // NEW PHYSICS — capsule sweep-and-slide (08b_physics.js)
     // ═══════════════════════════════════════════════════
-    physicsUpdate(fixedDt, moveVec, speed);
+    physicsUpdate(fixedDt, smoothedMove, speed);
 
   } else {
     // ═══════════════════════════════════════════════════
@@ -674,7 +679,7 @@ function update() {
     _eruptFadeT = 0;
     for (let i = 0; i < ERUPT_COUNT; i++) {
       eruptPhase[i] = Math.random() * Math.PI * 2;
-      eruptSpeed[i] = 14 + Math.random() * 7;
+      eruptSpeed[i] = 16.9 + Math.random() * 8.5;  // +10% again
       eruptPos[i*3+1] = Math.random() * ERUPT_MAX_H;
       eruptPos[i*3] = (Math.random()-0.5) * 2;
       eruptPos[i*3+2] = (Math.random()-0.5) * 2;
@@ -765,7 +770,7 @@ function update() {
   }
 
   if (state.erupted && state.matchTime < eruptionTime + 4 && !state.playerDead) {
-    const shakeIntensity = 0.18 * (1 - (state.matchTime - eruptionTime) / 4);
+    const shakeIntensity = 0.234 * (1 - (state.matchTime - eruptionTime) / 4);  // +30%
     state.shakeOffset.set(
       (Math.random() - 0.5) * shakeIntensity,
       (Math.random() - 0.5) * shakeIntensity * 0.5,
@@ -801,10 +806,9 @@ function update() {
     }
     waterPosAttr.needsUpdate = true;
 
-    const playerCurrentH = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
-    const playerFeetY = camera.position.y - playerCurrentH;
-    const kneeY = playerFeetY + 0.4;
-    if (state.waterLevel > kneeY) {
+    // Damage is terrain-based — jumping on water doesn't let you escape damage
+    const groundUnderPlayer = getTerrainHeight(camera.position.x, camera.position.z);
+    if (state.waterLevel > groundUnderPlayer + 0.4) {
       state.waterDmgTimer += renderDt;
       if (state.waterDmgTimer >= 1) {
         state.waterDmgTimer -= 1;
@@ -910,28 +914,36 @@ function update() {
     waterVignette.style.opacity = 0;
   }
 
-  // Bubble animation
-  if (!state.waterRising) {
-    bubbleGroup.visible = true;
-    bubbleGroup.children.forEach(b => {
-      b.position.y += b.userData.speed * renderDt;
-      b.material.opacity = 0.2 + Math.sin(clock.elapsedTime * 1.5 + b.userData.phase) * 0.15;
-      if (b.position.y > 3) b.position.y = -2 - Math.random() * 2;
-    });
-  } else {
-    bubbleGroup.visible = false;
+  // Bubble animation — single instanced mesh
+  if (window._bubbleInst) {
+    const bi = window._bubbleInst, bd = window._bubbleData, bdm = window._bubbleDummy2;
+    bi.visible = !state.waterRising;
+    if (!state.waterRising) {
+      const opac = 0.2 + Math.sin(clock.elapsedTime * 1.5) * 0.12;
+      bi.material.opacity = opac;
+      for (let i = 0; i < bd.length; i++) {
+        const b = bd[i]; if (!b) continue;
+        b.y += b.speed * renderDt;
+        if (b.y > 3) b.y = -2 - Math.random() * 2;
+        bdm.position.set(b.bx, b.y, b.bz);
+        bdm.scale.setScalar(b.size);
+        bdm.updateMatrix();
+        bi.setMatrixAt(i, bdm.matrix);
+      }
+      bi.instanceMatrix.needsUpdate = true;
+    }
   }
 
   // ── Stream water shimmer ──
   if (window.streamWater) {
     const st = clock.elapsedTime;
-    const shimmer = Math.sin(st * 1.1) * 0.03 + Math.sin(st * 2.9) * 0.015;
+    const shimmer = Math.sin(st * 1.3) * 0.04 + Math.sin(st * 3.1) * 0.02 + Math.sin(st * 0.7) * 0.015;
     window.streamWater.material.color.setRGB(
-      0.10 + shimmer * 0.4,
-      0.44 + shimmer * 0.8,
-      0.78 + shimmer * 0.5
+      0.08 + shimmer * 0.35,
+      0.50 + shimmer * 0.85,
+      0.82 + shimmer * 0.45
     );
-    window.streamWater.material.opacity = 0.72 + Math.sin(st * 0.8) * 0.08;
+    window.streamWater.material.opacity = 0.74 + Math.sin(st * 0.9) * 0.10;
   }
 
   // ── Head bob ──

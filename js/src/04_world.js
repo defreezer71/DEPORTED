@@ -14,8 +14,9 @@ const prisonMetal     = new THREE.MeshLambertMaterial({ color: 0x38383a });
 const prisonRust      = new THREE.MeshLambertMaterial({ color: 0x6b4030 });
 const prisonCap       = new THREE.MeshLambertMaterial({ color: 0x505048 });
 
-// Invisible collider material — colorWrite: false keeps it hidden
-// but lets Box3.setFromObject() measure it correctly
+// Invisible collider material — meshes using this are NOT added to the scene.
+// updateMatrixWorld(true) is called after positioning so Box3.setFromObject()
+// gets a correct world transform without issuing any draw calls.
 const colliderMat = new THREE.MeshBasicMaterial({
   transparent: true, opacity: 0,
   depthWrite: false, colorWrite: false
@@ -51,7 +52,7 @@ function createPrisonWall(x, z, w, h, d) {
   const cd = d < w ? d + 0.5 : d;
   const collider = new THREE.Mesh(new THREE.BoxGeometry(cw, h, cd), colliderMat);
   collider.position.set(x, h / 2, z);
-  scene.add(collider);
+  collider.updateMatrixWorld(true);
   collidables.push(collider);
 
   return mesh;
@@ -179,7 +180,7 @@ towerCorners.forEach(tc => {
   // Invisible collider for tower
   const towerCollider = new THREE.Mesh(new THREE.BoxGeometry(3.9, towerH, 3.9), colliderMat);
   towerCollider.position.set(tc.x, towerH / 2, tc.z);
-  scene.add(towerCollider);
+  towerCollider.updateMatrixWorld(true);
   collidables.push(towerCollider);
 
   for (const cx of [-1, 1]) for (const cz of [-1, 1]) {
@@ -276,6 +277,99 @@ towerCorners.forEach(tc => {
     flood.rotation.y = ry;
     scene.add(flood);
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// PERIMETER BILLBOARDS — one per outer wall, highway-style
+// `half` and `ct` are defined in 03_terrain.js (same global scope)
+// ═══════════════════════════════════════════════════════════
+{
+  const WALL_TOP   = CONFIG.cliffHeight + 4 - 3;  // = 36 (top of outer cliff walls)
+  const BB_W       = 24.6;   // face width
+  const BB_H       = 12.1;   // face height
+  const POLE_H     = 16.1;   // pole height above wall top
+  const POLE_GAP   = 17.6;   // pole spacing
+
+  const poleMat  = new THREE.MeshLambertMaterial({ color: 0x3a3830 });
+  const beamMat  = new THREE.MeshLambertMaterial({ color: 0x2e2c28 });
+  const sideMat  = new THREE.MeshLambertMaterial({ color: 0x4a4844 });  // back / sides
+
+  // Canvas texture for the billboard face
+  const _bbCanvas = document.createElement('canvas');
+  _bbCanvas.width = 1024; _bbCanvas.height = 512;
+  const _bbCtx = _bbCanvas.getContext('2d');
+  _bbCtx.fillStyle = '#e8e4d8';
+  _bbCtx.fillRect(0, 0, 1024, 512);
+  _bbCtx.fillStyle = '#1a1a1a';
+  _bbCtx.font = 'bold 108px Arial Black, Arial, sans-serif';
+  _bbCtx.textAlign = 'center';
+  _bbCtx.textBaseline = 'middle';
+  // Scale font down until text fits within 90% of canvas width
+  while (_bbCtx.measureText('YOUR AD HERE').width > 921) {
+    const size = parseInt(_bbCtx.font) - 4;
+    _bbCtx.font = `bold ${size}px Arial Black, Arial, sans-serif`;
+  }
+  _bbCtx.fillText('YOUR AD HERE', 512, 256);
+  const _bbTex = new THREE.CanvasTexture(_bbCanvas);
+  const faceMat = new THREE.MeshLambertMaterial({ map: _bbTex });
+
+  function _spawnBillboard(bx, bz, ry) {
+    const g = new THREE.Group();
+    g.position.set(bx, WALL_TOP, bz);
+    g.rotation.y = ry;
+
+    // Two steel poles (slightly tapered at base)
+    for (const sx of [-1, 1]) {
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.27, 0.34, POLE_H, 8),
+        poleMat
+      );
+      pole.position.set(sx * POLE_GAP / 2, POLE_H / 2, 0);
+      g.add(pole);
+    }
+
+    // Horizontal cross-bars between the poles
+    for (const frac of [0.3, 0.65]) {
+      const xbar = new THREE.Mesh(
+        new THREE.BoxGeometry(POLE_GAP - 0.4, 0.22, 0.22),
+        beamMat
+      );
+      xbar.position.set(0, POLE_H * frac, 0);
+      g.add(xbar);
+    }
+
+    // Top I-beam spanning the full board width
+    const topBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(BB_W + 1, 0.42, 0.42),
+      beamMat
+    );
+    topBeam.position.set(0, POLE_H + 0.21, 0);
+    g.add(topBeam);
+
+    // Billboard back panel
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(BB_W, BB_H, 0.22),
+      sideMat
+    );
+    back.position.set(0, POLE_H + BB_H / 2 + 0.42, 0);
+    g.add(back);
+
+    // Billboard face (facing local +Z = inward toward map)
+    const face = new THREE.Mesh(
+      new THREE.BoxGeometry(BB_W, BB_H, 0.10),
+      faceMat
+    );
+    face.position.set(0, POLE_H + BB_H / 2 + 0.42, 0.16);
+    g.add(face);
+
+    scene.add(g);
+  }
+
+  const wo = half + ct / 2;  // wall centre offset from map origin (= 131.5)
+  _spawnBillboard(  0,  -wo,   0            );  // North wall — faces south (+Z)
+  _spawnBillboard(  0,   wo,   Math.PI      );  // South wall — faces north (-Z)
+  _spawnBillboard(  wo,   0,  -Math.PI / 2  );  // East wall  — faces west  (-X)
+  _spawnBillboard( -wo,   0,   Math.PI / 2  );  // West wall  — faces east  (+X)
 }
 
 // ═══════════════════════════════════════════════════════════

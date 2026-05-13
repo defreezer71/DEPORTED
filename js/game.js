@@ -24,6 +24,7 @@ const CONFIG = {
 
   moveSpeed: 11.97,         // 5% slower
   adsSpeedMult: 0.65,
+  strafeSpeedMult: 0.80,    // Lateral (A/D) input scaled to 80% of forward speed
   jumpForce: 9,
   gravity: 25,
   mouseSens: 0.0018,
@@ -32,7 +33,7 @@ const CONFIG = {
   normalFov: 75,
   playerHeight: 1.7,
   playerRadius: 0.25,
-  moveSmoothing: 0.15,      // Strafe smoothing factor (lower = smoother)
+  moveSmoothing: 0.78,      // Acceleration smoothing — higher = smoother (~10 ticks to 90%)
   crouchHeight: 1.0,        // Camera height when crouched
   crouchSpeedMult: 0.5,     // 50% speed when crouched
 
@@ -187,7 +188,7 @@ function getVolcanoHeight(x, z) {
 function getTerrainHeight(x, z) {
   if (Math.abs(x) > half || Math.abs(z) > half) return -5;
   const vh = getVolcanoHeight(x, z);
-  if (vh > 0.5) return vh;
+
   const raw = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3;
 
   // Flatten terrain within 10 units of each canal side so the canal walls
@@ -198,9 +199,15 @@ function getTerrainHeight(x, z) {
   const dE = (Math.abs(z) <= R + buf) ? Math.abs(x - R) : 999;
   const dW = (Math.abs(z) <= R + buf) ? Math.abs(x + R) : 999;
   const dist = Math.min(dS, dN, dE, dW);
-  if (dist >= buf) return raw;
-  const t = dist / buf;
-  return raw * t * t * (3 - 2 * t);
+  const flatRaw = dist >= buf ? raw : raw * (dist / buf) * (dist / buf) * (3 - 2 * (dist / buf));
+
+  // Smoothly blend flat terrain into volcano over a 0→1.5 unit transition zone.
+  // The old hard threshold (vh > 0.5 → return vh) caused a visible floor jump.
+  if (vh <= 0)   return flatRaw;
+  if (vh >= 1.5) return vh;
+  const bt = vh / 1.5;
+  const st = bt * bt * (3 - 2 * bt);   // smoothstep
+  return flatRaw + (vh - flatRaw) * st;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -250,16 +257,26 @@ for (let i = 0; i < gPosAttr.count; i++) {
     g = baseG + (oxG - baseG) * midBlend + (ashG - oxG) * ashBlend * midBlend + (lavaG - ashG) * lavaBlend + vN5 * 0.2;
     b = baseB + (oxB - baseB) * midBlend + (ashB - oxB) * ashBlend * midBlend + (lavaB - ashB) * lavaBlend;
   } else {
-    const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.09;
-    const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.045;
-    const n3 = Math.sin(x * 0.11 - 0.2) * Math.cos(y * 0.094 + 0.5) * 0.07;
-    const n4 = Math.sin(x * 5.7 + y * 4.3) * 0.02;
-    const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.012;
-    const grass = n1 + n2 + n3 + n4 + n5;
-    const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.025;
-    r = (0.07 + grass + warmth + seededRand() * 0.025) * 0.58;
-    g = (0.26 + grass + seededRand() * 0.045) * 0.58;
-    b = (0.05 + grass * 0.4 - warmth * 0.5) * 0.58;
+    // Multi-octave noise for rich micro-variation
+    const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.11;
+    const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.055;
+    const n3 = Math.sin(x * 0.11 - 0.2) * Math.cos(y * 0.094 + 0.5) * 0.08;
+    const n4 = Math.sin(x * 5.7 + y * 4.3) * 0.028;
+    const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.016;
+    const n6 = Math.sin(x * 18.3 + y * 22.7) * 0.008; // fine detail
+    const grass = n1 + n2 + n3 + n4 + n5 + n6;
+    const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.03;
+    // Moisture map — damp dark green near canal, dry olive elsewhere
+    const dS = Math.abs(y + _CANAL_R), dN = Math.abs(y - _CANAL_R);
+    const dE = Math.abs(x - _CANAL_R), dW = Math.abs(x + _CANAL_R);
+    const nearCanal = Math.max(0, 1 - Math.min(dS, dN, dE, dW) / 22);
+    const moisture = nearCanal * 0.06;
+    // Subtle dirt-path variation along diagonals
+    const dirtPatch = Math.max(0, Math.sin(x * 0.22 + y * 0.19) * Math.cos(x * 0.15 - y * 0.28) - 0.55) * 0.18;
+    const baseG = 0.28 + grass + moisture;
+    r = Math.max(0, (0.07 + grass * 0.7 + warmth + seededRand() * 0.022 + dirtPatch * 1.1) * 0.60);
+    g = Math.max(0, (baseG   + seededRand() * 0.038 - dirtPatch * 0.3) * 0.62);
+    b = Math.max(0, (0.04 + grass * 0.35 - warmth * 0.6 + moisture * 0.4) * 0.60);
   }
   groundColors[i * 3] = r;
   groundColors[i * 3 + 1] = g;
@@ -282,7 +299,7 @@ scene.add(ground);
   const _s = 2.5;
 
   const _waterMat = new THREE.MeshLambertMaterial({
-    color: 0x1e78c8, transparent: true, opacity: 0.82, side: THREE.DoubleSide,
+    color: 0x1a8ed8, transparent: true, opacity: 0.84, side: THREE.DoubleSide,
   });
   const _wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide });
 
@@ -467,25 +484,48 @@ water.position.y = -5;
 water.visible = false;
 scene.add(water);
 
-// ── Rising bubble particles along perimeter ──
-const bubbleGroup = new THREE.Group();
-const bubbleMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
-for (let i = 0; i < 40; i++) {
+// ── Rising bubble particles along perimeter — single instanced mesh ──
+const BUBBLE_COUNT = 40;
+const bubbleMat  = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
+const bubbleInst = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(1, 5, 4),   // unit sphere — scaled per instance
+  bubbleMat,
+  BUBBLE_COUNT
+);
+bubbleInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+const _bubbleData = [];   // { bx, bz, baseY, speed, phase, size }
+const _bubbleDummy = new THREE.Object3D();
+let _bubbleCount = 0;
+for (let i = 0; i < BUBBLE_COUNT; i++) {
   const angle = seededRand() * Math.PI * 2;
-  const dist = half - 4 - seededRand() * 12;
-  const bx = Math.cos(angle) * dist;
-  const bz = Math.sin(angle) * dist;
+  const dist  = half - 4 - seededRand() * 12;
+  const bx    = Math.cos(angle) * dist;
+  const bz    = Math.sin(angle) * dist;
   if (Math.abs(bx - CONFIG.prisonPos.x) < CONFIG.prisonSize / 2 + 5 &&
-      Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) continue;
-  const bubble = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4 + seededRand() * 0.7, 5, 4),
-    bubbleMat
-  );
-  bubble.position.set(bx, -1 + seededRand() * 2, bz);
-  bubble.userData = { speed: 0.4 + seededRand() * 0.8, phase: seededRand() * 6.28 };
-  bubbleGroup.add(bubble);
+      Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) {
+    // Park off-screen so the slot doesn't flicker
+    _bubbleDummy.position.set(0, -9999, 0); _bubbleDummy.scale.setScalar(0.01);
+    _bubbleDummy.updateMatrix(); bubbleInst.setMatrixAt(i, _bubbleDummy.matrix);
+    _bubbleData.push(null);
+    continue;
+  }
+  const size  = 0.4 + seededRand() * 0.7;
+  const baseY = -1 + seededRand() * 2;
+  const speed = 0.4 + seededRand() * 0.8;
+  const phase = seededRand() * 6.28;
+  _bubbleData.push({ bx, bz, baseY, speed, phase, size, y: baseY });
+  _bubbleDummy.position.set(bx, baseY, bz);
+  _bubbleDummy.scale.setScalar(size);
+  _bubbleDummy.updateMatrix();
+  bubbleInst.setMatrixAt(i, _bubbleDummy.matrix);
+  _bubbleCount++;
 }
-scene.add(bubbleGroup);
+bubbleInst.instanceMatrix.needsUpdate = true;
+// Expose for update loop
+window._bubbleInst = bubbleInst;
+window._bubbleData = _bubbleData;
+window._bubbleDummy2 = _bubbleDummy;
+scene.add(bubbleInst);
 
 // ═══════════════════════════════════════════════════════════
 // CLIFF WALLS — Single color, smooth height variation
@@ -855,6 +895,99 @@ towerCorners.forEach(tc => {
 }
 
 // ═══════════════════════════════════════════════════════════
+// PERIMETER BILLBOARDS — one per outer wall, highway-style
+// `half` and `ct` are defined in 03_terrain.js (same global scope)
+// ═══════════════════════════════════════════════════════════
+{
+  const WALL_TOP   = CONFIG.cliffHeight + 4 - 3;  // = 36 (top of outer cliff walls)
+  const BB_W       = 24.6;   // face width
+  const BB_H       = 12.1;   // face height
+  const POLE_H     = 16.1;   // pole height above wall top
+  const POLE_GAP   = 17.6;   // pole spacing
+
+  const poleMat  = new THREE.MeshLambertMaterial({ color: 0x3a3830 });
+  const beamMat  = new THREE.MeshLambertMaterial({ color: 0x2e2c28 });
+  const sideMat  = new THREE.MeshLambertMaterial({ color: 0x4a4844 });  // back / sides
+
+  // Canvas texture for the billboard face
+  const _bbCanvas = document.createElement('canvas');
+  _bbCanvas.width = 1024; _bbCanvas.height = 512;
+  const _bbCtx = _bbCanvas.getContext('2d');
+  _bbCtx.fillStyle = '#e8e4d8';
+  _bbCtx.fillRect(0, 0, 1024, 512);
+  _bbCtx.fillStyle = '#1a1a1a';
+  _bbCtx.font = 'bold 108px Arial Black, Arial, sans-serif';
+  _bbCtx.textAlign = 'center';
+  _bbCtx.textBaseline = 'middle';
+  // Scale font down until text fits within 90% of canvas width
+  while (_bbCtx.measureText('YOUR AD HERE').width > 921) {
+    const size = parseInt(_bbCtx.font) - 4;
+    _bbCtx.font = `bold ${size}px Arial Black, Arial, sans-serif`;
+  }
+  _bbCtx.fillText('YOUR AD HERE', 512, 256);
+  const _bbTex = new THREE.CanvasTexture(_bbCanvas);
+  const faceMat = new THREE.MeshLambertMaterial({ map: _bbTex });
+
+  function _spawnBillboard(bx, bz, ry) {
+    const g = new THREE.Group();
+    g.position.set(bx, WALL_TOP, bz);
+    g.rotation.y = ry;
+
+    // Two steel poles (slightly tapered at base)
+    for (const sx of [-1, 1]) {
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.27, 0.34, POLE_H, 8),
+        poleMat
+      );
+      pole.position.set(sx * POLE_GAP / 2, POLE_H / 2, 0);
+      g.add(pole);
+    }
+
+    // Horizontal cross-bars between the poles
+    for (const frac of [0.3, 0.65]) {
+      const xbar = new THREE.Mesh(
+        new THREE.BoxGeometry(POLE_GAP - 0.4, 0.22, 0.22),
+        beamMat
+      );
+      xbar.position.set(0, POLE_H * frac, 0);
+      g.add(xbar);
+    }
+
+    // Top I-beam spanning the full board width
+    const topBeam = new THREE.Mesh(
+      new THREE.BoxGeometry(BB_W + 1, 0.42, 0.42),
+      beamMat
+    );
+    topBeam.position.set(0, POLE_H + 0.21, 0);
+    g.add(topBeam);
+
+    // Billboard back panel
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(BB_W, BB_H, 0.22),
+      sideMat
+    );
+    back.position.set(0, POLE_H + BB_H / 2 + 0.42, 0);
+    g.add(back);
+
+    // Billboard face (facing local +Z = inward toward map)
+    const face = new THREE.Mesh(
+      new THREE.BoxGeometry(BB_W, BB_H, 0.10),
+      faceMat
+    );
+    face.position.set(0, POLE_H + BB_H / 2 + 0.42, 0.16);
+    g.add(face);
+
+    scene.add(g);
+  }
+
+  const wo = half + ct / 2;  // wall centre offset from map origin (= 131.5)
+  _spawnBillboard(  0,  -wo,   0            );  // North wall — faces south (+Z)
+  _spawnBillboard(  0,   wo,   Math.PI      );  // South wall — faces north (-Z)
+  _spawnBillboard(  wo,   0,  -Math.PI / 2  );  // East wall  — faces west  (-X)
+  _spawnBillboard( -wo,   0,   Math.PI / 2  );  // West wall  — faces east  (+X)
+}
+
+// ═══════════════════════════════════════════════════════════
 // JUNGLE — Trees and Bushes
 // ═══════════════════════════════════════════════════════════
 function canPlaceAt(x, z) {
@@ -875,6 +1008,127 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   colorWrite: false
 });
 
+// ── Procedural textures — created once, shared across all instances ──
+function _makeBarkTex() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+  const ctx = c.getContext('2d');
+  // Warm mid-brown base
+  ctx.fillStyle = '#7a3e18'; ctx.fillRect(0, 0, 128, 256);
+  // Dark vertical streaks (main bark character)
+  for (let i = 0; i < 14; i++) {
+    const sx = Math.random() * 128;
+    const sw = 1.2 + Math.random() * 5.5;
+    const g = ctx.createLinearGradient(sx - sw, 0, sx + sw, 0);
+    g.addColorStop(0, 'rgba(16,5,1,0)');
+    g.addColorStop(0.5, `rgba(16,5,1,${0.55 + Math.random() * 0.35})`);
+    g.addColorStop(1, 'rgba(16,5,1,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 256);
+  }
+  // Light highlight streaks between dark ones
+  for (let i = 0; i < 6; i++) {
+    const sx = Math.random() * 128;
+    const g = ctx.createLinearGradient(sx - 2, 0, sx + 2, 0);
+    g.addColorStop(0, 'rgba(200,110,45,0)');
+    g.addColorStop(0.5, `rgba(200,110,45,${0.18 + Math.random() * 0.18})`);
+    g.addColorStop(1, 'rgba(200,110,45,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 256);
+  }
+  // Horizontal grain/crack lines
+  let y = 0;
+  while (y < 256) {
+    y += 5 + Math.random() * 18;
+    ctx.strokeStyle = `rgba(12,4,0,${0.08 + Math.random() * 0.22})`;
+    ctx.lineWidth = Math.random() < 0.4 ? 1.2 : 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.bezierCurveTo(40, y + (Math.random()-0.5)*4, 88, y + (Math.random()-0.5)*4, 128, y + (Math.random()-0.5)*3);
+    ctx.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(2, 4);
+  return t;
+}
+
+function _makeLeafTex() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+  const ctx = c.getContext('2d');
+  // Vibrant mid-green base — bright enough to survive instance color multiplication
+  ctx.fillStyle = '#4a9a20'; ctx.fillRect(0, 0, 256, 256);
+  // Soft shadow blobs — subtle depth, not heavy spots
+  for (let i = 0; i < 38; i++) {
+    const lx = Math.random() * 256, ly = Math.random() * 256;
+    const lr = 8 + Math.random() * 24;
+    const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
+    g.addColorStop(0, `rgba(4,18,1,${0.28 + Math.random() * 0.18})`);
+    g.addColorStop(0.5, `rgba(4,18,1,${0.10 + Math.random() * 0.10})`);
+    g.addColorStop(1, 'rgba(4,18,1,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(lx, ly, lr, 0, 6.28); ctx.fill();
+  }
+  // Gentle sun-dapple highlights
+  for (let i = 0; i < 20; i++) {
+    const lx = Math.random() * 256, ly = Math.random() * 256;
+    const lr = 5 + Math.random() * 16;
+    const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
+    g.addColorStop(0, `rgba(110,230,40,${0.18 + Math.random() * 0.14})`);
+    g.addColorStop(1, 'rgba(110,230,40,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(lx, ly, lr, 0, 6.28); ctx.fill();
+  }
+  // Fine noise — individual leaf edges
+  for (let i = 0; i < 140; i++) {
+    const nx = Math.random() * 256, ny = Math.random() * 256;
+    ctx.fillStyle = Math.random() < 0.55
+      ? `rgba(5,20,2,${0.12 + Math.random()*0.16})`
+      : `rgba(85,200,28,${0.08 + Math.random()*0.12})`;
+    ctx.fillRect(nx, ny, 1 + Math.random() * 2.5, 1 + Math.random() * 2.5);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(2, 2);
+  return t;
+}
+
+function _makeArborvitaeTex() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+  const ctx = c.getContext('2d');
+  // Medium green base — bright enough to show texture after instance color ×0.7-1.0
+  ctx.fillStyle = '#3a9018'; ctx.fillRect(0, 0, 128, 256);
+  // Subtle horizontal branch layers — hint of depth, not obvious stripes
+  let by = 0;
+  while (by < 256) {
+    const bh = 10 + Math.random() * 9;
+    // Soft light at top
+    ctx.fillStyle = `rgba(85,200,35,${0.14 + Math.random() * 0.10})`;
+    ctx.fillRect(0, by, 128, bh * 0.35);
+    // Soft shadow below
+    ctx.fillStyle = `rgba(5,22,2,${0.18 + Math.random() * 0.12})`;
+    ctx.fillRect(0, by + bh * 0.35, 128, bh * 0.65);
+    by += bh;
+  }
+  // Arc scales — light suggestion of needles
+  for (let i = 0; i < 55; i++) {
+    const ax = Math.random() * 128, ay = Math.random() * 256;
+    const ar = 3 + Math.random() * 6;
+    ctx.strokeStyle = `rgba(3,14,1,${0.18 + Math.random() * 0.18})`;
+    ctx.lineWidth = 0.6 + Math.random() * 0.8;
+    ctx.beginPath(); ctx.arc(ax, ay, ar, 0, Math.PI); ctx.stroke();
+  }
+  // Light needle tips
+  for (let i = 0; i < 40; i++) {
+    const ax = Math.random() * 128, ay = Math.random() * 256;
+    ctx.fillStyle = `rgba(100,220,45,${0.14 + Math.random() * 0.14})`;
+    ctx.fillRect(ax, ay, 1.2, 2 + Math.random() * 4);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(3, 5);
+  return t;
+}
+
+const _barkTex      = _makeBarkTex();
+const _leafTex      = _makeLeafTex();
+const _arborTex     = _makeArborvitaeTex();
+
 // ── Instanced Trees — 2 draw calls for all trunks + all canopies ──
 {
   const treePlacements = [];
@@ -890,29 +1144,33 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   const treeCount = treePlacements.length;
 
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.62, 1, 8);
-  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5c3310 });
+  const trunkMat = new THREE.MeshLambertMaterial({ map: _barkTex });
   const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
   trunkInst.castShadow = true;
 
   const flareGeo = new THREE.CylinderGeometry(0.55, 0.90, 1, 8);
-  const flareMat = new THREE.MeshLambertMaterial({ color: 0x2e1a06 });
+  const flareMat = new THREE.MeshLambertMaterial({ map: _barkTex });
   const flareInst = new THREE.InstancedMesh(flareGeo, flareMat, treeCount);
   flareInst.castShadow = false;
 
+  const _trunkCol = new THREE.Color();
+
   const canopyGeo = new THREE.SphereGeometry(1, 10, 8);
-  const canopyMat = new THREE.MeshLambertMaterial({ color: 0x0f3a08 });
+  const canopyMat = new THREE.MeshLambertMaterial({ map: _leafTex });
   const canopyInst = new THREE.InstancedMesh(canopyGeo, canopyMat, treeCount);
   canopyInst.castShadow = true;
 
   const canopy2Geo = new THREE.SphereGeometry(1, 9, 7);
-  const canopy2Mat = new THREE.MeshLambertMaterial({ color: 0x1e6010 });
+  const canopy2Mat = new THREE.MeshLambertMaterial({ map: _leafTex });
   const canopy2Inst = new THREE.InstancedMesh(canopy2Geo, canopy2Mat, treeCount);
   canopy2Inst.castShadow = false;
 
   const canopy3Geo = new THREE.SphereGeometry(1, 8, 6);
-  const canopy3Mat = new THREE.MeshLambertMaterial({ color: 0x5cb82a });
+  const canopy3Mat = new THREE.MeshLambertMaterial({ map: _leafTex });
   const canopy3Inst = new THREE.InstancedMesh(canopy3Geo, canopy3Mat, treeCount);
   canopy3Inst.castShadow = false;
+
+  const _treeCol = new THREE.Color();
 
   const dummy = new THREE.Object3D();
 
@@ -957,6 +1215,29 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     dummy.updateMatrix();
     canopy3Inst.setMatrixAt(i, dummy.matrix);
 
+    // Per-instance color — multi-prime hash, no seededRand consumption
+    const tf1 = Math.sin(x * 127.341 + z * 311.723);
+    const tf2 = Math.sin(x *  89.127 - z * 203.401 + 1.9);
+    const tf3 = Math.sin((x + z) * 53.17 + (x - z) * 71.39);
+    const hv  = (tf1 * 0.5 + tf2 * 0.3 + tf3 * 0.2) * 0.5 + 0.5;
+    const hv2 = (tf2 * 0.5 + tf3 * 0.5) * 0.5 + 0.5;
+    const hv3 = (tf3 * 0.6 + tf1 * 0.4) * 0.5 + 0.5;
+
+    // Trunk: warm vs cool bark shift
+    _trunkCol.setRGB(0.75 + hv * 0.35, 0.78 + hv2 * 0.25, 0.70 + hv3 * 0.30);
+    trunkInst.setColorAt(i, _trunkCol);
+    _trunkCol.setRGB(0.65 + hv * 0.32, 0.68 + hv2 * 0.22, 0.62 + hv3 * 0.26);
+    flareInst.setColorAt(i, _trunkCol);
+
+    // Canopy: narrow band centred on muted forest green, slight per-tree variance only.
+    // Multiplier range ~0.52–0.72 (±15%) — no extremes.
+    _treeCol.setRGB(0.52 + hv * 0.16 + hv2 * 0.04, 0.54 + hv * 0.16 + hv3 * 0.03, 0.42 + hv * 0.12 + hv2 * 0.04);
+    canopyInst.setColorAt(i, _treeCol);
+    _treeCol.setRGB(0.57 + hv * 0.15 + hv2 * 0.04, 0.59 + hv * 0.15 + hv3 * 0.03, 0.45 + hv * 0.11 + hv2 * 0.04);
+    canopy2Inst.setColorAt(i, _treeCol);
+    _treeCol.setRGB(0.62 + hv * 0.14 + hv2 * 0.04, 0.64 + hv * 0.14 + hv3 * 0.03, 0.48 + hv * 0.11 + hv2 * 0.04);
+    canopy3Inst.setColorAt(i, _treeCol);
+
     // Trunk PLAYER collider — generous, prevents walking through
     const trunkCol = new THREE.Mesh(
       new THREE.BoxGeometry(trunkR * 2.4, trunkH, trunkR * 2.4),
@@ -983,6 +1264,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
     canopyHit.position.set(x, h + trunkH + canopyR * 0.35, z);
     canopyHit.updateMatrixWorld(true);
     targets.push(canopyHit);
+    collidables.push(canopyHit);  // solid shell — player can't jump inside
   });
 
   trunkInst.instanceMatrix.needsUpdate = true;
@@ -990,6 +1272,11 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   canopyInst.instanceMatrix.needsUpdate = true;
   canopy2Inst.instanceMatrix.needsUpdate = true;
   canopy3Inst.instanceMatrix.needsUpdate = true;
+  trunkInst.instanceColor.needsUpdate  = true;
+  flareInst.instanceColor.needsUpdate  = true;
+  canopyInst.instanceColor.needsUpdate  = true;
+  canopy2Inst.instanceColor.needsUpdate = true;
+  canopy3Inst.instanceColor.needsUpdate = true;
   scene.add(trunkInst);
   scene.add(flareInst);
   scene.add(canopyInst);
@@ -1013,7 +1300,7 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   // bush2Inst = arborvitae base trunk  (even indices)
   // bush3Inst = decorative small bush  (odd indices, no collider)
   const bushGeo  = new THREE.ConeGeometry(0.5, 1, 6);
-  const bushMat  = new THREE.MeshLambertMaterial({ color: 0x0e3808 });
+  const bushMat  = new THREE.MeshLambertMaterial({ map: _arborTex });
   const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushPlacements.length);
   bushInst.castShadow = true;
   const bush2Geo  = new THREE.CylinderGeometry(0.25, 0.38, 0.5, 6);
@@ -1021,9 +1308,10 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
   const bush2Inst = new THREE.InstancedMesh(bush2Geo, bush2Mat, bushPlacements.length);
   bush2Inst.castShadow = false;
   const bush3Geo  = new THREE.SphereGeometry(1, 6, 4);
-  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0x4aa020 });
+  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const bush3Inst = new THREE.InstancedMesh(bush3Geo, bush3Mat, bushPlacements.length);
   bush3Inst.castShadow = false;
+  const _bushCol = new THREE.Color();
   const dummy = new THREE.Object3D();
   const zeroMatrix = (() => { const d = new THREE.Object3D(); d.scale.set(0,0,0); d.updateMatrix(); return d.matrix.clone(); })();
   bushPlacements.forEach(({ x, z }, i) => {
@@ -1043,6 +1331,11 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       dummy.updateMatrix();
       bush2Inst.setMatrixAt(i, dummy.matrix);
       bush3Inst.setMatrixAt(i, zeroMatrix);
+      // Arborvitae: narrow range, muted dark-to-medium green
+      const bv = Math.sin(x * 73.4 + z * 197.1) * 0.5 + 0.5;
+      _bushCol.setRGB(0.50 + bv * 0.18, 0.56 + bv * 0.14, 0.40 + bv * 0.14);
+      bushInst.setColorAt(i, _bushCol);
+      bush3Inst.setColorAt(i, _bushCol); // zero-scaled, harmless
       const bushCol = new THREE.Mesh(
         new THREE.BoxGeometry(w * 1.35, ht * 1.05, w * 1.35),
         invisibleColliderMat
@@ -1068,11 +1361,18 @@ const invisibleColliderMat = new THREE.MeshBasicMaterial({
       bush3Inst.setMatrixAt(i, dummy.matrix);
       bushInst.setMatrixAt(i, zeroMatrix);
       bush2Inst.setMatrixAt(i, zeroMatrix);
+      // Round bush: muted medium-dark green, slight variance
+      const bv2 = Math.cos(x * 41.7 - z * 83.2) * 0.5 + 0.5;
+      _bushCol.setRGB(0.06 + bv2 * 0.10, 0.28 + bv2 * 0.12, 0.03 + bv2 * 0.04);
+      bush3Inst.setColorAt(i, _bushCol);
+      bushInst.setColorAt(i, _bushCol); // zero-scaled, harmless
     }
   });
   bushInst.instanceMatrix.needsUpdate = true;
   bush2Inst.instanceMatrix.needsUpdate = true;
   bush3Inst.instanceMatrix.needsUpdate = true;
+  bushInst.instanceColor.needsUpdate  = true;
+  bush3Inst.instanceColor.needsUpdate = true;
   scene.add(bushInst);
   scene.add(bush2Inst);
   scene.add(bush3Inst);
@@ -1241,7 +1541,232 @@ for (let i = 0; i < 25; i++) {
   collidables.push(crate);
 }
 
+// ── Instanced Dandelions — thin stem + 3-plane star head, 1 draw call ──
+{
+  const dandelionPlacements = [];
+  const dGrid = 3.5;
+  for (let gx = -half + 8; gx < half - 8; gx += dGrid) {
+    for (let gz = -half + 8; gz < half - 8; gz += dGrid) {
+      const x = gx + (seededRand() - 0.5) * dGrid;
+      const z = gz + (seededRand() - 0.5) * dGrid;
+      if (!canPlaceAt(x, z)) continue;
+      dandelionPlacements.push({ x, z });
+    }
+  }
 
+  // Geometry: 2-plane thin stem (8 verts) + 3-plane star head (12 verts) = 20 verts, 10 tris
+  // Head planes at 0°, 60°, 120° around Y — reads as a round puffball from any angle
+  const sH = 0.275, sW = 0.0145;     // stem height, half-width (−30% total)
+  const hR = 0.094, hY = sH - 0.01, hT = hY + 0.065;   // head radius, base-y, top-y (−30% total)
+  const c60 = 0.5, s60 = 0.866;      // cos/sin 60°
+
+  const dv = new Float32Array([
+    // Stem plane 1 (along X)
+    -sW, 0,   0,   sW, 0,   0,   -sW, sH,  0,   sW, sH,  0,
+    // Stem plane 2 (along Z)
+     0,  0, -sW,    0, 0,  sW,    0,  sH, -sW,   0, sH,  sW,
+    // Head plane A (0°, along X)
+    -hR,      hY,  0,        hR,      hY,  0,        -hR,      hT,  0,        hR,      hT,  0,
+    // Head plane B (60°)
+    -hR*c60,  hY, -hR*s60,   hR*c60,  hY,  hR*s60,  -hR*c60,  hT, -hR*s60,  hR*c60,  hT,  hR*s60,
+    // Head plane C (120°)
+     hR*c60,  hY, -hR*s60,  -hR*c60,  hY,  hR*s60,   hR*c60,  hT, -hR*s60, -hR*c60,  hT,  hR*s60,
+  ]);
+
+  // Stem: dark green base → mid green top. Head: pure white (instance color provides hue).
+  const dCol = new Float32Array([
+    // Stem plane 1
+    0.04,0.12,0.01,  0.04,0.12,0.01,  0.10,0.28,0.03,  0.10,0.28,0.03,
+    // Stem plane 2
+    0.04,0.12,0.01,  0.04,0.12,0.01,  0.10,0.28,0.03,  0.10,0.28,0.03,
+    // Head A, B, C — pure white so instance color tints cleanly
+    1,1,1,  1,1,1,  1,1,1,  1,1,1,
+    1,1,1,  1,1,1,  1,1,1,  1,1,1,
+    1,1,1,  1,1,1,  1,1,1,  1,1,1,
+  ]);
+
+  const dIdx = [
+    0,1,2, 1,3,2,    // stem 1
+    4,5,6, 5,7,6,    // stem 2
+    8,9,10, 9,11,10, // head A
+    12,13,14, 13,15,14, // head B
+    16,17,18, 17,19,18, // head C
+  ];
+
+  const dandelionGeo = new THREE.BufferGeometry();
+  dandelionGeo.setAttribute('position', new THREE.BufferAttribute(dv, 3));
+  dandelionGeo.setAttribute('color',    new THREE.BufferAttribute(dCol, 3));
+  dandelionGeo.setIndex(dIdx);
+  const dandelionMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const dandelionInst = new THREE.InstancedMesh(dandelionGeo, dandelionMat, dandelionPlacements.length);
+  dandelionInst.castShadow = false;
+
+  // Head color palette: mostly greens, one yellow, whites
+  const dPalette = [
+    [0.18, 0.78, 0.18],   // bright green
+    [1.00, 0.94, 0.18],   // pale yellow (1 yellow kept)
+    [0.97, 0.97, 0.92],   // white puffball
+    [0.10, 0.58, 0.22],   // forest green
+    [0.95, 0.98, 0.85],   // cream/off-white
+    [0.25, 0.82, 0.32],   // vivid green
+  ];
+
+  const _dDummy = new THREE.Object3D();
+  const _dCol   = new THREE.Color();
+  dandelionPlacements.forEach(({ x, z }, i) => {
+    const h = getTerrainHeight(x, z);
+    const s = 0.397 + seededRand() * 0.470;    // −30% total
+    _dDummy.position.set(x, h, z);
+    _dDummy.scale.set(s, s * (0.85 + seededRand() * 0.40), s);
+    _dDummy.rotation.y = seededRand() * 6.28;
+    _dDummy.updateMatrix();
+    dandelionInst.setMatrixAt(i, _dDummy.matrix);
+
+    // Multi-prime hash — no grid pattern
+    const fi = Math.abs(
+      Math.sin(x * 173.1 + z * 251.7) * 0.5 +
+      Math.cos(x * 97.3  - z * 139.4) * 0.3 +
+      Math.sin((x - z)   * 61.7)      * 0.2
+    );
+    const [r, g, b] = dPalette[Math.floor(fi * dPalette.length) % dPalette.length];
+    _dCol.setRGB(r, g, b);
+    dandelionInst.setColorAt(i, _dCol);
+  });
+  dandelionInst.instanceMatrix.needsUpdate = true;
+  dandelionInst.instanceColor.needsUpdate  = true;
+  scene.add(dandelionInst);
+}
+
+// ── Instanced Ferns — 3-plane tapered fronds radiating from centre, 1 draw call ──
+{
+  const fernPlacements = [];
+  const fernGridSize = 11;
+  for (let gx = -half + 12; gx < half - 12; gx += fernGridSize) {
+    for (let gz = -half + 12; gz < half - 12; gz += fernGridSize) {
+      const x = gx + (seededRand() - 0.5) * fernGridSize * 0.85 + fernGridSize * 0.4;
+      const z = gz + (seededRand() - 0.5) * fernGridSize * 0.85 + fernGridSize * 0.4;
+      if (!canPlaceAt(x, z)) continue;
+      fernPlacements.push({ x, z });
+    }
+  }
+
+  // 3 frond planes at 0°, 60°, 120° — tapered (wide base → narrow tip)
+  // Base vertex color is dark so stems stay dark green regardless of instance tint.
+  // Tip vertex color is white so instance color fully controls the tip hue.
+  const fH = 0.68, fW = 0.52, fT = 0.055;   // height, base half-width, tip half-width
+  const c60 = 0.5, s60 = 0.866;
+
+  const fv = new Float32Array([
+    // Plane 0 (0°, along X)
+    -fW, 0,  0,      fW,  0,  0,     -fT, fH, 0,     fT, fH, 0,
+    // Plane 1 (60°)
+    -fW*c60, 0, -fW*s60,   fW*c60, 0, fW*s60,   -fT*c60, fH, -fT*s60,   fT*c60, fH, fT*s60,
+    // Plane 2 (120°)
+     fW*c60, 0, -fW*s60,  -fW*c60, 0, fW*s60,    fT*c60, fH, -fT*s60,  -fT*c60, fH, fT*s60,
+  ]);
+  const fc = new Float32Array([
+    0.03,0.14,0.02, 0.03,0.14,0.02, 1,1,1, 1,1,1,
+    0.03,0.14,0.02, 0.03,0.14,0.02, 1,1,1, 1,1,1,
+    0.03,0.14,0.02, 0.03,0.14,0.02, 1,1,1, 1,1,1,
+  ]);
+  const fIdx = [0,1,2,1,3,2,  4,5,6,5,7,6,  8,9,10,9,11,10];
+
+  const fernGeo  = new THREE.BufferGeometry();
+  fernGeo.setAttribute('position', new THREE.BufferAttribute(fv, 3));
+  fernGeo.setAttribute('color',    new THREE.BufferAttribute(fc, 3));
+  fernGeo.setIndex(fIdx);
+  const fernMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const fernInst = new THREE.InstancedMesh(fernGeo, fernMat, fernPlacements.length);
+
+  // Fern tip color palette — varied greens
+  const fernPalette = [
+    [0.20, 0.80, 0.18],   // bright green
+    [0.12, 0.55, 0.14],   // forest green
+    [0.28, 0.72, 0.22],   // yellow-green
+    [0.10, 0.62, 0.28],   // cool green
+    [0.22, 0.68, 0.16],   // medium green
+  ];
+
+  const _fDummy = new THREE.Object3D();
+  const _fCol   = new THREE.Color();
+  fernPlacements.forEach(({ x, z }, i) => {
+    const h = getTerrainHeight(x, z);
+    const s = 0.7 + seededRand() * 1.1;
+    _fDummy.position.set(x, h, z);
+    _fDummy.scale.set(s, s * (0.75 + seededRand() * 0.45), s);
+    _fDummy.rotation.y = seededRand() * 6.28;
+    _fDummy.updateMatrix();
+    fernInst.setMatrixAt(i, _fDummy.matrix);
+    const fi = Math.abs(Math.sin(x * 97.3 + z * 181.7) * 0.5 + Math.cos(x * 61.1 - z * 143.9) * 0.5);
+    const [r, g, b] = fernPalette[Math.floor(fi * fernPalette.length) % fernPalette.length];
+    _fCol.setRGB(r, g, b);
+    fernInst.setColorAt(i, _fCol);
+  });
+  fernInst.instanceMatrix.needsUpdate = true;
+  fernInst.instanceColor.needsUpdate  = true;
+  scene.add(fernInst);
+}
+
+// ── Wildflower Accents — tiny bright-top crossed quads, 1 draw call ──
+{
+  const flowerPlacements = [];
+  const flowerGridSize = 9;
+  for (let gx = -half + 10; gx < half - 10; gx += flowerGridSize) {
+    for (let gz = -half + 10; gz < half - 10; gz += flowerGridSize) {
+      const x = gx + (seededRand() - 0.5) * flowerGridSize * 0.9;
+      const z = gz + (seededRand() - 0.5) * flowerGridSize * 0.9;
+      if (!canPlaceAt(x, z)) continue;
+      flowerPlacements.push({ x, z });
+    }
+  }
+
+  // Short stem + bright top — very thin blades with vivid tip
+  const fh = 0.255, fw = 0.153;
+  const fv = new Float32Array([
+    -fw*0.5, 0,    0,      fw*0.5,  0,    0,     -fw*0.08, fh,  0,      fw*0.08, fh,  0,
+     0,       0,  -fw*0.5,  0,      0,   fw*0.5,  0,       fh, -fw*0.08, 0,      fh,  fw*0.08,
+  ]);
+  // Stem is dark green, top is white-ish (instance color provides the hue)
+  const fc = new Float32Array([
+    0.05,0.12,0.02,  0.05,0.12,0.02,  0.95,0.92,0.88,  0.95,0.92,0.88,
+    0.05,0.12,0.02,  0.05,0.12,0.02,  0.95,0.92,0.88,  0.95,0.92,0.88,
+  ]);
+  const fIdx = [0,1,2, 1,3,2,  4,5,6, 5,7,6];
+  const flowerGeo  = new THREE.BufferGeometry();
+  flowerGeo.setAttribute('position', new THREE.BufferAttribute(fv, 3));
+  flowerGeo.setAttribute('color',    new THREE.BufferAttribute(fc, 3));
+  flowerGeo.setIndex(fIdx);
+  const flowerMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const flowerInst = new THREE.InstancedMesh(flowerGeo, flowerMat, flowerPlacements.length);
+
+  const _fDummy = new THREE.Object3D();
+  const _fCol   = new THREE.Color();
+  // Palette: greens + lavender + white + blue (no yellow)
+  const flowerPalette = [
+    [0.22, 0.82, 0.25],  // bright green
+    [0.85, 0.60, 1.00],  // lavender
+    [1.0,  1.0,  1.0 ],  // white
+    [0.12, 0.62, 0.20],  // dark green
+    [0.55, 0.85, 1.00],  // sky blue
+  ];
+  flowerPlacements.forEach(({ x, z }, i) => {
+    const h   = getTerrainHeight(x, z);
+    const s   = 0.4675 + seededRand() * 0.5525;
+    _fDummy.position.set(x, h, z);
+    _fDummy.scale.set(s, s * (0.8 + seededRand() * 0.5), s);
+    _fDummy.rotation.y = seededRand() * 6.28;
+    _fDummy.updateMatrix();
+    flowerInst.setMatrixAt(i, _fDummy.matrix);
+    // Pick palette color from hash — never repeating in a grid pattern
+    const fi = Math.abs(Math.sin(x * 173.1 + z * 251.7) * Math.cos(x * 97.3 - z * 139.4));
+    const [r, g, b] = flowerPalette[Math.floor(fi * flowerPalette.length)];
+    _fCol.setRGB(r, g, b);
+    flowerInst.setColorAt(i, _fCol);
+  });
+  flowerInst.instanceMatrix.needsUpdate = true;
+  flowerInst.instanceColor.needsUpdate  = true;
+  scene.add(flowerInst);
+}
 
 // ═══════════════════════════════════════════════════════════
 // BOTS — AI with shooting, prison spawn, ammo seeking
@@ -2508,6 +3033,22 @@ function _physStep(fixedDt, inputDir, speed) {
   // Vertical movement
   phys.pos.y += phys.vel.y * fixedDt;
 
+  // Ceiling — stop upward movement when head enters a collidable from below.
+  // Without this, jumping near/under tree canopies lets the player clip inside.
+  if (phys.vel.y > 0) {
+    const headY = phys.pos.y + height;
+    for (const entry of collidableCache) {
+      const bb = entry.bb;
+      if (headY > bb.min.y && headY < bb.max.y && phys.pos.y < bb.min.y &&
+          phys.pos.x > bb.min.x - radius && phys.pos.x < bb.max.x + radius &&
+          phys.pos.z > bb.min.z - radius && phys.pos.z < bb.max.z + radius) {
+        phys.pos.y = bb.min.y - height;
+        phys.vel.y = 0;
+        break;
+      }
+    }
+  }
+
   // Floor: terrain + any object top we might be standing on
   let floorY = getTerrainHeight(phys.pos.x, phys.pos.z);
   for (const entry of collidableCache) {
@@ -3766,7 +4307,7 @@ const eruptSpeed = new Float32Array(ERUPT_COUNT);
 
 function _resetErupt(i) {
   eruptPhase[i]   = Math.random() * Math.PI * 2;
-  eruptSpeed[i]   = 22 + Math.random() * 14;
+  eruptSpeed[i]   = 26.6 + Math.random() * 16.9;  // +10% again
   eruptPos[i*3+1] = Math.random() * 4;  // always spawn at mouth
   eruptPos[i*3]   = (Math.random() - 0.5) * 2;
   eruptPos[i*3+2] = (Math.random() - 0.5) * 2;
@@ -3796,8 +4337,8 @@ function updateEruptionPoints(dt) {
   eruptPoints.visible = true;
   // Seed ceiling just above mouth on first call so particles aren't immediately killed
   if (_plumeCeiling === 0) _plumeCeiling = 5;
-  // Ceiling climbs at 11.9 units/s — reaches full height (~150) in ~13 seconds
-  _plumeCeiling = Math.min(ERUPT_MAX_H, _plumeCeiling + 11.9 * dt);
+  // Ceiling climbs at 14.4 units/s (+10% again) — reaches full height (~150) in ~11 seconds
+  _plumeCeiling = Math.min(ERUPT_MAX_H, _plumeCeiling + 14.4 * dt);
 
   _eruptFadeT = Math.min(1, _eruptFadeT + dt / 0.8);
   eruptMat.opacity = 0.88 * _eruptFadeT;
@@ -3815,7 +4356,7 @@ function updateEruptionPoints(dt) {
     const f  = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
     const h  = eruptPos[i*3+1];
     const ph = eruptPhase[i];
-    const maxR = 2 + Math.pow(f, 1.8) * 65;
+    const maxR = 2 + Math.pow(f, 1.3) * 120;  // wider crown — covers more sky
 
     // Three turbulence layers — each height gets a different phase offset (h * k)
     // so vertical slices of the plume move independently, creating the enveloping look
@@ -3937,15 +4478,18 @@ function physicsStep(fixedDt) {
   euler.set(state.pitch, state.yaw, 0, 'YXZ');
   camera.quaternion.setFromEuler(euler);
 
-  // Build world-space move vector from camera facing + input booleans
+  // Build world-space move vector from camera facing + input booleans.
+  // Strafe (A/D) is scaled by strafeSpeedMult so lateral movement is slightly slower
+  // than forward movement, matching CS/Krunker feel. Diagonal speed is capped at 1.
   camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
   rgt.crossVectors(fwd, new THREE.Vector3(0, -1, 0)).normalize();
+  const fwdInput  = (state.moveForward ? 1 : 0) - (state.moveBack  ? 1 : 0);
+  const sideInput = (state.moveLeft    ? 1 : 0) - (state.moveRight ? 1 : 0);
   moveVec.set(0, 0, 0);
-  if (state.moveForward) moveVec.add(fwd);
-  if (state.moveBack)    moveVec.sub(fwd);
-  if (state.moveLeft)    moveVec.add(rgt);
-  if (state.moveRight)   moveVec.sub(rgt);
-  if (moveVec.lengthSq() > 0) moveVec.normalize();
+  moveVec.addScaledVector(fwd, fwdInput);
+  moveVec.addScaledVector(rgt, sideInput * CONFIG.strafeSpeedMult);
+  const mLen = moveVec.length();
+  if (mLen > 1) moveVec.divideScalar(mLen);
 
   // Smoothed move vector — fixedDt is constant so smoothFactor is constant.
   // This means the lerp rate is perfectly frame-rate independent.
@@ -3974,13 +4518,15 @@ function physicsStep(fixedDt) {
     }
   }
   const isSwimming = state.waterRising && physicsWaterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
-  const _cp = camera.position, _cR = 85, _cW = 1.25;
+  // _cW must be < 0.96 (inner wall radius) so standing on the wall top doesn't count
+  const _cp = camera.position, _cR = 85, _cW = 0.80;
   const _feetY = CONFIG.newPhysics ? phys.pos.y : (_cp.y - state.smoothCameraHeight);
   const inCanalXZ = (Math.abs(_cp.z + _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
                     (Math.abs(_cp.z - _cR) < _cW && Math.abs(_cp.x) < _cR + _cW) ||
                     (Math.abs(_cp.x - _cR) < _cW && Math.abs(_cp.z) < _cR + _cW) ||
                     (Math.abs(_cp.x + _cR) < _cW && Math.abs(_cp.z) < _cR + _cW);
-  const inCanal = inCanalXZ && _feetY < 0.77;
+  // _feetY < 0.60 excludes players standing on top of the canal walls (wall top = 0.77)
+  const inCanal = inCanalXZ && _feetY < 0.60;
   state.inCanal = inCanal;
   let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
   if (isSwimming)      speed *= 0.55;
@@ -3991,7 +4537,7 @@ function physicsStep(fixedDt) {
     // ═══════════════════════════════════════════════════
     // NEW PHYSICS — capsule sweep-and-slide (08b_physics.js)
     // ═══════════════════════════════════════════════════
-    physicsUpdate(fixedDt, moveVec, speed);
+    physicsUpdate(fixedDt, smoothedMove, speed);
 
   } else {
     // ═══════════════════════════════════════════════════
@@ -4275,7 +4821,7 @@ function update() {
     _eruptFadeT = 0;
     for (let i = 0; i < ERUPT_COUNT; i++) {
       eruptPhase[i] = Math.random() * Math.PI * 2;
-      eruptSpeed[i] = 14 + Math.random() * 7;
+      eruptSpeed[i] = 16.9 + Math.random() * 8.5;  // +10% again
       eruptPos[i*3+1] = Math.random() * ERUPT_MAX_H;
       eruptPos[i*3] = (Math.random()-0.5) * 2;
       eruptPos[i*3+2] = (Math.random()-0.5) * 2;
@@ -4366,7 +4912,7 @@ function update() {
   }
 
   if (state.erupted && state.matchTime < eruptionTime + 4 && !state.playerDead) {
-    const shakeIntensity = 0.18 * (1 - (state.matchTime - eruptionTime) / 4);
+    const shakeIntensity = 0.234 * (1 - (state.matchTime - eruptionTime) / 4);  // +30%
     state.shakeOffset.set(
       (Math.random() - 0.5) * shakeIntensity,
       (Math.random() - 0.5) * shakeIntensity * 0.5,
@@ -4402,10 +4948,9 @@ function update() {
     }
     waterPosAttr.needsUpdate = true;
 
-    const playerCurrentH = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
-    const playerFeetY = camera.position.y - playerCurrentH;
-    const kneeY = playerFeetY + 0.4;
-    if (state.waterLevel > kneeY) {
+    // Damage is terrain-based — jumping on water doesn't let you escape damage
+    const groundUnderPlayer = getTerrainHeight(camera.position.x, camera.position.z);
+    if (state.waterLevel > groundUnderPlayer + 0.4) {
       state.waterDmgTimer += renderDt;
       if (state.waterDmgTimer >= 1) {
         state.waterDmgTimer -= 1;
@@ -4511,28 +5056,36 @@ function update() {
     waterVignette.style.opacity = 0;
   }
 
-  // Bubble animation
-  if (!state.waterRising) {
-    bubbleGroup.visible = true;
-    bubbleGroup.children.forEach(b => {
-      b.position.y += b.userData.speed * renderDt;
-      b.material.opacity = 0.2 + Math.sin(clock.elapsedTime * 1.5 + b.userData.phase) * 0.15;
-      if (b.position.y > 3) b.position.y = -2 - Math.random() * 2;
-    });
-  } else {
-    bubbleGroup.visible = false;
+  // Bubble animation — single instanced mesh
+  if (window._bubbleInst) {
+    const bi = window._bubbleInst, bd = window._bubbleData, bdm = window._bubbleDummy2;
+    bi.visible = !state.waterRising;
+    if (!state.waterRising) {
+      const opac = 0.2 + Math.sin(clock.elapsedTime * 1.5) * 0.12;
+      bi.material.opacity = opac;
+      for (let i = 0; i < bd.length; i++) {
+        const b = bd[i]; if (!b) continue;
+        b.y += b.speed * renderDt;
+        if (b.y > 3) b.y = -2 - Math.random() * 2;
+        bdm.position.set(b.bx, b.y, b.bz);
+        bdm.scale.setScalar(b.size);
+        bdm.updateMatrix();
+        bi.setMatrixAt(i, bdm.matrix);
+      }
+      bi.instanceMatrix.needsUpdate = true;
+    }
   }
 
   // ── Stream water shimmer ──
   if (window.streamWater) {
     const st = clock.elapsedTime;
-    const shimmer = Math.sin(st * 1.1) * 0.03 + Math.sin(st * 2.9) * 0.015;
+    const shimmer = Math.sin(st * 1.3) * 0.04 + Math.sin(st * 3.1) * 0.02 + Math.sin(st * 0.7) * 0.015;
     window.streamWater.material.color.setRGB(
-      0.10 + shimmer * 0.4,
-      0.44 + shimmer * 0.8,
-      0.78 + shimmer * 0.5
+      0.08 + shimmer * 0.35,
+      0.50 + shimmer * 0.85,
+      0.82 + shimmer * 0.45
     );
-    window.streamWater.material.opacity = 0.72 + Math.sin(st * 0.8) * 0.08;
+    window.streamWater.material.opacity = 0.74 + Math.sin(st * 0.9) * 0.10;
   }
 
   // ── Head bob ──

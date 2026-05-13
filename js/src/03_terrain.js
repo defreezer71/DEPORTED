@@ -30,7 +30,7 @@ function getVolcanoHeight(x, z) {
 function getTerrainHeight(x, z) {
   if (Math.abs(x) > half || Math.abs(z) > half) return -5;
   const vh = getVolcanoHeight(x, z);
-  if (vh > 0.5) return vh;
+
   const raw = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3;
 
   // Flatten terrain within 10 units of each canal side so the canal walls
@@ -41,9 +41,15 @@ function getTerrainHeight(x, z) {
   const dE = (Math.abs(z) <= R + buf) ? Math.abs(x - R) : 999;
   const dW = (Math.abs(z) <= R + buf) ? Math.abs(x + R) : 999;
   const dist = Math.min(dS, dN, dE, dW);
-  if (dist >= buf) return raw;
-  const t = dist / buf;
-  return raw * t * t * (3 - 2 * t);
+  const flatRaw = dist >= buf ? raw : raw * (dist / buf) * (dist / buf) * (3 - 2 * (dist / buf));
+
+  // Smoothly blend flat terrain into volcano over a 0→1.5 unit transition zone.
+  // The old hard threshold (vh > 0.5 → return vh) caused a visible floor jump.
+  if (vh <= 0)   return flatRaw;
+  if (vh >= 1.5) return vh;
+  const bt = vh / 1.5;
+  const st = bt * bt * (3 - 2 * bt);   // smoothstep
+  return flatRaw + (vh - flatRaw) * st;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -93,16 +99,26 @@ for (let i = 0; i < gPosAttr.count; i++) {
     g = baseG + (oxG - baseG) * midBlend + (ashG - oxG) * ashBlend * midBlend + (lavaG - ashG) * lavaBlend + vN5 * 0.2;
     b = baseB + (oxB - baseB) * midBlend + (ashB - oxB) * ashBlend * midBlend + (lavaB - ashB) * lavaBlend;
   } else {
-    const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.09;
-    const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.045;
-    const n3 = Math.sin(x * 0.11 - 0.2) * Math.cos(y * 0.094 + 0.5) * 0.07;
-    const n4 = Math.sin(x * 5.7 + y * 4.3) * 0.02;
-    const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.012;
-    const grass = n1 + n2 + n3 + n4 + n5;
-    const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.025;
-    r = (0.07 + grass + warmth + seededRand() * 0.025) * 0.58;
-    g = (0.26 + grass + seededRand() * 0.045) * 0.58;
-    b = (0.05 + grass * 0.4 - warmth * 0.5) * 0.58;
+    // Multi-octave noise for rich micro-variation
+    const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.11;
+    const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.055;
+    const n3 = Math.sin(x * 0.11 - 0.2) * Math.cos(y * 0.094 + 0.5) * 0.08;
+    const n4 = Math.sin(x * 5.7 + y * 4.3) * 0.028;
+    const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.016;
+    const n6 = Math.sin(x * 18.3 + y * 22.7) * 0.008; // fine detail
+    const grass = n1 + n2 + n3 + n4 + n5 + n6;
+    const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.03;
+    // Moisture map — damp dark green near canal, dry olive elsewhere
+    const dS = Math.abs(y + _CANAL_R), dN = Math.abs(y - _CANAL_R);
+    const dE = Math.abs(x - _CANAL_R), dW = Math.abs(x + _CANAL_R);
+    const nearCanal = Math.max(0, 1 - Math.min(dS, dN, dE, dW) / 22);
+    const moisture = nearCanal * 0.06;
+    // Subtle dirt-path variation along diagonals
+    const dirtPatch = Math.max(0, Math.sin(x * 0.22 + y * 0.19) * Math.cos(x * 0.15 - y * 0.28) - 0.55) * 0.18;
+    const baseG = 0.28 + grass + moisture;
+    r = Math.max(0, (0.07 + grass * 0.7 + warmth + seededRand() * 0.022 + dirtPatch * 1.1) * 0.60);
+    g = Math.max(0, (baseG   + seededRand() * 0.038 - dirtPatch * 0.3) * 0.62);
+    b = Math.max(0, (0.04 + grass * 0.35 - warmth * 0.6 + moisture * 0.4) * 0.60);
   }
   groundColors[i * 3] = r;
   groundColors[i * 3 + 1] = g;
@@ -125,7 +141,7 @@ scene.add(ground);
   const _s = 2.5;
 
   const _waterMat = new THREE.MeshLambertMaterial({
-    color: 0x1e78c8, transparent: true, opacity: 0.82, side: THREE.DoubleSide,
+    color: 0x1a8ed8, transparent: true, opacity: 0.84, side: THREE.DoubleSide,
   });
   const _wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide });
 
@@ -310,25 +326,48 @@ water.position.y = -5;
 water.visible = false;
 scene.add(water);
 
-// ── Rising bubble particles along perimeter ──
-const bubbleGroup = new THREE.Group();
-const bubbleMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
-for (let i = 0; i < 40; i++) {
+// ── Rising bubble particles along perimeter — single instanced mesh ──
+const BUBBLE_COUNT = 40;
+const bubbleMat  = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
+const bubbleInst = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(1, 5, 4),   // unit sphere — scaled per instance
+  bubbleMat,
+  BUBBLE_COUNT
+);
+bubbleInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+const _bubbleData = [];   // { bx, bz, baseY, speed, phase, size }
+const _bubbleDummy = new THREE.Object3D();
+let _bubbleCount = 0;
+for (let i = 0; i < BUBBLE_COUNT; i++) {
   const angle = seededRand() * Math.PI * 2;
-  const dist = half - 4 - seededRand() * 12;
-  const bx = Math.cos(angle) * dist;
-  const bz = Math.sin(angle) * dist;
+  const dist  = half - 4 - seededRand() * 12;
+  const bx    = Math.cos(angle) * dist;
+  const bz    = Math.sin(angle) * dist;
   if (Math.abs(bx - CONFIG.prisonPos.x) < CONFIG.prisonSize / 2 + 5 &&
-      Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) continue;
-  const bubble = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4 + seededRand() * 0.7, 5, 4),
-    bubbleMat
-  );
-  bubble.position.set(bx, -1 + seededRand() * 2, bz);
-  bubble.userData = { speed: 0.4 + seededRand() * 0.8, phase: seededRand() * 6.28 };
-  bubbleGroup.add(bubble);
+      Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) {
+    // Park off-screen so the slot doesn't flicker
+    _bubbleDummy.position.set(0, -9999, 0); _bubbleDummy.scale.setScalar(0.01);
+    _bubbleDummy.updateMatrix(); bubbleInst.setMatrixAt(i, _bubbleDummy.matrix);
+    _bubbleData.push(null);
+    continue;
+  }
+  const size  = 0.4 + seededRand() * 0.7;
+  const baseY = -1 + seededRand() * 2;
+  const speed = 0.4 + seededRand() * 0.8;
+  const phase = seededRand() * 6.28;
+  _bubbleData.push({ bx, bz, baseY, speed, phase, size, y: baseY });
+  _bubbleDummy.position.set(bx, baseY, bz);
+  _bubbleDummy.scale.setScalar(size);
+  _bubbleDummy.updateMatrix();
+  bubbleInst.setMatrixAt(i, _bubbleDummy.matrix);
+  _bubbleCount++;
 }
-scene.add(bubbleGroup);
+bubbleInst.instanceMatrix.needsUpdate = true;
+// Expose for update loop
+window._bubbleInst = bubbleInst;
+window._bubbleData = _bubbleData;
+window._bubbleDummy2 = _bubbleDummy;
+scene.add(bubbleInst);
 
 // ═══════════════════════════════════════════════════════════
 // CLIFF WALLS — Single color, smooth height variation

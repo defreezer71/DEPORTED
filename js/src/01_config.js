@@ -18,12 +18,13 @@ const CONFIG = {
   cliffThickness: 10,
   waterBaseLevel: 0.05,
 
-  prisonPos: { x: -75, z: 75 },
+  prisonPos: { x: -105, z: 105 },
   prisonSize: 23,           // 15% larger
   prisonWallHeight: 10,
 
   moveSpeed: 11.97,         // 5% slower
   adsSpeedMult: 0.65,
+  strafeSpeedMult: 0.80,    // Lateral (A/D) input scaled to 80% of forward speed
   jumpForce: 9,
   gravity: 25,
   mouseSens: 0.0018,
@@ -32,7 +33,7 @@ const CONFIG = {
   normalFov: 75,
   playerHeight: 1.7,
   playerRadius: 0.25,
-  moveSmoothing: 0.15,      // Strafe smoothing factor (lower = smoother)
+  moveSmoothing: 0.78,      // Acceleration smoothing — higher = smoother (~10 ticks to 90%)
   crouchHeight: 1.0,        // Camera height when crouched
   crouchSpeedMult: 0.5,     // 50% speed when crouched
 
