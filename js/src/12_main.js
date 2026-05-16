@@ -151,21 +151,15 @@ ashMesh.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 150, 0),
 const _plumeCanvas = document.createElement('canvas');
 _plumeCanvas.width = _plumeCanvas.height = 256;
 const _plumeCtx = _plumeCanvas.getContext('2d');
-// Sharp-edged dark smoke gradient — abrupt falloff for crisp silhouette
+// Hard-edged smoke puff — stays fully opaque to ~70% radius then cuts off sharply
 const _pg = _plumeCtx.createRadialGradient(128,128,0,128,128,118);
-_pg.addColorStop(0,   'rgba(42,42,42,0.98)');
-_pg.addColorStop(0.32,'rgba(38,38,38,0.88)');
-_pg.addColorStop(0.58,'rgba(30,30,30,0.55)');
-_pg.addColorStop(0.80,'rgba(18,18,18,0.18)');
+_pg.addColorStop(0,   'rgba(36,36,36,0.98)');
+_pg.addColorStop(0.55,'rgba(35,35,35,0.97)');  // flat opaque core
+_pg.addColorStop(0.72,'rgba(28,28,28,0.70)');  // begin edge
+_pg.addColorStop(0.86,'rgba(12,12,12,0.18)');  // steep drop
+_pg.addColorStop(0.95,'rgba(2,2,2,0.03)');
 _pg.addColorStop(1.0, 'rgba(0,0,0,0)');
 _plumeCtx.fillStyle = _pg; _plumeCtx.fillRect(0,0,256,256);
-// Satellite blobs — sharper, darker
-[[172,80,42,0.38],[78,174,38,0.32],[190,160,34,0.30],[68,98,30,0.28],
- [160,194,26,0.25],[98,56,22,0.22],[140,60,18,0.20]].forEach(([bx,by,br,a])=>{
-  const g=_plumeCtx.createRadialGradient(bx,by,0,bx,by,br);
-  g.addColorStop(0,`rgba(36,36,36,${a})`); g.addColorStop(0.7,`rgba(24,24,24,${(a*0.3).toFixed(2)})`); g.addColorStop(1,'rgba(0,0,0,0)');
-  _plumeCtx.fillStyle=g; _plumeCtx.fillRect(0,0,256,256);
-});
 const _plumeTex = new THREE.CanvasTexture(_plumeCanvas);
 
 // 50 billboard puffs: first 22 = column, rest = crown
@@ -196,15 +190,23 @@ for (let i = 0; i < PLUME_COUNT; i++) {
     speed:   10.1 + Math.random() * 11.5,
     angle:   ang,
     radMult: 0.55 + Math.random() * 0.90,
-    size:    21 + Math.random() * 26,
+    size:    13 + Math.random() * 14,
     isCrown,
   });
 }
 
 function updatePlume(dt) {
   _plumeGroup.visible = true;
+
+  // Violent phase: first 5s after eruption — 50% faster rise, 30% narrower
+  const tSinceErupt = state.matchTime - state.eruptionStartTime;
+  const violent = tSinceErupt < 5;
+  const speedMult   = violent ? 1.5 : 1.0;
+  const ceilSpeed   = violent ? 28.05 : 18.7;
+  const collarScale = violent ? 0.70 : 1.0;  // column + crown width
+
   _plumeFadeT = Math.min(1, _plumeFadeT + dt * 0.7);
-  _plumeCeiling = Math.min(155, _plumeCeiling + 18.7 * dt);
+  _plumeCeiling = Math.min(155, _plumeCeiling + ceilSpeed * dt);
   _plumeQuat.copy(camera.quaternion);
 
   const crownReady = _plumeCeiling > 50;
@@ -212,7 +214,7 @@ function updatePlume(dt) {
   for (const p of _plumeData) {
     if (p.isCrown && !crownReady) { p.mat.opacity = 0; continue; }
 
-    p.y += p.speed * dt;
+    p.y += p.speed * speedMult * dt;
     const maxY = p.isCrown ? 155 : 120;
     if (p.y > Math.min(maxY, _plumeCeiling)) {
       p.y = p.isCrown ? 38 + Math.random() * 14 : Math.random() * 4;
@@ -222,11 +224,12 @@ function updatePlume(dt) {
 
     let xr, zr;
     if (!p.isCrown) {
-      xr = Math.sin(p.y * 0.18 + p.angle)       * 2.2;
-      zr = Math.cos(p.y * 0.18 + p.angle * 1.3) * 2.2;
+      const mouthTaper = Math.min(1.0, 0.75 + 0.25 * (p.y / 30));
+      xr = Math.sin(p.y * 0.18 + p.angle)       * 2.2 * collarScale * mouthTaper;
+      zr = Math.cos(p.y * 0.18 + p.angle * 1.3) * 2.2 * collarScale * mouthTaper;
     } else {
       const cf  = Math.max(0, (f - 0.40) / 0.60);
-      const rad = 4 + Math.pow(cf, 1.2) * 88 * p.radMult;
+      const rad = (4 + Math.pow(cf, 1.2) * 88 * p.radMult) * collarScale;
       xr = Math.cos(p.angle) * rad;
       zr = Math.sin(p.angle) * rad;
     }
@@ -237,7 +240,6 @@ function updatePlume(dt) {
     const s = p.size * (1 + f * 2.2);
     p.mesh.scale.set(s, s, 1);
 
-    // Column no longer fades out early — continuous into crown
     const fadeIn    = Math.min(1, p.y / 15) * _plumeFadeT;
     const crownFade = p.isCrown ? Math.min(1, (_plumeCeiling - 85) / 20) : 1;
     p.mat.opacity   = 0.82 * fadeIn * crownFade;
@@ -395,7 +397,7 @@ function physicsStep(fixedDt) {
     }
   }
   const _playerFeetY = CONFIG.newPhysics ? phys.pos.y : (camera.position.y - state.smoothCameraHeight);
-  const isSwimming = state.waterRising && physicsWaterLevel > _playerFeetY + 0.8;
+  const isSwimming = !!state.isSwimming;
   // _cW must be < 0.96 (inner wall radius) so standing on the wall top doesn't count
   const _cp = camera.position, _cR = 85, _cW = 0.80;
   const _feetY = CONFIG.newPhysics ? phys.pos.y : (_cp.y - state.smoothCameraHeight);
@@ -691,7 +693,7 @@ function update() {
   document.getElementById('alive-val').textContent = aliveCount;
 
   // Volcano eruption
-  const eruptionTime = state.waterRiseStart - 15;
+  const eruptionTime = 5; // TESTING: normally state.waterRiseStart - 15
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
     state.eruptionStartTime = state.matchTime;

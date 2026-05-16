@@ -226,14 +226,16 @@ function _physStep(fixedDt, inputDir, speed) {
     phys.grounded = false;
   }
 
-  // Water float
+  // Water float — keep eyes 0.5 above surface (chest-deep look)
+  state.isSwimming = false;
   if (state.waterRising) {
     const waterAboveKnee = state.waterLevel > floorY + 0.8;
-    const floatFeetY     = state.waterLevel + 1.2 - height;
+    const floatFeetY     = state.waterLevel + 0.5 - height;
     if (waterAboveKnee && phys.pos.y < floatFeetY) {
-      phys.pos.y    = floatFeetY;
-      phys.vel.y    = 0;
-      phys.grounded = true;
+      phys.pos.y       = floatFeetY;
+      phys.vel.y       = 0;
+      phys.grounded    = true;
+      state.isSwimming = true;
     }
   }
 
