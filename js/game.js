@@ -760,13 +760,44 @@ const pw = prison.size;
 const pwh = CONFIG.prisonWallHeight;
 const pwt = 0.6;
 
-// ── Prison materials — layered concrete tones ──
-const prisonWallMat   = new THREE.MeshLambertMaterial({ color: 0x6a6a62 });
-const prisonWallDark  = new THREE.MeshLambertMaterial({ color: 0x4e4e48 });
-const prisonAccent    = new THREE.MeshLambertMaterial({ color: 0x58524a });
-const prisonMetal     = new THREE.MeshLambertMaterial({ color: 0x38383a });
-const prisonRust      = new THREE.MeshLambertMaterial({ color: 0x6b4030 });
-const prisonCap       = new THREE.MeshLambertMaterial({ color: 0x505048 });
+// ── Prison stone texture — dark grey masonry blocks ──
+{
+  const _sc = document.createElement('canvas');
+  _sc.width = _sc.height = 512;
+  const _sx = _sc.getContext('2d');
+  _sx.fillStyle = '#1c1b19';
+  _sx.fillRect(0, 0, 512, 512);
+  const _rowH = 27, _gap = 4;
+  const _rows = Math.ceil(512 / (_rowH + _gap)) + 2;
+  const _rng = (() => { let s = 42; return () => { s = (s * 1664525 + 1013904223) & 0x7fffffff; return s / 0x7fffffff; }; })();
+  for (let row = 0; row < _rows; row++) {
+    const y = row * (_rowH + _gap);
+    const shift = (row % 2) === 0 ? 0 : 55;
+    let x = -shift;
+    while (x < 560) {
+      const bw = 52 + Math.floor(_rng() * 42);
+      const s  = 60 + Math.floor((_rng() - 0.5) * 20);
+      _sx.fillStyle = `rgb(${s},${s - 1},${s - 3})`;
+      _sx.fillRect(x + 2, y + 2, bw - 3, _rowH - 2);
+      _sx.fillStyle = 'rgba(255,255,255,0.05)';
+      _sx.fillRect(x + 2, y + 2, bw - 3, 3);
+      _sx.fillStyle = 'rgba(0,0,0,0.22)';
+      _sx.fillRect(x + 2, y + _rowH - 5, bw - 3, 5);
+      x += bw;
+    }
+  }
+  window._prisonStoneTex = new THREE.CanvasTexture(_sc);
+  window._prisonStoneTex.wrapS = window._prisonStoneTex.wrapT = THREE.RepeatWrapping;
+  window._prisonStoneTex.repeat.set(3, 2);
+}
+
+// ── Prison materials — stone masonry ──
+const prisonWallMat  = new THREE.MeshLambertMaterial({ color: 0xbbbbbb, map: window._prisonStoneTex });
+const prisonWallDark = new THREE.MeshLambertMaterial({ color: 0x4e4e48 });
+const prisonAccent   = new THREE.MeshLambertMaterial({ color: 0x52524a, map: window._prisonStoneTex });
+const prisonMetal    = new THREE.MeshLambertMaterial({ color: 0x38383a });
+const prisonRust     = new THREE.MeshLambertMaterial({ color: 0x6b4030 });
+const prisonCap      = new THREE.MeshLambertMaterial({ color: 0x555550 });
 
 // Invisible collider material — meshes using this are NOT added to the scene.
 // updateMatrixWorld(true) is called after positioning so Box3.setFromObject()
@@ -790,13 +821,13 @@ function createPrisonWall(x, z, w, h, d) {
   cap.castShadow = true;
   scene.add(cap);
 
-  // Horizontal concrete band at mid-height
-  const band = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, 0.18, d + 0.04), prisonWallDark);
+  // Horizontal concrete band at mid-height — protrudes 0.18 to avoid z-fighting
+  const band = new THREE.Mesh(new THREE.BoxGeometry(w + 0.36, 0.18, d + 0.36), prisonWallDark);
   band.position.set(x, h * 0.45, z);
   scene.add(band);
 
   // Lower base strip
-  const base = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.35, d + 0.1), prisonAccent);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(w + 0.36, 0.35, d + 0.36), prisonAccent);
   base.position.set(x, 0.175, z);
   base.receiveShadow = true;
   scene.add(base);
@@ -824,9 +855,40 @@ createPrisonWall(prison.x + pw / 2, prison.z + pw / 2 - eastWallLen / 2, pwt, pw
 // West wall
 createPrisonWall(prison.x - pw / 2, prison.z, pwt, pwh, pw);
 
+// Prison floor — stone-textured courtyard
+{
+  const floorTex = window._prisonStoneTex.clone();
+  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+  floorTex.repeat.set(pw / 1.8, pw / 1.8);
+  floorTex.needsUpdate = true;
+  const floorMat = new THREE.MeshLambertMaterial({ color: 0xaaaaaa, map: floorTex });
+  // Slab extends deep underground so top is always at y=0.5 regardless of terrain variation
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(pw - pwt, 6, pw - pwt), floorMat);
+  floor.position.set(prison.x, -2.5, prison.z);
+  floor.receiveShadow = true;
+  scene.add(floor);
+  floor.updateMatrixWorld(true);
+  collidables.push(floor);
+}
+
+// Ground height helper — wraps getTerrainHeight but raises to slab surface inside prison
+const _prisonSlabTop = 0.5;
+const _prisonInnerMinX = prison.x - pw / 2 + pwt;
+const _prisonInnerMaxX = prison.x + pw / 2 - pwt;
+const _prisonInnerMinZ = prison.z - pw / 2 + pwt;
+const _prisonInnerMaxZ = prison.z + pw / 2 - pwt;
+function getGroundHeight(x, z) {
+  const th = getTerrainHeight(x, z);
+  if (x > _prisonInnerMinX && x < _prisonInnerMaxX &&
+      z > _prisonInnerMinZ && z < _prisonInnerMaxZ) {
+    return Math.max(th, _prisonSlabTop);
+  }
+  return th;
+}
+
 // Vertical pilasters
 {
-  const pilasterMat = new THREE.MeshLambertMaterial({ color: 0x5c5c54 });
+  const pilasterMat = new THREE.MeshLambertMaterial({ color: 0xbbbbbb, map: window._prisonStoneTex });
   const wallDefs = [
     { axis: 'x', fixed: prison.z - pw/2, from: prison.x - pw/2, to: prison.x + pw/2, faceZ: true },
     { axis: 'x', fixed: prison.z + pw/2, from: prison.x - pw/2, to: prison.x + pw/2, faceZ: true },
@@ -869,50 +931,108 @@ const signFace = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.38, gateWidth + 1.
 signFace.position.set(prison.x + pw / 2 - 0.2, pwh + 1.8, prison.z);
 scene.add(signFace);
 
-// Gate doors
+// Gate doors — dark oak with raised panels, rails, and stud rows
 const gateHalfW = gateWidth / 2;
-const gateDoorMat = new THREE.MeshLambertMaterial({ color: 0x3a3028 });
+const oakMat    = new THREE.MeshLambertMaterial({ color: 0x1e0f05 }); // dark oak base
+const oakFrame  = new THREE.MeshLambertMaterial({ color: 0x2c1a09 }); // slightly lighter frame
+const oakPanel  = new THREE.MeshLambertMaterial({ color: 0x160c03 }); // recessed panel
+const oakStud   = new THREE.MeshLambertMaterial({ color: 0x18120a }); // iron stud
 
-const gateDoorL = new THREE.Mesh(new THREE.BoxGeometry(pwt + 0.25, pwh, gateHalfW), gateDoorMat);
+const dt = pwt + 0.25;   // door thickness 0.85
+const dw = gateHalfW;    // door width 3
+const dh = pwh;           // door height 10
+const fx = -dt / 2 - 0.01; // exterior face x
+
+function buildDoorFace(door) {
+  // ── Horizontal rails: top frieze, centre divider, bottom plinth ──
+  const railDefs = [
+    { cy: dh/2 - 0.52, rh: 0.95 },
+    { cy: 0.0,           rh: 0.72 },
+    { cy: -dh/2 + 0.55, rh: 1.05 },
+  ];
+  for (const { cy, rh } of railDefs) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.10, rh, dw - 0.02), oakPanel);
+    rail.position.set(fx - 0.05, cy, 0);
+    door.add(rail);
+    const raise = new THREE.Mesh(new THREE.BoxGeometry(0.12, rh - 0.18, dw - 0.16), oakFrame);
+    raise.position.set(fx - 0.06, cy, 0);
+    door.add(raise);
+    // Stud row along rail
+    const studsZ = 7;
+    for (let s = 0; s < studsZ; s++) {
+      const sz = -dw/2 + 0.25 + s * ((dw - 0.5) / (studsZ - 1));
+      const stud = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.10), oakStud);
+      stud.position.set(fx - 0.09, cy, sz);
+      door.add(stud);
+    }
+  }
+
+  // ── Vertical stiles (left + right edge strips) ──
+  for (const sz of [-1, 1]) {
+    const stile = new THREE.Mesh(new THREE.BoxGeometry(0.10, dh, 0.22), oakPanel);
+    stile.position.set(fx - 0.05, 0, sz * (dw/2 - 0.11));
+    door.add(stile);
+  }
+
+  // ── Raised panels: upper + lower ──
+  const panelDefs = [
+    { cy:  2.1, ph: 3.5 },
+    { cy: -2.3, ph: 3.3 },
+  ];
+  for (const { cy, ph } of panelDefs) {
+    const pw2 = dw - 0.55;
+    // Recessed background
+    const bg = new THREE.Mesh(new THREE.BoxGeometry(0.07, ph, pw2), oakPanel);
+    bg.position.set(fx - 0.035, cy, 0);
+    door.add(bg);
+    // Raised inner field
+    const field = new THREE.Mesh(new THREE.BoxGeometry(0.10, ph - 0.28, pw2 - 0.28), oakFrame);
+    field.position.set(fx - 0.05, cy, 0);
+    door.add(field);
+    // Border molding — top, bottom, left, right strips
+    for (const [isH, len, oz, oy] of [
+      [true,  pw2, 0,          ph/2 - 0.09],
+      [true,  pw2, 0,         -ph/2 + 0.09],
+      [false, ph,  pw2/2-0.09, 0           ],
+      [false, ph, -pw2/2+0.09, 0           ],
+    ]) {
+      const mw = isH ? len : 0.12;
+      const mh = isH ? 0.12 : len;
+      const mz = isH ? 0.12 : 0.12;
+      const mol = new THREE.Mesh(new THREE.BoxGeometry(0.12, mh, mw), oakMat);
+      mol.position.set(fx - 0.06, cy + oy, oz);
+      door.add(mol);
+    }
+    // Stud row along top and bottom of panel
+    const ps = 6;
+    for (const oy of [ph/2 - 0.09, -ph/2 + 0.09]) {
+      for (let s = 0; s < ps; s++) {
+        const sz = -pw2/2 + 0.15 + s * ((pw2 - 0.3) / (ps - 1));
+        const stud = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), oakStud);
+        stud.position.set(fx - 0.10, cy + oy, sz);
+        door.add(stud);
+      }
+    }
+  }
+}
+
+const gateDoorL = new THREE.Mesh(new THREE.BoxGeometry(dt, dh, dw), oakMat);
 const gatePivotL = new THREE.Group();
 gatePivotL.position.set(prison.x + pw / 2, 0, prison.z - gateWidth / 2);
-gateDoorL.position.set(0, pwh / 2, gateHalfW / 2);
+gateDoorL.position.set(0, dh / 2, dw / 2);
 gatePivotL.add(gateDoorL);
 scene.add(gatePivotL);
-// Push the actual door mesh — refreshDynamicColliders updates its world BB each frame
-// so collision follows the door as it swings open
 collidables.push(gateDoorL);
+buildDoorFace(gateDoorL);
 
-const gateDoorR = new THREE.Mesh(new THREE.BoxGeometry(pwt + 0.25, pwh, gateHalfW), gateDoorMat);
+const gateDoorR = new THREE.Mesh(new THREE.BoxGeometry(dt, dh, dw), oakMat);
 const gatePivotR = new THREE.Group();
 gatePivotR.position.set(prison.x + pw / 2, 0, prison.z + gateWidth / 2);
-gateDoorR.position.set(0, pwh / 2, -gateHalfW / 2);
+gateDoorR.position.set(0, dh / 2, -dw / 2);
 gatePivotR.add(gateDoorR);
 scene.add(gatePivotR);
 collidables.push(gateDoorR);
-
-// Iron bars + cross bracing on each door
-for (const door of [gateDoorL, gateDoorR]) {
-  for (let b = 0; b < 4; b++) {
-    const bar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.035, 0.035, pwh * 0.85, 5),
-      prisonMetal
-    );
-    bar.position.set(0.18, 0, (b / 3 - 0.5) * gateHalfW * 0.72);
-    door.add(bar);
-  }
-  const hBar = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.12, gateHalfW * 0.9), prisonMetal);
-  hBar.position.set(0.18, pwh * 0.15, 0);
-  door.add(hBar);
-  const hBar2 = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.12, gateHalfW * 0.9), prisonMetal);
-  hBar2.position.set(0.18, -pwh * 0.2, 0);
-  door.add(hBar2);
-  for (let r = 0; r < 3; r++) {
-    const rust = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.18), prisonRust);
-    rust.position.set(0.22, pwh * 0.1 - r * pwh * 0.15, (seededRand() - 0.5) * gateHalfW * 0.6);
-    door.add(rust);
-  }
-}
+buildDoorFace(gateDoorR);
 let gateOpenProgress = 0;
 
 const towerH = pwh + 3.5;
@@ -1934,7 +2054,7 @@ const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Ho
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
 function createBot(x, z, name) {
-  const h = getTerrainHeight(x, z);
+  const h = getGroundHeight(x, z);
   const group = new THREE.Group();
   group.position.set(x, h, z);
 
@@ -2054,7 +2174,7 @@ function updateBots(dt) {
       const newZ = bz + bot.moveDir.z * bot.speed * dt;
       bot.group.position.x = newX;
       bot.group.position.z = newZ;
-      const th = getTerrainHeight(bot.group.position.x, bot.group.position.z);
+      const th = getGroundHeight(bot.group.position.x, bot.group.position.z);
       bot.group.position.y += (th - bot.group.position.y) * Math.min(1, dt * 18);
       bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
       bot.walkPhase += dt * bot.speed * 3;
@@ -2186,7 +2306,7 @@ function updateBots(dt) {
       bot.moveTimer = 1 + Math.random() * 2;
     }
 
-    const th = getTerrainHeight(bot.group.position.x, bot.group.position.z);
+    const th = getGroundHeight(bot.group.position.x, bot.group.position.z);
     bot.group.position.y += (th - bot.group.position.y) * Math.min(1, dt * 18);
     if (!bot.hasAmmo || distToPlayer >= bot.aggroRange || state.playerDead) {
       bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
@@ -2213,7 +2333,7 @@ function damageBot(bot, dmg, isHead) {
 
     // Death: tip over
     bot.group.rotation.x = Math.PI / 2;
-    bot.group.position.y = getTerrainHeight(bot.group.position.x, bot.group.position.z) + 0.3;
+    bot.group.position.y = getGroundHeight(bot.group.position.x, bot.group.position.z) + 0.3;
 
     // Remove from targets after brief delay
     setTimeout(() => {
@@ -2327,7 +2447,7 @@ function spawnLoot(x, z, type) {
 const windowPanes = []; // glass panes that block bullets
 const depotCorners = [
   { x:  half - 6, z:  half - 6, open: 'east'  },
-  { x: -half + 6, z:  half - 6, open: 'west'  },
+  // SW corner shed removed — too close to prison compound
   { x:  half - 6, z: -half + 6, open: 'east'  },
   { x: -half + 6, z: -half + 6, open: 'west'  },
 ];
@@ -4997,7 +5117,7 @@ function update() {
   document.getElementById('alive-val').textContent = aliveCount;
 
   // Volcano eruption
-  const eruptionTime = 5; // TESTING: normally state.waterRiseStart - 15
+  const eruptionTime = state.waterRiseStart - 15;
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
     state.eruptionStartTime = state.matchTime;

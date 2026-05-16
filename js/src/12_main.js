@@ -693,7 +693,7 @@ function update() {
   document.getElementById('alive-val').textContent = aliveCount;
 
   // Volcano eruption
-  const eruptionTime = 5; // TESTING: normally state.waterRiseStart - 15
+  const eruptionTime = state.waterRiseStart - 15;
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
     state.eruptionStartTime = state.matchTime;

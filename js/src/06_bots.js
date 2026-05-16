@@ -4,7 +4,7 @@ const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Ho
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
 function createBot(x, z, name) {
-  const h = getTerrainHeight(x, z);
+  const h = getGroundHeight(x, z);
   const group = new THREE.Group();
   group.position.set(x, h, z);
 
@@ -124,7 +124,7 @@ function updateBots(dt) {
       const newZ = bz + bot.moveDir.z * bot.speed * dt;
       bot.group.position.x = newX;
       bot.group.position.z = newZ;
-      const th = getTerrainHeight(bot.group.position.x, bot.group.position.z);
+      const th = getGroundHeight(bot.group.position.x, bot.group.position.z);
       bot.group.position.y += (th - bot.group.position.y) * Math.min(1, dt * 18);
       bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
       bot.walkPhase += dt * bot.speed * 3;
@@ -256,7 +256,7 @@ function updateBots(dt) {
       bot.moveTimer = 1 + Math.random() * 2;
     }
 
-    const th = getTerrainHeight(bot.group.position.x, bot.group.position.z);
+    const th = getGroundHeight(bot.group.position.x, bot.group.position.z);
     bot.group.position.y += (th - bot.group.position.y) * Math.min(1, dt * 18);
     if (!bot.hasAmmo || distToPlayer >= bot.aggroRange || state.playerDead) {
       bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
@@ -283,7 +283,7 @@ function damageBot(bot, dmg, isHead) {
 
     // Death: tip over
     bot.group.rotation.x = Math.PI / 2;
-    bot.group.position.y = getTerrainHeight(bot.group.position.x, bot.group.position.z) + 0.3;
+    bot.group.position.y = getGroundHeight(bot.group.position.x, bot.group.position.z) + 0.3;
 
     // Remove from targets after brief delay
     setTimeout(() => {

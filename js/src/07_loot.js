@@ -69,7 +69,7 @@ function spawnLoot(x, z, type) {
 const windowPanes = []; // glass panes that block bullets
 const depotCorners = [
   { x:  half - 6, z:  half - 6, open: 'east'  },
-  { x: -half + 6, z:  half - 6, open: 'west'  },
+  // SW corner shed removed — too close to prison compound
   { x:  half - 6, z: -half + 6, open: 'east'  },
   { x: -half + 6, z: -half + 6, open: 'west'  },
 ];
