@@ -72,32 +72,45 @@ for (let i = 0; i < gPosAttr.count; i++) {
   const y = gPosAttr.getY(i);
   const h = getTerrainHeight(x, y);
   let r, g, b;
-  if (h > 2) {
+  // Use distance from center to determine volcano zone (not height) — prevents green bleed at base
+  const vDist = Math.sqrt(x * x + y * y);
+  const onVolcano = vDist < CONFIG.volcanoRadius * 0.98 && getVolcanoHeight(x, y) > 0.2;
+  if (onVolcano) {
     const t = Math.min(h / CONFIG.volcanoHeight, 1);
-    const vN1 = Math.sin(x * 3.1 + y * 2.0) * 0.040 + Math.sin(x * 7.3) * 0.025;
-    const vN2 = Math.cos(x * 5.2 - y * 3.1) * 0.032 + Math.sin(y * 8.4) * 0.020;
-    const vN3 = Math.sin(x * 12.7 + y * 9.3) * 0.015 + Math.cos(x * 18.1 - y * 14.6) * 0.010;
-    const vN4 = Math.sin(x * 0.8 + y * 1.1) * 0.055;
-    const vN5 = Math.cos(x * 24.3 - y * 19.7) * 0.006;
-    const strata = Math.sin(h * 2.8) * 0.035 + Math.sin(h * 0.9) * 0.022;
-    const midBlend  = Math.max(0, Math.min(1, (t - 0.25) / 0.35));
-    const ashBlend  = Math.max(0, (t - 0.68) / 0.32);
-    const lavaBlend = Math.max(0, (t - 0.88) / 0.12);
-    const baseR = 0.14 + vN4 * 0.5;
-    const baseG = 0.11 + vN4 * 0.4;
-    const baseB = 0.10 + vN4 * 0.3;
-    const oxR = 0.38 + vN1 * 0.8;
-    const oxG = 0.22 + vN2 * 0.5;
-    const oxB = 0.10;
-    const ashR = 0.52 + vN3 + strata;
-    const ashG = 0.50 + vN3 + strata * 0.8;
-    const ashB = 0.48 + vN2 * 0.5 + strata * 0.6;
-    const lavaR = 0.85 + vN5;
-    const lavaG = 0.28 + vN5;
-    const lavaB = 0.04;
-    r = baseR + (oxR - baseR) * midBlend + (ashR - oxR) * ashBlend * midBlend + (lavaR - ashR) * lavaBlend + vN5 * 0.5;
-    g = baseG + (oxG - baseG) * midBlend + (ashG - oxG) * ashBlend * midBlend + (lavaG - ashG) * lavaBlend + vN5 * 0.2;
-    b = baseB + (oxB - baseB) * midBlend + (ashB - oxB) * ashBlend * midBlend + (lavaB - ashB) * lavaBlend;
+    // Diagonal flow streaks — angled noise simulates lava channels running down the slope
+    const flow1 = Math.sin(x * 1.8 + y * 2.6 + h * 0.4) * 0.090 + Math.sin(x * 4.1 - y * 3.3) * 0.050;
+    const flow2 = Math.cos(x * 2.9 - y * 1.7 + h * 0.3) * 0.075 + Math.cos(y * 5.8 + x * 1.2) * 0.040;
+    // Mid-frequency surface roughness
+    const rough = Math.sin(x * 9.4 + y * 7.1) * 0.022 + Math.cos(x * 14.2 - y * 11.8) * 0.014;
+    // Subtle height strata (geological layering)
+    const strata = Math.sin(h * 2.2) * 0.045 + Math.sin(h * 5.5) * 0.018;
+    // Combined surface noise
+    const surf = flow1 + flow2 + rough + strata;
+    // Zone blends — sharper transitions for visible banding
+    const rustBlend = Math.max(0, Math.min(1, (t - 0.20) / 0.25));
+    const ashBlend  = Math.max(0, Math.min(1, (t - 0.58) / 0.22));
+    const rimBlend  = Math.max(0, (t - 0.84) / 0.16);
+    // Colors: very dark basalt base → rich rust/iron-oxide → cool gray ash → dark crater rim
+    const basaltR = 0.10 + surf * 0.5;
+    const basaltG = 0.07 + surf * 0.3;
+    const basaltB = 0.06 + surf * 0.2;
+    const rustR   = 0.52 + surf * 1.1;
+    const rustG   = 0.28 + surf * 0.55;
+    const rustB   = 0.09 + surf * 0.15;
+    // Upper zone: dark volcanic red — deep crimson rock near the summit
+    const ashR    = 0.52 + rough * 0.5 + strata * 0.8;
+    const ashG    = 0.10 + rough * 0.2 + strata * 0.3;
+    const ashB    = 0.06 + rough * 0.1 + strata * 0.2;
+    // Crater rim: very dark red-black
+    const rimR    = 0.28 + rough * 0.6;
+    const rimG    = 0.06 + rough * 0.2;
+    const rimB    = 0.04 + rough * 0.1;
+    r = basaltR + (rustR - basaltR) * rustBlend + (ashR - rustR) * ashBlend + (rimR - ashR) * rimBlend;
+    g = basaltG + (rustG - basaltG) * rustBlend + (ashG - rustG) * ashBlend + (rimG - ashG) * rimBlend;
+    b = basaltB + (rustB - basaltB) * rustBlend + (ashB - rustB) * ashBlend + (rimB - ashB) * rimBlend;
+    r = Math.max(0, Math.min(1, r));
+    g = Math.max(0, Math.min(1, g));
+    b = Math.max(0, Math.min(1, b));
   } else {
     // Multi-octave noise for rich micro-variation
     const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.11;

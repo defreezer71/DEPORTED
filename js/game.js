@@ -102,13 +102,92 @@ const state = {
 // THREE.JS SETUP
 // ═══════════════════════════════════════════════════════════
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a6fdb);
-scene.fog = new THREE.FogExp2(0x2a88e8, 0.002);
+scene.background = null;
+scene.fog = new THREE.FogExp2(0x4a9fe8, 0.0018);
 
-// Bright yellow sun — no glow ring
+// ── Sky dome — gradient sphere viewed from inside ──
+{
+  const skyGeo = new THREE.SphereGeometry(880, 32, 20);
+  const sp = skyGeo.attributes.position;
+  const sc = new Float32Array(sp.count * 3);
+  // [y threshold, r, g, b] — sampled top-down
+  const stops = [
+    [ 880,  0.075, 0.210, 0.520 ],  // zenith — deep blue (not black)
+    [ 440,  0.072, 0.260, 0.640 ],  // upper sky
+    [   0,  0.095, 0.400, 0.840 ],  // mid sky at horizon level
+    [-880,  0.180, 0.580, 0.960 ],  // nadir — pale (underground, irrelevant)
+  ];
+  for (let i = 0; i < sp.count; i++) {
+    const y = sp.getY(i);
+    let s0 = stops[0], s1 = stops[stops.length - 1];
+    for (let k = 0; k < stops.length - 1; k++) {
+      if (y >= stops[k + 1][0]) { s0 = stops[k]; s1 = stops[k + 1]; break; }
+    }
+    const t = Math.max(0, Math.min(1, (s0[0] - y) / (s0[0] - s1[0])));
+    sc[i*3]   = s0[1] + (s1[1] - s0[1]) * t;
+    sc[i*3+1] = s0[2] + (s1[2] - s0[2]) * t;
+    sc[i*3+2] = s0[3] + (s1[3] - s0[3]) * t;
+  }
+  skyGeo.setAttribute('color', new THREE.BufferAttribute(sc, 3));
+  window.skyDome = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({
+    vertexColors: true, side: THREE.BackSide, depthWrite: false, fog: false
+  }));
+  window.skyDome.renderOrder = -1;
+  scene.add(window.skyDome);
+}
+
+// ── Clouds — instanced cross-billboard quads with procedural canvas texture ──
+{
+  const cc = document.createElement('canvas');
+  cc.width = cc.height = 256;
+  const cx = cc.getContext('2d');
+  [ [128,115,88], [72,145,58], [178,125,62], [105,80,52], [158,158,68] ]
+    .forEach(([bx, by, br]) => {
+      const g = cx.createRadialGradient(bx, by, 0, bx, by, br);
+      g.addColorStop(0,   'rgba(255,255,255,0.88)');
+      g.addColorStop(0.45,'rgba(235,245,255,0.42)');
+      g.addColorStop(1,   'rgba(255,255,255,0)');
+      cx.fillStyle = g;
+      cx.fillRect(0, 0, 256, 256);
+    });
+  const cloudTex = new THREE.CanvasTexture(cc);
+  const cloudMat = new THREE.MeshBasicMaterial({
+    map: cloudTex, transparent: true, opacity: 0.82,
+    depthWrite: false, side: THREE.DoubleSide, fog: false
+  });
+
+  const CLOUD_COUNT = 30;
+  const cloudInst = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1), cloudMat, CLOUD_COUNT * 2
+  );
+  cloudInst.renderOrder = -1;
+  const _cd = new THREE.Object3D();
+  let ci = 0;
+  for (let i = 0; i < CLOUD_COUNT; i++) {
+    const angle  = seededRand() * Math.PI * 2;
+    const radius = 170 + seededRand() * 280;
+    const cx2    = Math.cos(angle) * radius;
+    const cz2    = Math.sin(angle) * radius;
+    const cy2    = 110 + seededRand() * 140;
+    const cw     = 80 + seededRand() * 130;
+    const ch     = 20 + seededRand() * 30;
+    const yRot   = seededRand() * Math.PI;
+    for (const ao of [0, 1]) {
+      _cd.position.set(cx2, cy2, cz2);
+      _cd.scale.set(cw, ch, 1);
+      _cd.rotation.set(0, yRot + ao * Math.PI * 0.5, 0);
+      _cd.updateMatrix();
+      cloudInst.setMatrixAt(ci++, _cd.matrix);
+    }
+  }
+  cloudInst.instanceMatrix.needsUpdate = true;
+  scene.add(cloudInst);
+}
+
+// Sun
 const sunMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(10, 16, 12),
-  new THREE.MeshBasicMaterial({ color: 0xFFEE00 })
+  new THREE.SphereGeometry(12, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0xFFEE88, fog: false })
 );
 sunMesh.position.set(80, 140, -60);
 scene.add(sunMesh);
@@ -127,6 +206,7 @@ weaponCamera.position.set(0, 0, 0);
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x1a4d8a, 1);
 renderer.shadowMap.enabled = true;
 renderer.autoClear = false;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -230,32 +310,45 @@ for (let i = 0; i < gPosAttr.count; i++) {
   const y = gPosAttr.getY(i);
   const h = getTerrainHeight(x, y);
   let r, g, b;
-  if (h > 2) {
+  // Use distance from center to determine volcano zone (not height) — prevents green bleed at base
+  const vDist = Math.sqrt(x * x + y * y);
+  const onVolcano = vDist < CONFIG.volcanoRadius * 0.98 && getVolcanoHeight(x, y) > 0.2;
+  if (onVolcano) {
     const t = Math.min(h / CONFIG.volcanoHeight, 1);
-    const vN1 = Math.sin(x * 3.1 + y * 2.0) * 0.040 + Math.sin(x * 7.3) * 0.025;
-    const vN2 = Math.cos(x * 5.2 - y * 3.1) * 0.032 + Math.sin(y * 8.4) * 0.020;
-    const vN3 = Math.sin(x * 12.7 + y * 9.3) * 0.015 + Math.cos(x * 18.1 - y * 14.6) * 0.010;
-    const vN4 = Math.sin(x * 0.8 + y * 1.1) * 0.055;
-    const vN5 = Math.cos(x * 24.3 - y * 19.7) * 0.006;
-    const strata = Math.sin(h * 2.8) * 0.035 + Math.sin(h * 0.9) * 0.022;
-    const midBlend  = Math.max(0, Math.min(1, (t - 0.25) / 0.35));
-    const ashBlend  = Math.max(0, (t - 0.68) / 0.32);
-    const lavaBlend = Math.max(0, (t - 0.88) / 0.12);
-    const baseR = 0.14 + vN4 * 0.5;
-    const baseG = 0.11 + vN4 * 0.4;
-    const baseB = 0.10 + vN4 * 0.3;
-    const oxR = 0.38 + vN1 * 0.8;
-    const oxG = 0.22 + vN2 * 0.5;
-    const oxB = 0.10;
-    const ashR = 0.52 + vN3 + strata;
-    const ashG = 0.50 + vN3 + strata * 0.8;
-    const ashB = 0.48 + vN2 * 0.5 + strata * 0.6;
-    const lavaR = 0.85 + vN5;
-    const lavaG = 0.28 + vN5;
-    const lavaB = 0.04;
-    r = baseR + (oxR - baseR) * midBlend + (ashR - oxR) * ashBlend * midBlend + (lavaR - ashR) * lavaBlend + vN5 * 0.5;
-    g = baseG + (oxG - baseG) * midBlend + (ashG - oxG) * ashBlend * midBlend + (lavaG - ashG) * lavaBlend + vN5 * 0.2;
-    b = baseB + (oxB - baseB) * midBlend + (ashB - oxB) * ashBlend * midBlend + (lavaB - ashB) * lavaBlend;
+    // Diagonal flow streaks — angled noise simulates lava channels running down the slope
+    const flow1 = Math.sin(x * 1.8 + y * 2.6 + h * 0.4) * 0.090 + Math.sin(x * 4.1 - y * 3.3) * 0.050;
+    const flow2 = Math.cos(x * 2.9 - y * 1.7 + h * 0.3) * 0.075 + Math.cos(y * 5.8 + x * 1.2) * 0.040;
+    // Mid-frequency surface roughness
+    const rough = Math.sin(x * 9.4 + y * 7.1) * 0.022 + Math.cos(x * 14.2 - y * 11.8) * 0.014;
+    // Subtle height strata (geological layering)
+    const strata = Math.sin(h * 2.2) * 0.045 + Math.sin(h * 5.5) * 0.018;
+    // Combined surface noise
+    const surf = flow1 + flow2 + rough + strata;
+    // Zone blends — sharper transitions for visible banding
+    const rustBlend = Math.max(0, Math.min(1, (t - 0.20) / 0.25));
+    const ashBlend  = Math.max(0, Math.min(1, (t - 0.58) / 0.22));
+    const rimBlend  = Math.max(0, (t - 0.84) / 0.16);
+    // Colors: very dark basalt base → rich rust/iron-oxide → cool gray ash → dark crater rim
+    const basaltR = 0.10 + surf * 0.5;
+    const basaltG = 0.07 + surf * 0.3;
+    const basaltB = 0.06 + surf * 0.2;
+    const rustR   = 0.52 + surf * 1.1;
+    const rustG   = 0.28 + surf * 0.55;
+    const rustB   = 0.09 + surf * 0.15;
+    // Upper zone: dark volcanic red — deep crimson rock near the summit
+    const ashR    = 0.52 + rough * 0.5 + strata * 0.8;
+    const ashG    = 0.10 + rough * 0.2 + strata * 0.3;
+    const ashB    = 0.06 + rough * 0.1 + strata * 0.2;
+    // Crater rim: very dark red-black
+    const rimR    = 0.28 + rough * 0.6;
+    const rimG    = 0.06 + rough * 0.2;
+    const rimB    = 0.04 + rough * 0.1;
+    r = basaltR + (rustR - basaltR) * rustBlend + (ashR - rustR) * ashBlend + (rimR - ashR) * rimBlend;
+    g = basaltG + (rustG - basaltG) * rustBlend + (ashG - rustG) * ashBlend + (rimG - ashG) * rimBlend;
+    b = basaltB + (rustB - basaltB) * rustBlend + (ashB - rustB) * ashBlend + (rimB - ashB) * rimBlend;
+    r = Math.max(0, Math.min(1, r));
+    g = Math.max(0, Math.min(1, g));
+    b = Math.max(0, Math.min(1, b));
   } else {
     // Multi-octave noise for rich micro-variation
     const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.11;
@@ -994,7 +1087,15 @@ function canPlaceAt(x, z) {
   if (getVolcanoHeight(x, z) > 1) return false;
   if (Math.abs(x - prison.x) < pw / 2 + 10 && Math.abs(z - prison.z) < pw / 2 + 10) return false;
   if (Math.abs(x) > half - 12 || Math.abs(z) > half - 12) return false;
-  if (isInStream(x, z)) return false; // No trees/bushes in stream
+  if (isInStream(x, z)) return false;
+  return true;
+}
+// Looser version for ground cover — allows placement right up to the wall base
+function canPlaceGround(x, z) {
+  if (getVolcanoHeight(x, z) > 1) return false;
+  if (Math.abs(x - prison.x) < pw / 2 + 3 && Math.abs(z - prison.z) < pw / 2 + 3) return false;
+  if (Math.abs(x) > half - 2 || Math.abs(z) > half - 2) return false;
+  if (isInStream(x, z)) return false;
   return true;
 }
 
@@ -1541,231 +1642,153 @@ for (let i = 0; i < 25; i++) {
   collidables.push(crate);
 }
 
-// ── Instanced Dandelions — thin stem + 3-plane star head, 1 draw call ──
+// ── Dirt patch data — precomputed so grass loop can avoid them ──
+const _dirtPatches = [];
 {
-  const dandelionPlacements = [];
-  const dGrid = 3.5;
-  for (let gx = -half + 8; gx < half - 8; gx += dGrid) {
-    for (let gz = -half + 8; gz < half - 8; gz += dGrid) {
-      const x = gx + (seededRand() - 0.5) * dGrid;
-      const z = gz + (seededRand() - 0.5) * dGrid;
-      if (!canPlaceAt(x, z)) continue;
-      dandelionPlacements.push({ x, z });
+  const dpGrid = 20;
+  for (let gx = -half; gx < half; gx += dpGrid) {
+    for (let gz = -half; gz < half; gz += dpGrid) {
+      const x = gx + (seededRand() - 0.5) * dpGrid * 1.2;
+      const z = gz + (seededRand() - 0.5) * dpGrid * 1.2;
+      if (!canPlaceGround(x, z)) continue;
+      const r = (2.5 + seededRand() * 4.0) * 1.25;
+      _dirtPatches.push({ x, z, r });
+    }
+  }
+}
+
+// ── Instanced Grass — uniform-width skinny shards, 1 draw call ──
+{
+  const grassPlacements = [];
+  const grassGrid = 0.38;
+  for (let gx = -half; gx < half; gx += grassGrid) {
+    for (let gz = -half; gz < half; gz += grassGrid) {
+      const x = gx + (seededRand() - 0.5) * grassGrid;
+      const z = gz + (seededRand() - 0.5) * grassGrid;
+      if (!canPlaceGround(x, z)) continue;
+      let inDirt = false;
+      for (const p of _dirtPatches) {
+        const dx = x - p.x, dz = z - p.z;
+        if (dx*dx + dz*dz < p.r * p.r * 0.52) { inDirt = true; break; }
+      }
+      if (inDirt) continue;
+      grassPlacements.push({ x, z });
     }
   }
 
-  // Geometry: 2-plane thin stem (8 verts) + 3-plane star head (12 verts) = 20 verts, 10 tris
-  // Head planes at 0°, 60°, 120° around Y — reads as a round puffball from any angle
-  const sH = 0.275, sW = 0.0145;     // stem height, half-width (−30% total)
-  const hR = 0.094, hY = sH - 0.01, hT = hY + 0.065;   // head radius, base-y, top-y (−30% total)
-  const c60 = 0.5, s60 = 0.866;      // cos/sin 60°
-
-  const dv = new Float32Array([
-    // Stem plane 1 (along X)
-    -sW, 0,   0,   sW, 0,   0,   -sW, sH,  0,   sW, sH,  0,
-    // Stem plane 2 (along Z)
-     0,  0, -sW,    0, 0,  sW,    0,  sH, -sW,   0, sH,  sW,
-    // Head plane A (0°, along X)
-    -hR,      hY,  0,        hR,      hY,  0,        -hR,      hT,  0,        hR,      hT,  0,
-    // Head plane B (60°)
-    -hR*c60,  hY, -hR*s60,   hR*c60,  hY,  hR*s60,  -hR*c60,  hT, -hR*s60,  hR*c60,  hT,  hR*s60,
-    // Head plane C (120°)
-     hR*c60,  hY, -hR*s60,  -hR*c60,  hY,  hR*s60,   hR*c60,  hT, -hR*s60, -hR*c60,  hT,  hR*s60,
+  // 2 perpendicular planes — slightly wider blade, lighter base so it blends with terrain
+  const gH = 0.107, gW = 0.016;
+  const gv = new Float32Array([
+    -gW, 0, 0,   gW, 0, 0,   -gW, gH, 0,   gW, gH, 0,   // Plane 0 (along X)
+     0, 0, -gW,   0, 0, gW,   0, gH, -gW,   0, gH, gW,   // Plane 1 (along Z)
   ]);
-
-  // Stem: dark green base → mid green top. Head: pure white (instance color provides hue).
-  const dCol = new Float32Array([
-    // Stem plane 1
-    0.04,0.12,0.01,  0.04,0.12,0.01,  0.10,0.28,0.03,  0.10,0.28,0.03,
-    // Stem plane 2
-    0.04,0.12,0.01,  0.04,0.12,0.01,  0.10,0.28,0.03,  0.10,0.28,0.03,
-    // Head A, B, C — pure white so instance color tints cleanly
-    1,1,1,  1,1,1,  1,1,1,  1,1,1,
-    1,1,1,  1,1,1,  1,1,1,  1,1,1,
-    1,1,1,  1,1,1,  1,1,1,  1,1,1,
+  // Medium green base → soft muted tip (not white — prevents oversaturation)
+  const gcol = new Float32Array([
+    0.12,0.34,0.06, 0.12,0.34,0.06, 0.48,0.72,0.22, 0.48,0.72,0.22,
+    0.12,0.34,0.06, 0.12,0.34,0.06, 0.48,0.72,0.22, 0.48,0.72,0.22,
   ]);
+  const gIdx = [0,1,2, 1,3,2,  4,5,6, 5,7,6];
 
-  const dIdx = [
-    0,1,2, 1,3,2,    // stem 1
-    4,5,6, 5,7,6,    // stem 2
-    8,9,10, 9,11,10, // head A
-    12,13,14, 13,15,14, // head B
-    16,17,18, 17,19,18, // head C
+  const grassGeo  = new THREE.BufferGeometry();
+  grassGeo.setAttribute('position', new THREE.BufferAttribute(gv, 3));
+  grassGeo.setAttribute('color',    new THREE.BufferAttribute(gcol, 3));
+  grassGeo.setIndex(gIdx);
+  const grassMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const grassInst = new THREE.InstancedMesh(grassGeo, grassMat, grassPlacements.length);
+
+  const grassPalette = [
+    [0.55, 0.80, 0.40],  // muted warm green
+    [0.45, 0.72, 0.30],  // muted forest
+    [0.60, 0.85, 0.42],  // muted fresh
+    [0.50, 0.75, 0.38],  // muted cool
+    [0.40, 0.65, 0.28],  // muted dark
   ];
 
-  const dandelionGeo = new THREE.BufferGeometry();
-  dandelionGeo.setAttribute('position', new THREE.BufferAttribute(dv, 3));
-  dandelionGeo.setAttribute('color',    new THREE.BufferAttribute(dCol, 3));
-  dandelionGeo.setIndex(dIdx);
-  const dandelionMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  const dandelionInst = new THREE.InstancedMesh(dandelionGeo, dandelionMat, dandelionPlacements.length);
-  dandelionInst.castShadow = false;
-
-  // Head color palette: mostly greens, one yellow, whites
-  const dPalette = [
-    [0.18, 0.78, 0.18],   // bright green
-    [1.00, 0.94, 0.18],   // pale yellow (1 yellow kept)
-    [0.97, 0.97, 0.92],   // white puffball
-    [0.10, 0.58, 0.22],   // forest green
-    [0.95, 0.98, 0.85],   // cream/off-white
-    [0.25, 0.82, 0.32],   // vivid green
-  ];
-
-  const _dDummy = new THREE.Object3D();
-  const _dCol   = new THREE.Color();
-  dandelionPlacements.forEach(({ x, z }, i) => {
+  const _gDummy = new THREE.Object3D();
+  const _gCol   = new THREE.Color();
+  grassPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const s = 0.397 + seededRand() * 0.470;    // −30% total
-    _dDummy.position.set(x, h, z);
-    _dDummy.scale.set(s, s * (0.85 + seededRand() * 0.40), s);
-    _dDummy.rotation.y = seededRand() * 6.28;
-    _dDummy.updateMatrix();
-    dandelionInst.setMatrixAt(i, _dDummy.matrix);
-
-    // Multi-prime hash — no grid pattern
-    const fi = Math.abs(
-      Math.sin(x * 173.1 + z * 251.7) * 0.5 +
-      Math.cos(x * 97.3  - z * 139.4) * 0.3 +
-      Math.sin((x - z)   * 61.7)      * 0.2
+    const s = 0.7 + seededRand() * 1.0;
+    _gDummy.position.set(x, h, z);
+    _gDummy.scale.set(s, s * (0.7 + seededRand() * 0.55), s);
+    // Random lean — tilt 5–22° in a random azimuth direction so blades look organic not vertical
+    const leanDir = seededRand() * 6.28;
+    const leanAmt = 0.09 + seededRand() * 0.30;
+    _gDummy.rotation.set(
+      Math.sin(leanDir) * leanAmt,
+      seededRand() * 6.28,
+      Math.cos(leanDir) * leanAmt
     );
-    const [r, g, b] = dPalette[Math.floor(fi * dPalette.length) % dPalette.length];
-    _dCol.setRGB(r, g, b);
-    dandelionInst.setColorAt(i, _dCol);
+    _gDummy.updateMatrix();
+    grassInst.setMatrixAt(i, _gDummy.matrix);
+    const fi = Math.abs(Math.sin(x * 131.7 + z * 211.3) * 0.6 + Math.cos(x * 79.1 - z * 163.7) * 0.4);
+    const [r, g, b] = grassPalette[Math.floor(fi * grassPalette.length) % grassPalette.length];
+    _gCol.setRGB(r, g, b);
+    grassInst.setColorAt(i, _gCol);
   });
-  dandelionInst.instanceMatrix.needsUpdate = true;
-  dandelionInst.instanceColor.needsUpdate  = true;
-  scene.add(dandelionInst);
+  grassInst.instanceMatrix.needsUpdate = true;
+  grassInst.instanceColor.needsUpdate  = true;
+  scene.add(grassInst);
 }
 
-// ── Instanced Ferns — 3-plane tapered fronds radiating from centre, 1 draw call ──
+// ── Instanced Dirt Patches — smooth organic blobs, no grass inside ──
 {
-  const fernPlacements = [];
-  const fernGridSize = 11;
-  for (let gx = -half + 12; gx < half - 12; gx += fernGridSize) {
-    for (let gz = -half + 12; gz < half - 12; gz += fernGridSize) {
-      const x = gx + (seededRand() - 0.5) * fernGridSize * 0.85 + fernGridSize * 0.4;
-      const z = gz + (seededRand() - 0.5) * fernGridSize * 0.85 + fernGridSize * 0.4;
-      if (!canPlaceAt(x, z)) continue;
-      fernPlacements.push({ x, z });
-    }
-  }
+  // Large central gradient + small perimeter bumps → soft organic edge, no hard outline
+  const dc = document.createElement('canvas'); dc.width = dc.height = 256;
+  const dctx = dc.getContext('2d');
+  const g0 = dctx.createRadialGradient(128, 128, 0, 128, 128, 118);
+  g0.addColorStop(0,    'rgba(255,255,255,1.0)');
+  g0.addColorStop(0.55, 'rgba(255,255,255,0.92)');
+  g0.addColorStop(0.78, 'rgba(255,255,255,0.45)');
+  g0.addColorStop(0.92, 'rgba(255,255,255,0.10)');
+  g0.addColorStop(1.0,  'rgba(255,255,255,0)');
+  dctx.fillStyle = g0; dctx.fillRect(0, 0, 256, 256);
+  [ [88,52,30], [168,60,24], [196,140,28], [155,205,22], [72,178,26], [50,115,20], [130,40,18] ]
+    .forEach(([bx, by, br]) => {
+      const g = dctx.createRadialGradient(bx, by, 0, bx, by, br);
+      g.addColorStop(0,   'rgba(255,255,255,0.45)');
+      g.addColorStop(0.6, 'rgba(255,255,255,0.15)');
+      g.addColorStop(1,   'rgba(255,255,255,0)');
+      dctx.fillStyle = g; dctx.fillRect(0, 0, 256, 256);
+    });
+  const dirtTex = new THREE.CanvasTexture(dc);
 
-  // 3 frond planes at 0°, 60°, 120° — tapered (wide base → narrow tip)
-  // Base vertex color is dark so stems stay dark green regardless of instance tint.
-  // Tip vertex color is white so instance color fully controls the tip hue.
-  const fH = 0.68, fW = 0.52, fT = 0.055;   // height, base half-width, tip half-width
-  const c60 = 0.5, s60 = 0.866;
+  const dirtGeo = new THREE.PlaneGeometry(1, 1);
+  const dirtMat = new THREE.MeshBasicMaterial({
+    map: dirtTex, transparent: true, depthWrite: false,
+    side: THREE.DoubleSide, color: 0xffffff
+  });
+  const dirtInst = new THREE.InstancedMesh(dirtGeo, dirtMat, _dirtPatches.length);
+  dirtInst.castShadow = false;
+  dirtInst.renderOrder = 1;
 
-  const fv = new Float32Array([
-    // Plane 0 (0°, along X)
-    -fW, 0,  0,      fW,  0,  0,     -fT, fH, 0,     fT, fH, 0,
-    // Plane 1 (60°)
-    -fW*c60, 0, -fW*s60,   fW*c60, 0, fW*s60,   -fT*c60, fH, -fT*s60,   fT*c60, fH, fT*s60,
-    // Plane 2 (120°)
-     fW*c60, 0, -fW*s60,  -fW*c60, 0, fW*s60,    fT*c60, fH, -fT*s60,  -fT*c60, fH, fT*s60,
-  ]);
-  const fc = new Float32Array([
-    0.03,0.14,0.02, 0.03,0.14,0.02, 1,1,1, 1,1,1,
-    0.03,0.14,0.02, 0.03,0.14,0.02, 1,1,1, 1,1,1,
-    0.03,0.14,0.02, 0.03,0.14,0.02, 1,1,1, 1,1,1,
-  ]);
-  const fIdx = [0,1,2,1,3,2,  4,5,6,5,7,6,  8,9,10,9,11,10];
-
-  const fernGeo  = new THREE.BufferGeometry();
-  fernGeo.setAttribute('position', new THREE.BufferAttribute(fv, 3));
-  fernGeo.setAttribute('color',    new THREE.BufferAttribute(fc, 3));
-  fernGeo.setIndex(fIdx);
-  const fernMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  const fernInst = new THREE.InstancedMesh(fernGeo, fernMat, fernPlacements.length);
-
-  // Fern tip color palette — varied greens
-  const fernPalette = [
-    [0.20, 0.80, 0.18],   // bright green
-    [0.12, 0.55, 0.14],   // forest green
-    [0.28, 0.72, 0.22],   // yellow-green
-    [0.10, 0.62, 0.28],   // cool green
-    [0.22, 0.68, 0.16],   // medium green
+  const dirtPalette = [
+    [0.34, 0.21, 0.09],
+    [0.44, 0.29, 0.12],
+    [0.38, 0.23, 0.08],
+    [0.29, 0.18, 0.07],
+    [0.50, 0.34, 0.16],
   ];
 
-  const _fDummy = new THREE.Object3D();
-  const _fCol   = new THREE.Color();
-  fernPlacements.forEach(({ x, z }, i) => {
+  const _ddDummy = new THREE.Object3D();
+  const _ddCol = new THREE.Color();
+  _dirtPatches.forEach(({ x, z, r }, i) => {
     const h = getTerrainHeight(x, z);
-    const s = 0.7 + seededRand() * 1.1;
-    _fDummy.position.set(x, h, z);
-    _fDummy.scale.set(s, s * (0.75 + seededRand() * 0.45), s);
-    _fDummy.rotation.y = seededRand() * 6.28;
-    _fDummy.updateMatrix();
-    fernInst.setMatrixAt(i, _fDummy.matrix);
-    const fi = Math.abs(Math.sin(x * 97.3 + z * 181.7) * 0.5 + Math.cos(x * 61.1 - z * 143.9) * 0.5);
-    const [r, g, b] = fernPalette[Math.floor(fi * fernPalette.length) % fernPalette.length];
-    _fCol.setRGB(r, g, b);
-    fernInst.setColorAt(i, _fCol);
+    const diameter = r * 2.0;
+    const aspect = 0.7 + seededRand() * 0.6;
+    _ddDummy.position.set(x, h + 0.015, z);
+    _ddDummy.scale.set(diameter, diameter * aspect, diameter);
+    _ddDummy.rotation.set(-Math.PI / 2, 0, seededRand() * Math.PI * 2);
+    _ddDummy.updateMatrix();
+    dirtInst.setMatrixAt(i, _ddDummy.matrix);
+    const fi = Math.abs(Math.sin(x * 113.7 + z * 197.3) * 0.5 + Math.cos(x * 71.1 - z * 153.9) * 0.5);
+    const [rv, g, b] = dirtPalette[Math.floor(fi * dirtPalette.length) % dirtPalette.length];
+    _ddCol.setRGB(rv, g, b);
+    dirtInst.setColorAt(i, _ddCol);
   });
-  fernInst.instanceMatrix.needsUpdate = true;
-  fernInst.instanceColor.needsUpdate  = true;
-  scene.add(fernInst);
-}
-
-// ── Wildflower Accents — tiny bright-top crossed quads, 1 draw call ──
-{
-  const flowerPlacements = [];
-  const flowerGridSize = 9;
-  for (let gx = -half + 10; gx < half - 10; gx += flowerGridSize) {
-    for (let gz = -half + 10; gz < half - 10; gz += flowerGridSize) {
-      const x = gx + (seededRand() - 0.5) * flowerGridSize * 0.9;
-      const z = gz + (seededRand() - 0.5) * flowerGridSize * 0.9;
-      if (!canPlaceAt(x, z)) continue;
-      flowerPlacements.push({ x, z });
-    }
-  }
-
-  // Short stem + bright top — very thin blades with vivid tip
-  const fh = 0.255, fw = 0.153;
-  const fv = new Float32Array([
-    -fw*0.5, 0,    0,      fw*0.5,  0,    0,     -fw*0.08, fh,  0,      fw*0.08, fh,  0,
-     0,       0,  -fw*0.5,  0,      0,   fw*0.5,  0,       fh, -fw*0.08, 0,      fh,  fw*0.08,
-  ]);
-  // Stem is dark green, top is white-ish (instance color provides the hue)
-  const fc = new Float32Array([
-    0.05,0.12,0.02,  0.05,0.12,0.02,  0.95,0.92,0.88,  0.95,0.92,0.88,
-    0.05,0.12,0.02,  0.05,0.12,0.02,  0.95,0.92,0.88,  0.95,0.92,0.88,
-  ]);
-  const fIdx = [0,1,2, 1,3,2,  4,5,6, 5,7,6];
-  const flowerGeo  = new THREE.BufferGeometry();
-  flowerGeo.setAttribute('position', new THREE.BufferAttribute(fv, 3));
-  flowerGeo.setAttribute('color',    new THREE.BufferAttribute(fc, 3));
-  flowerGeo.setIndex(fIdx);
-  const flowerMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  const flowerInst = new THREE.InstancedMesh(flowerGeo, flowerMat, flowerPlacements.length);
-
-  const _fDummy = new THREE.Object3D();
-  const _fCol   = new THREE.Color();
-  // Palette: greens + lavender + white + blue (no yellow)
-  const flowerPalette = [
-    [0.22, 0.82, 0.25],  // bright green
-    [0.85, 0.60, 1.00],  // lavender
-    [1.0,  1.0,  1.0 ],  // white
-    [0.12, 0.62, 0.20],  // dark green
-    [0.55, 0.85, 1.00],  // sky blue
-  ];
-  flowerPlacements.forEach(({ x, z }, i) => {
-    const h   = getTerrainHeight(x, z);
-    const s   = 0.4675 + seededRand() * 0.5525;
-    _fDummy.position.set(x, h, z);
-    _fDummy.scale.set(s, s * (0.8 + seededRand() * 0.5), s);
-    _fDummy.rotation.y = seededRand() * 6.28;
-    _fDummy.updateMatrix();
-    flowerInst.setMatrixAt(i, _fDummy.matrix);
-    // Pick palette color from hash — never repeating in a grid pattern
-    const fi = Math.abs(Math.sin(x * 173.1 + z * 251.7) * Math.cos(x * 97.3 - z * 139.4));
-    const [r, g, b] = flowerPalette[Math.floor(fi * flowerPalette.length)];
-    _fCol.setRGB(r, g, b);
-    flowerInst.setColorAt(i, _fCol);
-  });
-  flowerInst.instanceMatrix.needsUpdate = true;
-  flowerInst.instanceColor.needsUpdate  = true;
-  scene.add(flowerInst);
+  dirtInst.instanceMatrix.needsUpdate = true;
+  dirtInst.instanceColor.needsUpdate = true;
+  scene.add(dirtInst);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3033,17 +3056,17 @@ function _physStep(fixedDt, inputDir, speed) {
   // Vertical movement
   phys.pos.y += phys.vel.y * fixedDt;
 
-  // Ceiling — stop upward movement when head enters a collidable from below.
-  // Without this, jumping near/under tree canopies lets the player clip inside.
-  if (phys.vel.y > 0) {
+  // Ceiling — eject player down if head overlaps any collider from below.
+  // Runs unconditionally (not just vel.y>0) so slope-walking into a canopy is caught too.
+  {
     const headY = phys.pos.y + height;
     for (const entry of collidableCache) {
       const bb = entry.bb;
-      if (headY > bb.min.y && headY < bb.max.y && phys.pos.y < bb.min.y &&
+      if (headY > bb.min.y && phys.pos.y < bb.min.y &&
           phys.pos.x > bb.min.x - radius && phys.pos.x < bb.max.x + radius &&
           phys.pos.z > bb.min.z - radius && phys.pos.z < bb.max.z + radius) {
         phys.pos.y = bb.min.y - height;
-        phys.vel.y = 0;
+        if (phys.vel.y > 0) phys.vel.y = 0;
         break;
       }
     }
@@ -3597,7 +3620,7 @@ state.physicsTime = 0;
 state.pitch = 0;
 
 // ── Drone camera for menu background ──
-const droneCamera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 1, 800);
+const droneCamera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 1, 1200);
 const droneClock = { angle: 0, height: 95, radius: 155 };
 const overlayCanvas = document.getElementById('overlay-canvas');
 overlayCanvas.width = window.innerWidth;
@@ -3607,7 +3630,8 @@ overlayCanvas.style.inset = '0';
 // Use a second renderer for drone view
 const droneRenderer = new THREE.WebGLRenderer({ canvas: overlayCanvas, antialias: false });
 droneRenderer.setSize(window.innerWidth, window.innerHeight);
-droneRenderer.setPixelRatio(1); // Keep perf light
+droneRenderer.setPixelRatio(1);
+droneRenderer.setClearColor(0x1a4d8a, 1);
 droneRenderer.shadowMap.enabled = false;
 function updateDroneCamera(dt) {
   droneClock.angle += dt * 0.04; // Very slow orbit
@@ -4654,11 +4678,11 @@ function update() {
   if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
   if (!state.locked) {
-    if (state.phase === 'lobby') {
-      updateDroneCamera(renderDt);
-      droneRenderer.render(scene, droneCamera);
-    }
+    updateDroneCamera(renderDt);
+    if (window.skyDome) window.skyDome.position.copy(droneCamera.position);
+    droneRenderer.render(scene, droneCamera);
     renderer.clear();
+    if (window.skyDome) window.skyDome.position.copy(camera.position);
     renderer.render(scene, camera);
     renderer.clearDepth();
     renderer.render(weaponScene, weaponCamera); return;
@@ -4674,7 +4698,7 @@ function update() {
 
   if (state.phase === 'countdown') {
     state.countdownTime = state.matchStartAt
-      ? 10 - (Date.now() - state.matchStartAt) / 1000
+      ? 1 - (Date.now() - state.matchStartAt) / 1000
       : state.countdownTime - renderDt;
     const num = Math.ceil(state.countdownTime);
     const cdEl = document.getElementById('countdown-num');
@@ -5194,6 +5218,7 @@ function update() {
   camera.position.y += headBobY;
   euler.set(state.pitch + landingBobY, state.yaw, 0, 'YXZ');
   camera.quaternion.setFromEuler(euler);
+  if (window.skyDome) window.skyDome.position.copy(camera.position);
   renderer.clear();
   renderer.render(scene, camera);
   renderer.clearDepth();

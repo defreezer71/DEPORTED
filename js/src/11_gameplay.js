@@ -335,13 +335,10 @@ function drawMinimap() {
   mCtx.arc(cx, cy, CONFIG.volcanoRadius * scale, 0, Math.PI * 2);
   mCtx.fillStyle = '#5a4a3a'; mCtx.fill();
 
-  // Stream (draw meandering path)
-  mCtx.beginPath();
-  mCtx.moveTo(cx + streamPoints[0].x * scale, cy + streamPoints[0].z * scale);
-  for (let i = 1; i < streamPoints.length; i++) {
-    mCtx.lineTo(cx + streamPoints[i].x * scale, cy + streamPoints[i].z * scale);
-  }
-  mCtx.strokeStyle = '#1199dd'; mCtx.lineWidth = 2; mCtx.stroke();
+  // Canal (square)
+  mCtx.strokeStyle = '#1199dd'; mCtx.lineWidth = 3;
+  const _cr = _CANAL_R * scale;
+  mCtx.strokeRect(cx - _cr, cy - _cr, _cr * 2, _cr * 2);
 
   // Water flood level — show as blue fill covering submerged areas
   if (state.waterRising && state.waterLevel > 0.5) {

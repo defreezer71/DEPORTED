@@ -512,11 +512,11 @@ function update() {
   if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
   if (!state.locked) {
-    if (state.phase === 'lobby') {
-      updateDroneCamera(renderDt);
-      droneRenderer.render(scene, droneCamera);
-    }
+    updateDroneCamera(renderDt);
+    if (window.skyDome) window.skyDome.position.copy(droneCamera.position);
+    droneRenderer.render(scene, droneCamera);
     renderer.clear();
+    if (window.skyDome) window.skyDome.position.copy(camera.position);
     renderer.render(scene, camera);
     renderer.clearDepth();
     renderer.render(weaponScene, weaponCamera); return;
@@ -532,7 +532,7 @@ function update() {
 
   if (state.phase === 'countdown') {
     state.countdownTime = state.matchStartAt
-      ? 10 - (Date.now() - state.matchStartAt) / 1000
+      ? 1 - (Date.now() - state.matchStartAt) / 1000
       : state.countdownTime - renderDt;
     const num = Math.ceil(state.countdownTime);
     const cdEl = document.getElementById('countdown-num');
@@ -1052,6 +1052,7 @@ function update() {
   camera.position.y += headBobY;
   euler.set(state.pitch + landingBobY, state.yaw, 0, 'YXZ');
   camera.quaternion.setFromEuler(euler);
+  if (window.skyDome) window.skyDome.position.copy(camera.position);
   renderer.clear();
   renderer.render(scene, camera);
   renderer.clearDepth();

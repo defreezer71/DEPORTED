@@ -21,7 +21,7 @@ state.physicsTime = 0;
 state.pitch = 0;
 
 // ── Drone camera for menu background ──
-const droneCamera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 1, 800);
+const droneCamera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 1, 1200);
 const droneClock = { angle: 0, height: 95, radius: 155 };
 const overlayCanvas = document.getElementById('overlay-canvas');
 overlayCanvas.width = window.innerWidth;
@@ -31,7 +31,8 @@ overlayCanvas.style.inset = '0';
 // Use a second renderer for drone view
 const droneRenderer = new THREE.WebGLRenderer({ canvas: overlayCanvas, antialias: false });
 droneRenderer.setSize(window.innerWidth, window.innerHeight);
-droneRenderer.setPixelRatio(1); // Keep perf light
+droneRenderer.setPixelRatio(1);
+droneRenderer.setClearColor(0x1a4d8a, 1);
 droneRenderer.shadowMap.enabled = false;
 function updateDroneCamera(dt) {
   droneClock.angle += dt * 0.04; // Very slow orbit
@@ -72,7 +73,11 @@ overlay.addEventListener('click', (e) => {
     state.pendingLock = false;
     const pl = document.getElementById('click-to-play');
     if (pl) pl.style.setProperty('display', 'none', 'important');
+    renderer.domElement.requestPointerLock();
+    return;
   }
+  // Only re-acquire pointer lock if a game mode is active (not on main menu)
+  if (!state.gameMode) return;
   renderer.domElement.requestPointerLock();
 });
 renderer.domElement.addEventListener('click', () => {
