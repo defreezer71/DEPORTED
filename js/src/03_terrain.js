@@ -13,6 +13,15 @@ function isInStream(x, z) {
   if (Math.abs(x + _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true; // West
   return false;
 }
+// Tight version — only excludes the actual water channel (for grass placement)
+function isInCanalWater(x, z) {
+  const w = _CANAL_W + 0.2;
+  if (Math.abs(z + _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true;
+  if (Math.abs(x - _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true;
+  if (Math.abs(z - _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true;
+  if (Math.abs(x + _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true;
+  return false;
+}
 
 function getVolcanoHeight(x, z) {
   const dist = Math.sqrt(x * x + z * z);
@@ -94,9 +103,9 @@ for (let i = 0; i < gPosAttr.count; i++) {
     const basaltR = 0.10 + surf * 0.5;
     const basaltG = 0.07 + surf * 0.3;
     const basaltB = 0.06 + surf * 0.2;
-    const rustR   = 0.52 + surf * 1.1;
-    const rustG   = 0.28 + surf * 0.55;
-    const rustB   = 0.09 + surf * 0.15;
+    const rustR   = 0.23 + surf * 1.1;
+    const rustG   = 0.13 + surf * 0.55;
+    const rustB   = 0.04 + surf * 0.15;
     // Upper zone: dark volcanic red — deep crimson rock near the summit
     const ashR    = 0.52 + rough * 0.5 + strata * 0.8;
     const ashG    = 0.10 + rough * 0.2 + strata * 0.3;
@@ -156,11 +165,46 @@ scene.add(ground);
   const _waterMat = new THREE.MeshLambertMaterial({
     color: 0x1a8ed8, transparent: true, opacity: 0.84, side: THREE.DoubleSide,
   });
-  const _wallMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide });
 
-  const addQuad = (arr, idx, x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3) => {
+  // Brick texture for canal walls
+  const _brickCanvas = document.createElement('canvas'); _brickCanvas.width = 256; _brickCanvas.height = 128;
+  const _bctx = _brickCanvas.getContext('2d');
+  _bctx.fillStyle = '#291a11'; _bctx.fillRect(0, 0, 256, 128);
+  const bW = 64, bH = 28;
+  for (let row = 0; row < 6; row++) {
+    const offsetX = (row % 2) * bW * 0.5;
+    for (let col = -1; col < 5; col++) {
+      const bx = col * bW + offsetX, by = row * bH;
+      const shade = 0.88 + Math.random() * 0.24;
+      _bctx.fillStyle = `rgba(${Math.floor(50*shade)},${Math.floor(28*shade)},${Math.floor(16*shade)},1)`;
+      _bctx.fillRect(bx + 2, by + 2, bW - 4, bH - 4);
+      for (let gi = 0; gi < 5; gi++) {
+        _bctx.fillStyle = `rgba(0,0,0,${0.04 + Math.random()*0.06})`;
+        _bctx.fillRect(bx + 2 + Math.random()*(bW-8), by + 2 + Math.random()*(bH-6), bW*0.3, 1);
+      }
+    }
+  }
+  _bctx.fillStyle = 'rgba(18,11,8,0.92)';
+  for (let row = 0; row <= 6; row++) { _bctx.fillRect(0, row * bH, 256, 2); }
+  for (let row = 0; row < 6; row++) {
+    const offsetX = (row % 2) * bW * 0.5;
+    for (let col = -1; col < 5; col++) { _bctx.fillRect(col*bW+offsetX, row*bH, 2, bH); }
+  }
+  const _brickTex = new THREE.CanvasTexture(_brickCanvas);
+  _brickTex.wrapS = _brickTex.wrapT = THREE.RepeatWrapping;
+
+  const _wallMat = new THREE.MeshLambertMaterial({ map: _brickTex, side: THREE.DoubleSide });
+
+  // addQuad with UV: uvArr receives UVs computed from quad horizontal/vertical spans
+  const addQuad = (arr, uvArr, idx, x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3) => {
     const b = arr.length / 3;
     arr.push(x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3);
+    if (uvArr) {
+      const sc = 0.55;
+      const dx=x1-x0,dz=z1-z0; const hL=Math.sqrt(dx*dx+dz*dz)*sc;
+      const dx2=x2-x0,dy2=y2-y0,dz2=z2-z0; const vL=Math.sqrt(dx2*dx2+dy2*dy2+dz2*dz2)*sc;
+      uvArr.push(0,0, hL,0, 0,vL, hL,vL);
+    }
     idx.push(b, b+1, b+2, b+1, b+3, b+2);
   };
 
@@ -204,7 +248,7 @@ scene.add(ground);
 
   for (let si=0; si<NS; si++) {
     const seg=segments[si], sn=norms[si];
-    const wv=[], wi=[];
+    const wv=[], wuv=[], wi=[];
 
     for (let i=0; i<seg.length-1; i++) {
       const p=seg[i], q=seg[i+1];
@@ -214,33 +258,34 @@ scene.add(ground);
       const yB=-1.0, yT=canalH, fY=0.08;
 
       // Island-side wall (inner face of canal)
-      addQuad(wv,wi, p.x+mp.nx*canalOuter,yB,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yB,q.z+mq.nz*canalOuter,
+      addQuad(wv,wuv,wi, p.x+mp.nx*canalOuter,yB,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yB,q.z+mq.nz*canalOuter,
                      p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
-      addQuad(wv,wi, p.x+mp.nx*canalInner,yB,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yB,q.z+mq.nz*canalInner,
+      addQuad(wv,wuv,wi, p.x+mp.nx*canalInner,yB,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yB,q.z+mq.nz*canalInner,
                      p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner);
-      addQuad(wv,wi, p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner,
+      addQuad(wv,wuv,wi, p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner,
                      p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
 
       // Exterior wall
-      addQuad(wv,wi, p.x-mp.nx*canalOuter,yB,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yB,q.z-mq.nz*canalOuter,
+      addQuad(wv,wuv,wi, p.x-mp.nx*canalOuter,yB,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yB,q.z-mq.nz*canalOuter,
                      p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
-      addQuad(wv,wi, p.x-mp.nx*canalInner,yB,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yB,q.z-mq.nz*canalInner,
+      addQuad(wv,wuv,wi, p.x-mp.nx*canalInner,yB,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yB,q.z-mq.nz*canalInner,
                      p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner);
-      addQuad(wv,wi, p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner,
+      addQuad(wv,wuv,wi, p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner,
                      p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
 
       // Concrete floor
-      addQuad(wv,wi, p.x-mp.nx*canalInner,fY,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,fY,q.z-mq.nz*canalInner,
+      addQuad(wv,wuv,wi, p.x-mp.nx*canalInner,fY,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,fY,q.z-mq.nz*canalInner,
                      p.x+mp.nx*canalInner,fY,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,fY,q.z+mq.nz*canalInner);
 
       // Water
       const ww=canalInner-0.05, yw=canalH*0.75;
-      addQuad(allWaterV,allWaterI, p.x-mp.nx*ww,yw,p.z-mp.nz*ww, q.x-mq.nx*ww,yw,q.z-mq.nz*ww,
+      addQuad(allWaterV,null,allWaterI, p.x-mp.nx*ww,yw,p.z-mp.nz*ww, q.x-mq.nx*ww,yw,q.z-mq.nz*ww,
                                    p.x+mp.nx*ww,yw,p.z+mp.nz*ww, q.x+mq.nx*ww,yw,q.z+mq.nz*ww);
     }
 
     const g=new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(wv),3));
+    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(wuv),2));
     g.setIndex(wi);
     g.computeVertexNormals();
     // Visual only — collision handled by axis-aligned strips below

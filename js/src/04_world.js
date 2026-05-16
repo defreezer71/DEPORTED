@@ -285,10 +285,10 @@ towerCorners.forEach(tc => {
 // ═══════════════════════════════════════════════════════════
 {
   const WALL_TOP   = CONFIG.cliffHeight + 4 - 3;  // = 36 (top of outer cliff walls)
-  const BB_W       = 24.6;   // face width
-  const BB_H       = 12.1;   // face height
+  const BB_W       = 30.75;  // face width (+25%)
+  const BB_H       = 13.31;  // face height (+10%)
   const POLE_H     = 16.1;   // pole height above wall top
-  const POLE_GAP   = 17.6;   // pole spacing
+  const POLE_GAP   = 22.0;   // pole spacing (matched to wider board)
 
   const poleMat  = new THREE.MeshLambertMaterial({ color: 0x3a3830 });
   const beamMat  = new THREE.MeshLambertMaterial({ color: 0x2e2c28 });

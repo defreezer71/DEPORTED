@@ -60,7 +60,7 @@ scene.fog = new THREE.FogExp2(0x4a9fe8, 0.0018);
   const cloudInst = new THREE.InstancedMesh(
     new THREE.PlaneGeometry(1, 1), cloudMat, CLOUD_COUNT * 2
   );
-  cloudInst.renderOrder = -1;
+  cloudInst.renderOrder = 1;  // render after sun so clouds layer in front
   const _cd = new THREE.Object3D();
   let ci = 0;
   for (let i = 0; i < CLOUD_COUNT; i++) {
@@ -86,10 +86,11 @@ scene.fog = new THREE.FogExp2(0x4a9fe8, 0.0018);
 
 // Sun
 const sunMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(12, 16, 12),
+  new THREE.SphereGeometry(32, 16, 12),
   new THREE.MeshBasicMaterial({ color: 0xFFEE88, fog: false })
 );
-sunMesh.position.set(80, 140, -60);
+sunMesh.position.set(210, 367, -157);
+sunMesh.renderOrder = 0;
 scene.add(sunMesh);
 
 const camera = new THREE.PerspectiveCamera(CONFIG.normalFov, window.innerWidth / window.innerHeight, 0.1, 2000);
@@ -126,7 +127,7 @@ const bots = [];
 // ═══════════════════════════════════════════════════════════
 scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 const sun = new THREE.DirectionalLight(0xfffbe8, 2.2);
-sun.position.set(80, 200, -60);
+sun.position.set(210, 367, -157);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1; sun.shadow.camera.far = 600;

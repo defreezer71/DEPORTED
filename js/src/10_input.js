@@ -22,7 +22,7 @@ state.pitch = 0;
 
 // ── Drone camera for menu background ──
 const droneCamera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 1, 1200);
-const droneClock = { angle: 0, height: 95, radius: 155 };
+const droneClock = { angle: 0, height: 95, radius: 108 };
 const overlayCanvas = document.getElementById('overlay-canvas');
 overlayCanvas.width = window.innerWidth;
 overlayCanvas.height = window.innerHeight;

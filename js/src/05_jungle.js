@@ -12,8 +12,18 @@ function canPlaceGround(x, z) {
   if (getVolcanoHeight(x, z) > 1) return false;
   if (Math.abs(x - prison.x) < pw / 2 + 3 && Math.abs(z - prison.z) < pw / 2 + 3) return false;
   if (Math.abs(x) > half - 2 || Math.abs(z) > half - 2) return false;
-  if (isInStream(x, z)) return false;
+  if (isInCanalWater(x, z)) return false;
   return true;
+}
+
+// Proximity guard — populated as objects are placed, checked by each new object
+const _placedObjList = [];
+function _tooClose(x, z, r) {
+  for (const p of _placedObjList) {
+    const dx = x - p.x, dz = z - p.z;
+    if (dx*dx + dz*dz < (r + p.r) * (r + p.r)) return true;
+  }
+  return false;
 }
 
 // Shared invisible collider material — meshes using this are NOT added to the scene.
@@ -143,11 +153,45 @@ function _makeArborvitaeTex() {
   return t;
 }
 
+function _makeCrateTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#3a1a08'; ctx.fillRect(0, 0, 256, 256);
+  for (let p = 0; p < 4; p++) {
+    const px = p * 64;
+    ctx.fillStyle = p % 2 === 0 ? 'rgba(220,130,60,0.07)' : 'rgba(0,0,0,0.09)';
+    ctx.fillRect(px + 2, 0, 60, 256);
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(px, 0, 2, 256);
+  }
+  for (let i = 0; i < 35; i++) {
+    const y = Math.random() * 256;
+    ctx.strokeStyle = `rgba(0,0,0,${0.04 + Math.random() * 0.09})`;
+    ctx.lineWidth = 0.5 + Math.random() * 0.6;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(256, y + (Math.random()-0.5)*5); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(12,5,1,0.82)'; ctx.lineWidth = 13; ctx.lineCap = 'square';
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(256,256); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(256,0); ctx.lineTo(0,256); ctx.stroke();
+  ctx.strokeStyle = 'rgba(180,100,40,0.20)'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(256,256); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(256,0); ctx.lineTo(0,256); ctx.stroke();
+  ctx.strokeStyle = 'rgba(10,4,1,0.88)'; ctx.lineWidth = 18; ctx.lineCap = 'square';
+  ctx.strokeRect(9, 9, 238, 238);
+  ctx.strokeStyle = 'rgba(160,90,35,0.22)'; ctx.lineWidth = 6;
+  ctx.strokeRect(9, 9, 238, 238);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+}
+
 const _barkTex      = _makeBarkTex();
 const _leafTex      = _makeLeafTex();
 const _arborTex     = _makeArborvitaeTex();
+const _crateTex     = _makeCrateTex();
 
-// ── Instanced Trees — 2 draw calls for all trunks + all canopies ──
+// ── Willow + Palm Trees — 5 draw calls, improved geometry ──
+// Willow: trunk + dense layered canopy/droops (2 calls)
+// Palm:   trunk + 12 outer + 6 inner fronds in one geo (2 calls)
+// + 1 for ferns below
 {
   const treePlacements = [];
   const treeGridSize = 18;
@@ -155,245 +199,217 @@ const _arborTex     = _makeArborvitaeTex();
     for (let gz = -half + 15; gz < half - 15; gz += treeGridSize) {
       const x = gx + (seededRand() - 0.5) * treeGridSize * 0.7;
       const z = gz + (seededRand() - 0.5) * treeGridSize * 0.7;
-      if (canPlaceAt(x, z)) treePlacements.push({ x, z });
+      if (canPlaceAt(x, z) && !_tooClose(x, z, 2.5)) { treePlacements.push({ x, z }); _placedObjList.push({ x, z, r: 2.5 }); }
     }
   }
+  const oakPlaces = [], palmPlaces = [];
+  treePlacements.forEach(p => (seededRand() < 0.5 ? oakPlaces : palmPlaces).push(p));
 
-  const treeCount = treePlacements.length;
+  const _tDummy = new THREE.Object3D();
+  const _tCol   = new THREE.Color();
 
-  const trunkGeo = new THREE.CylinderGeometry(0.22, 0.62, 1, 8);
-  const trunkMat = new THREE.MeshLambertMaterial({ map: _barkTex });
-  const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
-  trunkInst.castShadow = true;
+  // ── 3 overlapping textured spheres per tree — organic silhouette from all angles ──
+  // Green palette — darker, more varied
+  const _oakGreenPalette = [
+    [0.55, 0.65, 0.40],  // natural muted
+    [0.48, 0.62, 0.32],  // fresh mid
+    [0.38, 0.54, 0.24],  // forest dark
+    [0.60, 0.58, 0.36],  // warm yellow-green
+    [0.32, 0.50, 0.20],  // deep dark
+    [0.50, 0.60, 0.34],  // cool mid
+    [0.42, 0.58, 0.28],  // muted forest
+    [0.58, 0.66, 0.38],  // olive green
+  ];
 
-  const flareGeo = new THREE.CylinderGeometry(0.55, 0.90, 1, 8);
-  const flareMat = new THREE.MeshLambertMaterial({ map: _barkTex });
-  const flareInst = new THREE.InstancedMesh(flareGeo, flareMat, treeCount);
-  flareInst.castShadow = false;
+  // Clone leaf texture for each sphere layer with different UV repeat — breaks up visible tiling
+  const _leafTexB = _leafTex.clone(); _leafTexB.repeat.set(1.4, 1.8); _leafTexB.needsUpdate = true;
+  const _leafTexC = _leafTex.clone(); _leafTexC.repeat.set(2.8, 2.3); _leafTexC.needsUpdate = true;
 
-  const _trunkCol = new THREE.Color();
+  const canopyMatA = new THREE.MeshLambertMaterial({ map: _leafTex });
+  const canopyMatB = new THREE.MeshLambertMaterial({ map: _leafTexB });
+  const canopyMatC = new THREE.MeshLambertMaterial({ map: _leafTexC });
 
-  const canopyGeo = new THREE.SphereGeometry(1, 10, 8);
-  const canopyMat = new THREE.MeshLambertMaterial({ map: _leafTex });
-  const canopyInst = new THREE.InstancedMesh(canopyGeo, canopyMat, treeCount);
-  canopyInst.castShadow = true;
+  const oakTrunkInst   = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.50, 1, 9), new THREE.MeshLambertMaterial({map:_barkTex}), oakPlaces.length);
+  const oakCanopyInst  = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), canopyMatA, oakPlaces.length);
+  const oakCanopy2Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  9, 7), canopyMatB, oakPlaces.length);
+  const oakCanopy3Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  8, 6), canopyMatC, oakPlaces.length);
+  oakTrunkInst.castShadow = true;
+  oakCanopyInst.castShadow = true; oakCanopy2Inst.castShadow = false; oakCanopy3Inst.castShadow = false;
 
-  const canopy2Geo = new THREE.SphereGeometry(1, 9, 7);
-  const canopy2Mat = new THREE.MeshLambertMaterial({ map: _leafTex });
-  const canopy2Inst = new THREE.InstancedMesh(canopy2Geo, canopy2Mat, treeCount);
-  canopy2Inst.castShadow = false;
-
-  const canopy3Geo = new THREE.SphereGeometry(1, 8, 6);
-  const canopy3Mat = new THREE.MeshLambertMaterial({ map: _leafTex });
-  const canopy3Inst = new THREE.InstancedMesh(canopy3Geo, canopy3Mat, treeCount);
-  canopy3Inst.castShadow = false;
-
-  const _treeCol = new THREE.Color();
-
-  const dummy = new THREE.Object3D();
-
-  treePlacements.forEach(({ x, z }, i) => {
+  oakPlaces.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const trunkH   = 5.5 + seededRand() * 4.0;
-    const trunkR   = 0.42 + seededRand() * 0.32;
-    const canopyR  = (2.2 + seededRand() * 2.8) * 1.5;
-    const scaleY   = 0.55 + seededRand() * 0.28;
-    const lean     = (seededRand() - 0.5) * 0.06;
+    const trunkH = 2.0 + seededRand() * 8.0;
+    const trunkR = 0.28 + seededRand() * 0.36;
+    const canopyR = 3.0 + seededRand() * 6.5;
+    // Per-tree offset directions for secondary spheres — smaller offset so spheres overlap more
+    const offAngle = seededRand() * 6.28;
+    const offDist  = canopyR * 0.22;
+    const ox = Math.sin(offAngle) * offDist, oz = Math.cos(offAngle) * offDist;
+    const baseY = h + trunkH + canopyR * 0.55;
 
-    dummy.position.set(x, h + trunkH / 2, z);
-    dummy.scale.set(trunkR / 0.44, trunkH, trunkR / 0.44);
-    dummy.rotation.set(lean, seededRand() * 6.28, lean * 0.5);
-    dummy.updateMatrix();
-    trunkInst.setMatrixAt(i, dummy.matrix);
+    _tDummy.position.set(x, h + trunkH / 2, z);
+    _tDummy.scale.set(trunkR / 0.33, trunkH, trunkR / 0.33);
+    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
+    _tDummy.updateMatrix(); oakTrunkInst.setMatrixAt(i, _tDummy.matrix);
 
-    dummy.position.set(x, h + 0.55, z);
-    dummy.scale.set(trunkR / 0.44 * 1.1, 1.1, trunkR / 0.44 * 1.1);
-    dummy.rotation.set(0, seededRand() * 6.28, 0);
-    dummy.updateMatrix();
-    flareInst.setMatrixAt(i, dummy.matrix);
+    // Main sphere — centred on canopy
+    _tDummy.position.set(x, baseY, z);
+    _tDummy.scale.set(canopyR, canopyR * 0.88, canopyR);
+    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
+    _tDummy.updateMatrix(); oakCanopyInst.setMatrixAt(i, _tDummy.matrix);
 
-    const jx = (seededRand()-0.5)*0.6, jz = (seededRand()-0.5)*0.6;
-    dummy.position.set(x + jx, h + trunkH + canopyR * 0.25, z + jz);
-    dummy.scale.set(canopyR, canopyR * scaleY, canopyR);
-    dummy.rotation.set(lean * 0.3, seededRand() * 6.28, 0);
-    dummy.updateMatrix();
-    canopyInst.setMatrixAt(i, dummy.matrix);
+    // Secondary — slightly offset, sunk deep into main so seam disappears
+    _tDummy.position.set(x + ox, baseY + canopyR * 0.30, z + oz);
+    _tDummy.scale.set(canopyR * 0.76, canopyR * 0.72, canopyR * 0.76);
+    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
+    _tDummy.updateMatrix(); oakCanopy2Inst.setMatrixAt(i, _tDummy.matrix);
 
-    const c2r = canopyR * (0.60 + seededRand() * 0.18);
-    dummy.position.set(x + jx + (seededRand()-0.5)*1.2, h + trunkH + canopyR * 0.52 + c2r * 0.1, z + jz + (seededRand()-0.5)*1.2);
-    dummy.scale.set(c2r, c2r * (scaleY * 0.88 + 0.08), c2r);
-    dummy.rotation.set(0, seededRand() * 6.28, 0);
-    dummy.updateMatrix();
-    canopy2Inst.setMatrixAt(i, dummy.matrix);
+    // Tertiary — opposite side, sunk into main body, lower bulge
+    _tDummy.position.set(x - ox * 0.9, baseY - canopyR * 0.18, z - oz * 0.9);
+    _tDummy.scale.set(canopyR * 0.70, canopyR * 0.62, canopyR * 0.70);
+    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
+    _tDummy.updateMatrix(); oakCanopy3Inst.setMatrixAt(i, _tDummy.matrix);
 
-    const c3r = canopyR * (0.35 + seededRand() * 0.15);
-    dummy.position.set(x + jx * 0.3, h + trunkH + canopyR * 0.8 + c3r * 0.3, z + jz * 0.3);
-    dummy.scale.set(c3r, c3r * (scaleY * 0.75 + 0.15), c3r);
-    dummy.rotation.set(0, seededRand() * 6.28, 0);
-    dummy.updateMatrix();
-    canopy3Inst.setMatrixAt(i, dummy.matrix);
+    const hv = Math.sin(x*127.3+z*311.7)*0.5+0.5;
+    _tCol.setRGB(0.50+hv*0.24, 0.38+hv*0.20, 0.24+hv*0.14); oakTrunkInst.setColorAt(i, _tCol);
+    const gp = _oakGreenPalette[Math.floor((Math.sin(x*53.7+z*89.3)*0.5+0.5) * _oakGreenPalette.length) % _oakGreenPalette.length];
+    _tCol.setRGB(gp[0], gp[1], gp[2]);
+    oakCanopyInst.setColorAt(i, _tCol); oakCanopy2Inst.setColorAt(i, _tCol); oakCanopy3Inst.setColorAt(i, _tCol);
 
-    // Per-instance color — multi-prime hash, no seededRand consumption
-    const tf1 = Math.sin(x * 127.341 + z * 311.723);
-    const tf2 = Math.sin(x *  89.127 - z * 203.401 + 1.9);
-    const tf3 = Math.sin((x + z) * 53.17 + (x - z) * 71.39);
-    const hv  = (tf1 * 0.5 + tf2 * 0.3 + tf3 * 0.2) * 0.5 + 0.5;
-    const hv2 = (tf2 * 0.5 + tf3 * 0.5) * 0.5 + 0.5;
-    const hv3 = (tf3 * 0.6 + tf1 * 0.4) * 0.5 + 0.5;
-
-    // Trunk: warm vs cool bark shift
-    _trunkCol.setRGB(0.75 + hv * 0.35, 0.78 + hv2 * 0.25, 0.70 + hv3 * 0.30);
-    trunkInst.setColorAt(i, _trunkCol);
-    _trunkCol.setRGB(0.65 + hv * 0.32, 0.68 + hv2 * 0.22, 0.62 + hv3 * 0.26);
-    flareInst.setColorAt(i, _trunkCol);
-
-    // Canopy: narrow band centred on muted forest green, slight per-tree variance only.
-    // Multiplier range ~0.52–0.72 (±15%) — no extremes.
-    _treeCol.setRGB(0.52 + hv * 0.16 + hv2 * 0.04, 0.54 + hv * 0.16 + hv3 * 0.03, 0.42 + hv * 0.12 + hv2 * 0.04);
-    canopyInst.setColorAt(i, _treeCol);
-    _treeCol.setRGB(0.57 + hv * 0.15 + hv2 * 0.04, 0.59 + hv * 0.15 + hv3 * 0.03, 0.45 + hv * 0.11 + hv2 * 0.04);
-    canopy2Inst.setColorAt(i, _treeCol);
-    _treeCol.setRGB(0.62 + hv * 0.14 + hv2 * 0.04, 0.64 + hv * 0.14 + hv3 * 0.03, 0.48 + hv * 0.11 + hv2 * 0.04);
-    canopy3Inst.setColorAt(i, _treeCol);
-
-    // Trunk PLAYER collider — generous, prevents walking through
-    const trunkCol = new THREE.Mesh(
-      new THREE.BoxGeometry(trunkR * 2.4, trunkH, trunkR * 2.4),
-      invisibleColliderMat
-    );
-    trunkCol.position.set(x, h + trunkH / 2, z);
-    trunkCol.updateMatrixWorld(true);
-    collidables.push(trunkCol);
-
-    // Trunk BULLET hitbox — tight to visual trunk cylinder
-    const trunkHit = new THREE.Mesh(
-      new THREE.BoxGeometry(trunkR * 1.8, trunkH, trunkR * 1.8),
-      invisibleColliderMat
-    );
-    trunkHit.position.set(x, h + trunkH / 2, z);
-    trunkHit.updateMatrixWorld(true);
-    targets.push(trunkHit);
-
-    // Canopy BULLET hitbox — tight to visual squashed sphere
-    const canopyHit = new THREE.Mesh(
-      new THREE.BoxGeometry(canopyR * 1.3, canopyR * scaleY * 1.4, canopyR * 1.3),
-      invisibleColliderMat
-    );
-    canopyHit.position.set(x, h + trunkH + canopyR * 0.35, z);
-    canopyHit.updateMatrixWorld(true);
-    targets.push(canopyHit);
-    collidables.push(canopyHit);  // solid shell — player can't jump inside
+    const trunkCol = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.2, trunkH, trunkR*2.2), invisibleColliderMat);
+    trunkCol.position.set(x, h+trunkH/2, z); trunkCol.updateMatrixWorld(true); collidables.push(trunkCol);
+    const trunkHit = new THREE.Mesh(new THREE.BoxGeometry(trunkR*1.8, trunkH, trunkR*1.8), invisibleColliderMat);
+    trunkHit.position.set(x, h+trunkH/2, z); trunkHit.updateMatrixWorld(true); targets.push(trunkHit);
+    const canopyHit = new THREE.Mesh(new THREE.BoxGeometry(canopyR*2.0, canopyR*1.0, canopyR*2.0), invisibleColliderMat);
+    canopyHit.position.set(x, baseY, z); canopyHit.updateMatrixWorld(true);
+    targets.push(canopyHit); collidables.push(canopyHit);
   });
 
-  trunkInst.instanceMatrix.needsUpdate = true;
-  flareInst.instanceMatrix.needsUpdate = true;
-  canopyInst.instanceMatrix.needsUpdate = true;
-  canopy2Inst.instanceMatrix.needsUpdate = true;
-  canopy3Inst.instanceMatrix.needsUpdate = true;
-  trunkInst.instanceColor.needsUpdate  = true;
-  flareInst.instanceColor.needsUpdate  = true;
-  canopyInst.instanceColor.needsUpdate  = true;
-  canopy2Inst.instanceColor.needsUpdate = true;
-  canopy3Inst.instanceColor.needsUpdate = true;
-  scene.add(trunkInst);
-  scene.add(flareInst);
-  scene.add(canopyInst);
-  scene.add(canopy2Inst);
-  scene.add(canopy3Inst);
+  // ── Palm frond geometry: 7 outer fronds + 3 small upright top fronds ──
+  const palmFrondGeo = (() => {
+    const pos = [], col = [], idx = [];
+    // 7 main outer fronds — arch out and droop
+    const frondS = [[0,0,0.04],[0.35,0.45,0.20],[0.75,0.40,0.12],[1.00,-0.05,0.03]];
+    for (let i = 0; i < 7; i++) {
+      const ba=i/7*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
+      const base=pos.length/3;
+      frondS.forEach(([d,h,hw],si) => {
+        const t=si/(frondS.length-1);
+        pos.push(sa*d-pa*hw,h,ca*d+pca*hw, sa*d+pa*hw,h,ca*d-pca*hw);
+        const r=0.08+t*0.22, g=0.32+t*0.44, b=0.04+t*0.10;
+        col.push(r,g,b, r,g,b);
+      });
+      for (let s=0;s<frondS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
+    }
+    // 3 small upright top fronds — short, nearly vertical, break up flat top
+    const topS = [[0,0.025,0.038],[0.15,0.40,0.088],[0.275,0.725,0.050],[0.35,0.90,0.025]];
+    for (let i = 0; i < 3; i++) {
+      const ba=(i/3*Math.PI*2)+Math.PI/6, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
+      const base=pos.length/3;
+      topS.forEach(([d,h,hw],si) => {
+        const t=si/(topS.length-1);
+        pos.push(sa*d-pa*hw,h,ca*d+pca*hw, sa*d+pa*hw,h,ca*d-pca*hw);
+        const r=0.10+t*0.18, g=0.38+t*0.38, b=0.05+t*0.09;
+        col.push(r,g,b, r,g,b);
+      });
+      for (let s=0;s<topS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
+    g.setIndex(idx); g.computeVertexNormals(); return g;
+  })();
+
+  const palmTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.13,0.30,1,8), new THREE.MeshLambertMaterial({map:_barkTex}), palmPlaces.length);
+  const palmFrondInst = new THREE.InstancedMesh(palmFrondGeo, new THREE.MeshLambertMaterial({vertexColors:true, side:THREE.DoubleSide}), palmPlaces.length);
+  palmTrunkInst.castShadow = true; palmFrondInst.castShadow = true;
+
+  palmPlaces.forEach(({ x, z }, i) => {
+    const h = getTerrainHeight(x, z);
+    const trunkH = 7.5 + seededRand() * 5.5;
+    const trunkR = 0.24 + seededRand() * 0.16;
+    const frondR = 4.5 + seededRand() * 2.8;
+    const lean   = (seededRand()-0.5) * 0.12;
+    _tDummy.position.set(x, h+trunkH/2, z);
+    _tDummy.scale.set(trunkR/0.215, trunkH, trunkR/0.215);
+    _tDummy.rotation.set(lean, seededRand()*6.28, lean*0.5);
+    _tDummy.updateMatrix(); palmTrunkInst.setMatrixAt(i, _tDummy.matrix);
+    _tDummy.position.set(x+Math.sin(lean)*trunkH*0.3, h+trunkH, z);
+    _tDummy.scale.set(frondR, frondR*0.55, frondR);
+    _tDummy.rotation.set(0, seededRand()*6.28, 0);
+    _tDummy.updateMatrix(); palmFrondInst.setMatrixAt(i, _tDummy.matrix);
+    const hv = Math.sin(x*89.1+z*203.4)*0.5+0.5;
+    _tCol.setRGB(0.48+hv*0.26, 0.40+hv*0.20, 0.28+hv*0.16); palmTrunkInst.setColorAt(i, _tCol);
+    _tCol.setRGB(0.68+hv*0.20, 0.80+hv*0.14, 0.50+hv*0.18); palmFrondInst.setColorAt(i, _tCol);
+    const trunkCol = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.9,trunkH,trunkR*2.9), invisibleColliderMat);
+    trunkCol.position.set(x, h+trunkH/2, z); trunkCol.updateMatrixWorld(true); collidables.push(trunkCol);
+    const trunkHit = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.5,trunkH,trunkR*2.5), invisibleColliderMat);
+    trunkHit.position.set(x, h+trunkH/2, z); trunkHit.updateMatrixWorld(true); targets.push(trunkHit);
+    const frondHit = new THREE.Mesh(new THREE.BoxGeometry(frondR*1.1,frondR*0.45,frondR*1.1), invisibleColliderMat);
+    frondHit.position.set(x, h+trunkH+frondR*0.1, z); frondHit.updateMatrixWorld(true);
+    targets.push(frondHit); collidables.push(frondHit);
+  });
+
+  [oakTrunkInst,oakCanopyInst,oakCanopy2Inst,oakCanopy3Inst,palmTrunkInst,palmFrondInst].forEach(m => {
+    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; scene.add(m);
+  });
 }
 
-// ── Instanced Bushes ──
+// ── Instanced Ferns (replaces bushes) — 1 draw call ──
 {
-  const bushPlacements = [];
-  const bushGridSize = 14;
-  for (let gx = -half + 20; gx < half - 20; gx += bushGridSize) {
-    for (let gz = -half + 20; gz < half - 20; gz += bushGridSize) {
-      const x = gx + (seededRand() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
-      const z = gz + (seededRand() - 0.5) * bushGridSize * 0.8 + bushGridSize / 2;
-      if (canPlaceAt(x, z)) bushPlacements.push({ x, z });
+  const fernPlacements = [];
+  const fernGrid = 10;
+  for (let gx = -half+20; gx < half-20; gx += fernGrid) {
+    for (let gz = -half+20; gz < half-20; gz += fernGrid) {
+      const x = gx + (seededRand()-0.5)*fernGrid*0.8 + fernGrid/2;
+      const z = gz + (seededRand()-0.5)*fernGrid*0.8 + fernGrid/2;
+      if (canPlaceAt(x, z)) fernPlacements.push({ x, z });
     }
   }
-
-  // bushInst  = arborvitae cone body  (even indices)
-  // bush2Inst = arborvitae base trunk  (even indices)
-  // bush3Inst = decorative small bush  (odd indices, no collider)
-  const bushGeo  = new THREE.ConeGeometry(0.5, 1, 6);
-  const bushMat  = new THREE.MeshLambertMaterial({ map: _arborTex });
-  const bushInst = new THREE.InstancedMesh(bushGeo, bushMat, bushPlacements.length);
-  bushInst.castShadow = true;
-  const bush2Geo  = new THREE.CylinderGeometry(0.25, 0.38, 0.5, 6);
-  const bush2Mat  = new THREE.MeshLambertMaterial({ color: 0x0a1806 });
-  const bush2Inst = new THREE.InstancedMesh(bush2Geo, bush2Mat, bushPlacements.length);
-  bush2Inst.castShadow = false;
-  const bush3Geo  = new THREE.SphereGeometry(1, 6, 4);
-  const bush3Mat  = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  const bush3Inst = new THREE.InstancedMesh(bush3Geo, bush3Mat, bushPlacements.length);
-  bush3Inst.castShadow = false;
-  const _bushCol = new THREE.Color();
-  const dummy = new THREE.Object3D();
-  const zeroMatrix = (() => { const d = new THREE.Object3D(); d.scale.set(0,0,0); d.updateMatrix(); return d.matrix.clone(); })();
-  bushPlacements.forEach(({ x, z }, i) => {
-    const h = getTerrainHeight(x, z);
-    if (i % 2 === 0) {
-      // Arborvitae
-      const w  = (0.4 + seededRand() * 0.35) * 4.4;
-      const ht = w * (2.6 + seededRand() * 1.0);
-      dummy.position.set(x, h + ht * 0.5, z);
-      dummy.scale.set(w * 1.25, ht, w * 1.25);
-      dummy.rotation.set(0, seededRand() * 6.28, 0);
-      dummy.updateMatrix();
-      bushInst.setMatrixAt(i, dummy.matrix);
-      dummy.position.set(x, h + 0.25, z);
-      dummy.scale.set(w * 0.55, 1, w * 0.55);
-      dummy.rotation.set(0, 0, 0);
-      dummy.updateMatrix();
-      bush2Inst.setMatrixAt(i, dummy.matrix);
-      bush3Inst.setMatrixAt(i, zeroMatrix);
-      // Arborvitae: narrow range, muted dark-to-medium green
-      const bv = Math.sin(x * 73.4 + z * 197.1) * 0.5 + 0.5;
-      _bushCol.setRGB(0.50 + bv * 0.18, 0.56 + bv * 0.14, 0.40 + bv * 0.14);
-      bushInst.setColorAt(i, _bushCol);
-      bush3Inst.setColorAt(i, _bushCol); // zero-scaled, harmless
-      const bushCol = new THREE.Mesh(
-        new THREE.BoxGeometry(w * 1.35, ht * 1.05, w * 1.35),
-        invisibleColliderMat
-      );
-      bushCol.position.set(x, h + ht * 0.5, z);
-      bushCol.updateMatrixWorld(true);
-      collidables.push(bushCol);
-      const bushHit = new THREE.Mesh(
-        new THREE.BoxGeometry(w * 0.85, ht, w * 0.85),
-        invisibleColliderMat
-      );
-      bushHit.position.set(x, h + ht * 0.5, z);
-      bushHit.updateMatrixWorld(true);
-      targets.push(bushHit);
-    } else {
-      // Decorative small bush — no collider, walkthrough
-      const dr     = 0.546 + seededRand() * 0.858;
-      const dScaleY = 0.28 + seededRand() * 0.22;
-      dummy.position.set(x, h + dr * dScaleY * 0.5, z);
-      dummy.scale.set(dr, dr * dScaleY, dr);
-      dummy.rotation.set(0, seededRand() * 6.28, 0);
-      dummy.updateMatrix();
-      bush3Inst.setMatrixAt(i, dummy.matrix);
-      bushInst.setMatrixAt(i, zeroMatrix);
-      bush2Inst.setMatrixAt(i, zeroMatrix);
-      // Round bush: muted medium-dark green, slight variance
-      const bv2 = Math.cos(x * 41.7 - z * 83.2) * 0.5 + 0.5;
-      _bushCol.setRGB(0.06 + bv2 * 0.10, 0.28 + bv2 * 0.12, 0.03 + bv2 * 0.04);
-      bush3Inst.setColorAt(i, _bushCol);
-      bushInst.setColorAt(i, _bushCol); // zero-scaled, harmless
+  // 7-frond fern: each frond arches up then droops at tip
+  const fernGeo = (() => {
+    const pos = [], col = [], idx = [];
+    for (let i = 0; i < 7; i++) {
+      const ba = i / 7 * Math.PI * 2;
+      const sa = Math.sin(ba), ca = Math.cos(ba);
+      const pa = Math.cos(ba), pca = -Math.sin(ba);
+      const segs = [ [0.02,0.02,0.05], [0.35,0.30,0.22], [0.70,0.38,0.15], [1.00,0.14,0.04] ];
+      const base = pos.length / 3;
+      segs.forEach(([d, h, hw], si) => {
+        const t = si / (segs.length - 1);
+        pos.push(sa*d-pa*hw, h, ca*d+pca*hw,  sa*d+pa*hw, h, ca*d-pca*hw);
+        col.push(0.08+t*0.18, 0.35+t*0.32, 0.03+t*0.12,
+                 0.08+t*0.18, 0.35+t*0.32, 0.03+t*0.12);
+      });
+      for (let s = 0; s < segs.length-1; s++) {
+        const b = base + s*2; idx.push(b,b+1,b+2, b+1,b+3,b+2);
+      }
     }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
+    g.setIndex(idx); g.computeVertexNormals(); return g;
+  })();
+
+  const fernMat  = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const fernInst = new THREE.InstancedMesh(fernGeo, fernMat, fernPlacements.length);
+  fernInst.castShadow = false;
+  const _fDummy = new THREE.Object3D(), _fCol = new THREE.Color();
+  fernPlacements.forEach(({ x, z }, i) => {
+    const h = getTerrainHeight(x, z);
+    const s = 1.0 + seededRand() * 1.4;
+    _fDummy.position.set(x, h, z);
+    _fDummy.scale.set(s, s, s);
+    _fDummy.rotation.set(0, seededRand()*6.28, 0);
+    _fDummy.updateMatrix();
+    fernInst.setMatrixAt(i, _fDummy.matrix);
+    const hv = Math.sin(x*53.1+z*97.3)*0.5+0.5;
+    _fCol.setRGB(0.36+hv*0.12, 0.50+hv*0.14, 0.24+hv*0.10);
+    fernInst.setColorAt(i, _fCol);
   });
-  bushInst.instanceMatrix.needsUpdate = true;
-  bush2Inst.instanceMatrix.needsUpdate = true;
-  bush3Inst.instanceMatrix.needsUpdate = true;
-  bushInst.instanceColor.needsUpdate  = true;
-  bush3Inst.instanceColor.needsUpdate = true;
-  scene.add(bushInst);
-  scene.add(bush2Inst);
-  scene.add(bush3Inst);
+  fernInst.instanceMatrix.needsUpdate = true;
+  fernInst.instanceColor.needsUpdate  = true;
+  scene.add(fernInst);
 }
 
 // ── Instanced Rocks ──
@@ -405,86 +421,133 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     for (let gz = -half + 25; gz < half - 25; gz += rockGridSize) {
       const x = gx + (seededRand() - 0.5) * rockGridSize * 0.6;
       const z = gz + (seededRand() - 0.5) * rockGridSize * 0.6;
-      if (canPlaceAt(x, z)) rockPlacements.push({ x, z });
+      if (canPlaceAt(x, z) && !_tooClose(x, z, 1.5)) { rockPlacements.push({ x, z }); _placedObjList.push({ x, z, r: 1.5 }); }
     }
   }
 
-  // Crate visuals — 3 instanced meshes: main body, wood slat H, wood slat V
-  const crateBodyGeo = new THREE.BoxGeometry(1, 1, 1);
-  const crateBodyMat = new THREE.MeshLambertMaterial({ color: 0xa06828 });
-  const crateInst    = new THREE.InstancedMesh(crateBodyGeo, crateBodyMat, rockPlacements.length);
+  const crateInst = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshLambertMaterial({ map: _crateTex, color: 0xffdbaf }),
+    rockPlacements.length
+  );
   crateInst.castShadow = true;
-
-  const slatHGeo  = new THREE.BoxGeometry(1.12, 0.11, 1.12);
-  const slatMat   = new THREE.MeshLambertMaterial({ color: 0x1e0c02 });
-  const slatHInst = new THREE.InstancedMesh(slatHGeo, slatMat, rockPlacements.length * 2);
-  slatHInst.castShadow = false;
-
-  const slatVGeo  = new THREE.BoxGeometry(1.12, 0.11, 1.12);
-  const slatVInst = new THREE.InstancedMesh(slatVGeo, slatMat, rockPlacements.length * 2);
-  slatVInst.castShadow = false;
-
   const dummy = new THREE.Object3D();
 
   rockPlacements.forEach(({ x, z }, i) => {
     const h  = getTerrainHeight(x, z);
-    const sz = 1.4 + seededRand() * 1.2;  // crate size 1.4–2.6 units
+    const sz = 1.4 + seededRand() * 1.2;
     const yRot = seededRand() * 6.28;
-
-    // Main crate body
     dummy.position.set(x, h + sz * 0.5, z);
     dummy.scale.set(sz, sz, sz);
     dummy.rotation.set(0, yRot, 0);
     dummy.updateMatrix();
     crateInst.setMatrixAt(i, dummy.matrix);
-
-    // Horizontal slats (top + bottom band)
-    [-0.41, 0.41].forEach((yOff, si) => {
-      dummy.position.set(x, h + sz * 0.5 + sz * yOff, z);
-      dummy.scale.set(sz, sz, sz);
-      dummy.rotation.set(0, yRot, 0);
-      dummy.updateMatrix();
-      slatHInst.setMatrixAt(i * 2 + si, dummy.matrix);
-    });
-
-    // Vertical slats (front + back band)
-    [-0.41, 0.41].forEach((xOff, si) => {
-      dummy.position.set(x, h + sz * 0.5 + sz * xOff, z);
-      dummy.scale.set(sz, sz, sz);
-      dummy.rotation.set(0, yRot, 0);
-      dummy.updateMatrix();
-      slatVInst.setMatrixAt(i * 2 + si, dummy.matrix);
-    });
-
-    // Player collider — exact crate size, perfect fit since it's already a box
-    const collider = new THREE.Mesh(
-      new THREE.BoxGeometry(sz * 1.2, sz * 1.2, sz * 1.2),
-      invisibleColliderMat
-    );
+    const collider = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
     collider.position.set(x, h + sz * 0.5, z);
-    collider.rotation.y = 0;
+    collider.rotation.y = yRot;
     collider.updateMatrixWorld(true);
     collidables.push(collider);
-
-    // Bullet hitbox — same as collider
-    const crateHit = new THREE.Mesh(
-      new THREE.BoxGeometry(sz, sz, sz),
-      invisibleColliderMat
-    );
+    const crateHit = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
     crateHit.position.set(x, h + sz * 0.5, z);
     crateHit.rotation.y = yRot;
     crateHit.updateMatrixWorld(true);
     targets.push(crateHit);
   });
-
   crateInst.instanceMatrix.needsUpdate = true;
-  slatHInst.instanceMatrix.needsUpdate = true;
-  slatVInst.instanceMatrix.needsUpdate = true;
   scene.add(crateInst);
-  scene.add(slatHInst);
-  scene.add(slatVInst);
 }
 
+// ── Volcano crates — 10 fixed positions on the slope ──
+{
+  const volcR = CONFIG.volcanoRadius;
+  const volcCratePositions = [
+    { r: 0.52, a: 0.00 }, { r: 0.62, a: 0.63 }, { r: 0.45, a: 1.26 },
+    { r: 0.58, a: 1.88 }, { r: 0.40, a: 2.51 }, { r: 0.55, a: 3.14 },
+    { r: 0.48, a: 3.77 }, { r: 0.60, a: 4.40 }, { r: 0.42, a: 5.03 },
+    { r: 0.50, a: 5.65 },
+  ];
+  volcCratePositions.forEach(({ r, a }, idx) => {
+    const x = Math.cos(a) * volcR * r;
+    const z = Math.sin(a) * volcR * r;
+    const h = getTerrainHeight(x, z);
+    const sz = 1.4 + (idx % 3) * 0.4;
+    const yRot = a + 0.4;
+    const crate = new THREE.Mesh(
+      new THREE.BoxGeometry(sz, sz, sz),
+      new THREE.MeshLambertMaterial({ map: _crateTex, color: 0xffdbaf })
+    );
+    crate.position.set(x, h + sz * 0.5, z);
+    crate.rotation.y = yRot;
+    crate.castShadow = true;
+    scene.add(crate);
+    const collider = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
+    collider.position.set(x, h + sz * 0.5, z);
+    collider.rotation.y = yRot;
+    collider.updateMatrixWorld(true);
+    collidables.push(collider);
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
+    hit.position.set(x, h + sz * 0.5, z);
+    hit.rotation.y = yRot;
+    hit.updateMatrixWorld(true);
+    targets.push(hit);
+  });
+}
+
+// ── Instanced Marble Pillars with Ivy ──
+{
+  const pillarPlacements = [];
+  const pillarGrid = 42;
+  for (let gx = -half + 18; gx < half - 18; gx += pillarGrid) {
+    for (let gz = -half + 18; gz < half - 18; gz += pillarGrid) {
+      const x = gx + (seededRand() - 0.5) * pillarGrid * 0.7;
+      const z = gz + (seededRand() - 0.5) * pillarGrid * 0.7;
+      if (canPlaceAt(x, z) && !_tooClose(x, z, 1.5)) { pillarPlacements.push({ x, z }); _placedObjList.push({ x, z, r: 1.5 }); }
+    }
+  }
+
+  const stoneMat   = new THREE.MeshLambertMaterial({ color: 0xddd8c4 });
+  const shaftGeo   = new THREE.CylinderGeometry(0.52, 0.63, 1, 8);
+  const baseGeo    = new THREE.BoxGeometry(1.61, 0.37, 1.61);
+  const capitalGeo = new THREE.BoxGeometry(1.78, 0.32, 1.78);
+  const n = pillarPlacements.length;
+  const shaftInst   = new THREE.InstancedMesh(shaftGeo,   stoneMat, n);
+  const baseInst    = new THREE.InstancedMesh(baseGeo,    stoneMat, n);
+  const capitalInst = new THREE.InstancedMesh(capitalGeo, stoneMat, n);
+
+  const _pDummy = new THREE.Object3D(), _pCol = new THREE.Color();
+  pillarPlacements.forEach(({ x, z }, i) => {
+    const h = getTerrainHeight(x, z);
+    const pillarH = 5.52 + seededRand() * 2.53;
+    const shaftH  = pillarH - 0.28 - 0.24;
+    const yRot = seededRand() * 6.28;
+    const hv = Math.sin(x*73.1+z*137.9)*0.5+0.5;
+
+    _pDummy.position.set(x, h+0.14, z);
+    _pDummy.scale.set(1,1,1); _pDummy.rotation.set(0,yRot,0);
+    _pDummy.updateMatrix(); baseInst.setMatrixAt(i, _pDummy.matrix);
+
+    _pDummy.position.set(x, h+0.28+shaftH/2, z);
+    _pDummy.scale.set(1,shaftH,1); _pDummy.rotation.set(0,yRot,0);
+    _pDummy.updateMatrix(); shaftInst.setMatrixAt(i, _pDummy.matrix);
+
+    _pDummy.position.set(x, h+pillarH-0.12, z);
+    _pDummy.scale.set(1,1,1); _pDummy.rotation.set(0,yRot,0);
+    _pDummy.updateMatrix(); capitalInst.setMatrixAt(i, _pDummy.matrix);
+
+    _pCol.setRGB(0.84+hv*0.08, 0.80+hv*0.06, 0.70+hv*0.08);
+    baseInst.setColorAt(i,_pCol); shaftInst.setColorAt(i,_pCol); capitalInst.setColorAt(i,_pCol);
+
+    const col2 = new THREE.Mesh(new THREE.BoxGeometry(1.30,pillarH,1.30), invisibleColliderMat);
+    col2.position.set(x, h+pillarH/2, z); col2.updateMatrixWorld(true); collidables.push(col2);
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(1.26,pillarH,1.26), invisibleColliderMat);
+    hit.position.set(x, h+pillarH/2, z); hit.updateMatrixWorld(true); targets.push(hit);
+  });
+
+  [shaftInst, baseInst, capitalInst].forEach(m => {
+    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true;
+    m.castShadow = true; scene.add(m);
+  });
+}
 
 // Volcano LOS/bullet blocker
 const bulletBlockers = [];
@@ -524,26 +587,14 @@ for (let i = 0; i < 25; i++) {
   const slopeX = Math.atan2(hR - hL, step * 2);
   const slopeZ = Math.atan2(hU - hD, step * 2);
 
-  // Crate body — tilted to slope
   const crate = new THREE.Mesh(
     new THREE.BoxGeometry(sz, sz, sz),
-    new THREE.MeshLambertMaterial({ color: 0xa06828 })
+    new THREE.MeshLambertMaterial({ map: _crateTex, color: 0xffdbaf })
   );
   crate.position.set(x, h + sz * 0.5, z);
   crate.rotation.set(0, yRot, 0);
   crate.castShadow = true;
   scene.add(crate);
-
-  // Dark wood slats — full-wrap bands near top and bottom edges
-  [-0.41, 0.41].forEach(yOff => {
-    const slat = new THREE.Mesh(
-      new THREE.BoxGeometry(sz * 1.12, sz * 0.11, sz * 1.12),
-      new THREE.MeshLambertMaterial({ color: 0x1e0c02 })
-    );
-    slat.position.set(x, h + sz * 0.5 + sz * yOff, z);
-    slat.rotation.set(0, yRot, 0);
-    scene.add(slat);
-  });
 
   // Bullet hitbox — tilted to match visual
   const crateHit = new THREE.Mesh(
@@ -574,14 +625,76 @@ const _dirtPatches = [];
   }
 }
 
-// ── Instanced Grass — uniform-width skinny shards, 1 draw call ──
+// ── Instanced Grass Tufts — 5-blade tapered fan, 1 draw call ──
+// Each instance is a cluster of 5 blades fanning outward from a shared base,
+// matching the reference: wide tapered blades, dark base → bright tip, outward lean.
 {
+  // ── Build tuft geometry (5 tapered blades, baked into one BufferGeometry) ──
+  // Blade config: [azimuth_deg, lean_deg] — azimuth spreads blades, lean tilts them out
+  const bladeDefs = [
+    [  0,  12],   // center — nearly upright
+    [ 38,  30],   // inner left
+    [-38,  30],   // inner right
+    [ 68,  48],   // outer left
+    [-68,  48],   // outer right
+  ];
+  const bH  = 0.32;   // blade length
+  const bBW = 0.026;  // base half-width
+  const bTW = 0.005;  // tip half-width
+  const BASE_COL = [0.06, 0.26, 0.04];   // very dark green at soil
+  const TIP_COL  = [0.40, 0.88, 0.20];   // bright lime-green at tip
+
+  const vCount = bladeDefs.length * 4;   // 4 verts per blade
+  const positions = new Float32Array(vCount * 3);
+  const colors    = new Float32Array(vCount * 3);
+  const indices   = [];
+
+  bladeDefs.forEach(([azDeg, leanDeg], bi) => {
+    const az   = azDeg   * Math.PI / 180;
+    const lean = leanDeg * Math.PI / 180;
+    const vi   = bi * 4;
+
+    // Lean direction unit vector (XZ plane)
+    const lx = Math.sin(az), lz = Math.cos(az);
+    // Perpendicular (for blade width)
+    const px = Math.cos(az), pz = -Math.sin(az);
+    // Tip world offset
+    const tx = Math.sin(lean) * lx * bH;
+    const ty = Math.cos(lean) * bH;
+    const tz = Math.sin(lean) * lz * bH;
+
+    // v0 base-left, v1 base-right, v2 tip-left, v3 tip-right
+    const vd = [
+      [-bBW * px, 0,  -bBW * pz],
+      [ bBW * px, 0,   bBW * pz],
+      [tx - bTW * px, ty, tz - bTW * pz],
+      [tx + bTW * px, ty, tz + bTW * pz],
+    ];
+    vd.forEach(([vx, vy, vz], k) => {
+      const pi = (vi + k) * 3;
+      positions[pi] = vx; positions[pi+1] = vy; positions[pi+2] = vz;
+      const isBase = k < 2;
+      const ci = (vi + k) * 3;
+      colors[ci]   = isBase ? BASE_COL[0] : TIP_COL[0];
+      colors[ci+1] = isBase ? BASE_COL[1] : TIP_COL[1];
+      colors[ci+2] = isBase ? BASE_COL[2] : TIP_COL[2];
+    });
+    indices.push(vi, vi+1, vi+2,  vi+1, vi+3, vi+2);
+  });
+
+  const grassGeo = new THREE.BufferGeometry();
+  grassGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  grassGeo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+  grassGeo.setIndex(indices);
+  const grassMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+
+  // ── Place tufts on a jittered grid ──
   const grassPlacements = [];
-  const grassGrid = 0.38;
+  const grassGrid = 0.55;
   for (let gx = -half; gx < half; gx += grassGrid) {
     for (let gz = -half; gz < half; gz += grassGrid) {
-      const x = gx + (seededRand() - 0.5) * grassGrid;
-      const z = gz + (seededRand() - 0.5) * grassGrid;
+      const x = gx + (seededRand() - 0.5) * grassGrid * 0.9;
+      const z = gz + (seededRand() - 0.5) * grassGrid * 0.9;
       if (!canPlaceGround(x, z)) continue;
       let inDirt = false;
       for (const p of _dirtPatches) {
@@ -593,52 +706,29 @@ const _dirtPatches = [];
     }
   }
 
-  // 2 perpendicular planes — slightly wider blade, lighter base so it blends with terrain
-  const gH = 0.107, gW = 0.016;
-  const gv = new Float32Array([
-    -gW, 0, 0,   gW, 0, 0,   -gW, gH, 0,   gW, gH, 0,   // Plane 0 (along X)
-     0, 0, -gW,   0, 0, gW,   0, gH, -gW,   0, gH, gW,   // Plane 1 (along Z)
-  ]);
-  // Medium green base → soft muted tip (not white — prevents oversaturation)
-  const gcol = new Float32Array([
-    0.12,0.34,0.06, 0.12,0.34,0.06, 0.48,0.72,0.22, 0.48,0.72,0.22,
-    0.12,0.34,0.06, 0.12,0.34,0.06, 0.48,0.72,0.22, 0.48,0.72,0.22,
-  ]);
-  const gIdx = [0,1,2, 1,3,2,  4,5,6, 5,7,6];
-
-  const grassGeo  = new THREE.BufferGeometry();
-  grassGeo.setAttribute('position', new THREE.BufferAttribute(gv, 3));
-  grassGeo.setAttribute('color',    new THREE.BufferAttribute(gcol, 3));
-  grassGeo.setIndex(gIdx);
-  const grassMat  = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
   const grassInst = new THREE.InstancedMesh(grassGeo, grassMat, grassPlacements.length);
 
+  // Palette: mostly rich greens with slight variation
   const grassPalette = [
-    [0.55, 0.80, 0.40],  // muted warm green
-    [0.45, 0.72, 0.30],  // muted forest
-    [0.60, 0.85, 0.42],  // muted fresh
-    [0.50, 0.75, 0.38],  // muted cool
-    [0.40, 0.65, 0.28],  // muted dark
+    [0.55, 0.92, 0.28],  // bright fresh green
+    [0.38, 0.72, 0.18],  // mid green
+    [0.28, 0.58, 0.12],  // dark forest green
+    [0.48, 0.85, 0.22],  // vivid green
+    [0.32, 0.65, 0.15],  // cool dark
   ];
 
   const _gDummy = new THREE.Object3D();
   const _gCol   = new THREE.Color();
   grassPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const s = 0.7 + seededRand() * 1.0;
+    const s = 0.65 + seededRand() * 0.80;  // size variation: small to large tufts
     _gDummy.position.set(x, h, z);
-    _gDummy.scale.set(s, s * (0.7 + seededRand() * 0.55), s);
-    // Random lean — tilt 5–22° in a random azimuth direction so blades look organic not vertical
-    const leanDir = seededRand() * 6.28;
-    const leanAmt = 0.09 + seededRand() * 0.30;
-    _gDummy.rotation.set(
-      Math.sin(leanDir) * leanAmt,
-      seededRand() * 6.28,
-      Math.cos(leanDir) * leanAmt
-    );
+    _gDummy.scale.set(s, s * (0.8 + seededRand() * 0.45), s);
+    _gDummy.rotation.set(0, seededRand() * 6.28, 0);  // random azimuth only — lean baked in
     _gDummy.updateMatrix();
     grassInst.setMatrixAt(i, _gDummy.matrix);
-    const fi = Math.abs(Math.sin(x * 131.7 + z * 211.3) * 0.6 + Math.cos(x * 79.1 - z * 163.7) * 0.4);
+    // Smooth spatial color — nearby tufts cluster in similar hue
+    const fi = Math.abs(Math.sin(x * 0.28 + z * 0.41) * 0.6 + Math.cos(x * 1.5 - z * 1.1) * 0.4);
     const [r, g, b] = grassPalette[Math.floor(fi * grassPalette.length) % grassPalette.length];
     _gCol.setRGB(r, g, b);
     grassInst.setColorAt(i, _gCol);

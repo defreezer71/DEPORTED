@@ -137,100 +137,119 @@ let physicsAccumulator = 0;
 // ── Instanced Ash Cloud Pool — 1 draw call for ALL ash particles ──
 const ASH_POOL_SIZE = 300;
 const ashGeo = new THREE.SphereGeometry(1, 5, 4);
-const ashMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.7, color: 0x444444, depthWrite: false });
+const ashMat = new THREE.MeshLambertMaterial({ transparent: true, opacity: 0.7, color: 0x686868, depthWrite: false });
 const ashMesh = new THREE.InstancedMesh(ashGeo, ashMat, ASH_POOL_SIZE);
 ashMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 ashMesh.frustumCulled = false;
+ashMesh.renderOrder = 2;
 ashMesh.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 150, 0), 800);
 
-// ── Eruption — single unified cone system ──
-const ERUPT_COUNT = 500;
-const ERUPT_MAX_H = 155;
+// ── Eruption — large overlapping camera-facing billboard smoke puffs ──
+// Camera-facing planes avoid the "ball" look that PointsMaterial always produces.
 
-const eruptCanvas = document.createElement('canvas');
-eruptCanvas.width = eruptCanvas.height = 64;
-const eruptCtx = eruptCanvas.getContext('2d');
-const eruptGrad = eruptCtx.createRadialGradient(32,32,0,32,32,32);
-eruptGrad.addColorStop(0,    'rgba(8,8,8,1)');
-eruptGrad.addColorStop(0.55, 'rgba(10,10,10,1)');
-eruptGrad.addColorStop(0.78, 'rgba(5,5,5,0.5)');
-eruptGrad.addColorStop(1,    'rgba(0,0,0,0)');
-eruptCtx.fillStyle = eruptGrad;
-eruptCtx.fillRect(0,0,64,64);
-const eruptTex = new THREE.CanvasTexture(eruptCanvas);
-
-const eruptPos   = new Float32Array(ERUPT_COUNT * 3);
-const eruptPhase = new Float32Array(ERUPT_COUNT);
-const eruptSpeed = new Float32Array(ERUPT_COUNT);
-
-function _resetErupt(i) {
-  eruptPhase[i]   = Math.random() * Math.PI * 2;
-  eruptSpeed[i]   = 26.6 + Math.random() * 16.9;  // +10% again
-  eruptPos[i*3+1] = Math.random() * 4;  // always spawn at mouth
-  eruptPos[i*3]   = (Math.random() - 0.5) * 2;
-  eruptPos[i*3+2] = (Math.random() - 0.5) * 2;
-}
-for (let i = 0; i < ERUPT_COUNT; i++) _resetErupt(i);
-
-let _plumeCeiling = 0;  // grows upward from 0 → ERUPT_MAX_H over ~17s
-
-const eruptGeo = new THREE.BufferGeometry();
-eruptGeo.setAttribute('position', new THREE.BufferAttribute(eruptPos, 3));
-eruptGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 78, 0), 800);
-
-const eruptMat = new THREE.PointsMaterial({
-  size: 26, map: eruptTex, transparent: true,
-  depthWrite: false, depthTest: true, opacity: 0.88, sizeAttenuation: true
+// Soft irregular smoke texture (256×256)
+const _plumeCanvas = document.createElement('canvas');
+_plumeCanvas.width = _plumeCanvas.height = 256;
+const _plumeCtx = _plumeCanvas.getContext('2d');
+// Sharp-edged dark smoke gradient — abrupt falloff for crisp silhouette
+const _pg = _plumeCtx.createRadialGradient(128,128,0,128,128,118);
+_pg.addColorStop(0,   'rgba(42,42,42,0.98)');
+_pg.addColorStop(0.32,'rgba(38,38,38,0.88)');
+_pg.addColorStop(0.58,'rgba(30,30,30,0.55)');
+_pg.addColorStop(0.80,'rgba(18,18,18,0.18)');
+_pg.addColorStop(1.0, 'rgba(0,0,0,0)');
+_plumeCtx.fillStyle = _pg; _plumeCtx.fillRect(0,0,256,256);
+// Satellite blobs — sharper, darker
+[[172,80,42,0.38],[78,174,38,0.32],[190,160,34,0.30],[68,98,30,0.28],
+ [160,194,26,0.25],[98,56,22,0.22],[140,60,18,0.20]].forEach(([bx,by,br,a])=>{
+  const g=_plumeCtx.createRadialGradient(bx,by,0,bx,by,br);
+  g.addColorStop(0,`rgba(36,36,36,${a})`); g.addColorStop(0.7,`rgba(24,24,24,${(a*0.3).toFixed(2)})`); g.addColorStop(1,'rgba(0,0,0,0)');
+  _plumeCtx.fillStyle=g; _plumeCtx.fillRect(0,0,256,256);
 });
+const _plumeTex = new THREE.CanvasTexture(_plumeCanvas);
 
-const eruptPoints = new THREE.Points(eruptGeo, eruptMat);
-eruptPoints.frustumCulled = false;
-eruptPoints.position.set(0, CONFIG.volcanoHeight, 0);
-eruptPoints.visible = false;
-scene.add(eruptPoints);
+// 50 billboard puffs: first 22 = column, rest = crown
+const PLUME_COUNT = 75;
+const _plumeGroup = new THREE.Group();
+_plumeGroup.position.set(0, CONFIG.volcanoHeight, 0);
+_plumeGroup.visible = false;
+_plumeGroup.renderOrder = 2;
+scene.add(_plumeGroup);
 
-let _eruptFadeT = 0;
+const _plumeData = [];
+const _plumeQuat = new THREE.Quaternion();
+let _plumeFadeT = 0, _plumeCeiling = 0;
 
-function updateEruptionPoints(dt) {
-  eruptPoints.visible = true;
-  // Seed ceiling just above mouth on first call so particles aren't immediately killed
-  if (_plumeCeiling === 0) _plumeCeiling = 5;
-  // Ceiling climbs at 14.4 units/s (+10% again) — reaches full height (~150) in ~11 seconds
-  _plumeCeiling = Math.min(ERUPT_MAX_H, _plumeCeiling + 14.4 * dt);
+for (let i = 0; i < PLUME_COUNT; i++) {
+  const mat = new THREE.MeshBasicMaterial({
+    map: _plumeTex, transparent: true, opacity: 0,
+    depthWrite: false, side: THREE.DoubleSide, fog: false
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1,1), mat);
+  mesh.renderOrder = 2; mesh.frustumCulled = false;
+  _plumeGroup.add(mesh);
+  const ang = Math.random() * 6.28;
+  const isCrown = i >= 30;
+  _plumeData.push({
+    mesh, mat,
+    y:       Math.random() * (isCrown ? 155 : 110),
+    speed:   10.1 + Math.random() * 11.5,
+    angle:   ang,
+    radMult: 0.55 + Math.random() * 0.90,
+    size:    21 + Math.random() * 26,
+    isCrown,
+  });
+}
 
-  _eruptFadeT = Math.min(1, _eruptFadeT + dt / 0.8);
-  eruptMat.opacity = 0.88 * _eruptFadeT;
+function updatePlume(dt) {
+  _plumeGroup.visible = true;
+  _plumeFadeT = Math.min(1, _plumeFadeT + dt * 0.7);
+  _plumeCeiling = Math.min(155, _plumeCeiling + 18.7 * dt);
+  _plumeQuat.copy(camera.quaternion);
 
-  const t = clock.elapsedTime;
-  for (let i = 0; i < ERUPT_COUNT; i++) {
-    const frac = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
-    eruptPos[i*3+1] += eruptSpeed[i] * (1 - frac * 0.65) * dt;
+  const crownReady = _plumeCeiling > 50;
 
-    // Reset to mouth if particle hits the rising ceiling or overshoots max
-    if (eruptPos[i*3+1] > _plumeCeiling) {
-      _resetErupt(i);
+  for (const p of _plumeData) {
+    if (p.isCrown && !crownReady) { p.mat.opacity = 0; continue; }
+
+    p.y += p.speed * dt;
+    const maxY = p.isCrown ? 155 : 120;
+    if (p.y > Math.min(maxY, _plumeCeiling)) {
+      p.y = p.isCrown ? 38 + Math.random() * 14 : Math.random() * 4;
     }
 
-    const f  = Math.min(1, eruptPos[i*3+1] / ERUPT_MAX_H);
-    const h  = eruptPos[i*3+1];
-    const ph = eruptPhase[i];
-    const maxR = 2 + Math.pow(f, 1.3) * 120;  // wider crown — covers more sky
+    const f = Math.min(1, p.y / 155);
 
-    // Three turbulence layers — each height gets a different phase offset (h * k)
-    // so vertical slices of the plume move independently, creating the enveloping look
-    const lx = Math.cos(ph * 0.7 + t * 0.12) * 0.55 + Math.sin(ph * 1.2 + t * 0.09) * 0.35;
-    const lz = Math.sin(ph * 0.7 + t * 0.12) * 0.55 + Math.cos(ph * 1.2 + t * 0.09) * 0.35;
-    const mx = Math.cos(ph * 2.1 + t * 0.40 + h * 0.025) * 0.45;
-    const mz = Math.sin(ph * 2.1 + t * 0.40 + h * 0.025) * 0.45;
-    const sx = Math.cos(ph * 3.8 + t * 0.90 + h * 0.055) * 0.20;
-    const sz = Math.sin(ph * 3.8 + t * 0.90 + h * 0.055) * 0.20;
+    let xr, zr;
+    if (!p.isCrown) {
+      xr = Math.sin(p.y * 0.18 + p.angle)       * 2.2;
+      zr = Math.cos(p.y * 0.18 + p.angle * 1.3) * 2.2;
+    } else {
+      const cf  = Math.max(0, (f - 0.40) / 0.60);
+      const rad = 4 + Math.pow(cf, 1.2) * 88 * p.radMult;
+      xr = Math.cos(p.angle) * rad;
+      zr = Math.sin(p.angle) * rad;
+    }
 
-    // Don't normalize — let combined magnitude vary (0.2–1.6× maxR) for lumpy edges
-    eruptPos[i*3]   = (lx + mx + sx) * maxR;
-    eruptPos[i*3+2] = (lz + mz + sz) * maxR;
+    p.mesh.position.set(xr, p.y, zr);
+    p.mesh.quaternion.copy(_plumeQuat);
+
+    const s = p.size * (1 + f * 2.2);
+    p.mesh.scale.set(s, s, 1);
+
+    // Column no longer fades out early — continuous into crown
+    const fadeIn    = Math.min(1, p.y / 15) * _plumeFadeT;
+    const crownFade = p.isCrown ? Math.min(1, (_plumeCeiling - 85) / 20) : 1;
+    p.mat.opacity   = 0.82 * fadeIn * crownFade;
   }
-  eruptGeo.attributes.position.needsUpdate = true;
 }
+
+// Stub so existing eruption-start code doesn't break
+const ERUPT_COUNT = 1;
+const eruptPhase = new Float32Array(1);
+const eruptSpeed = new Float32Array(1);
+const eruptPos   = new Float32Array(3);
+const ERUPT_MAX_H = 155;
 
 
 scene.add(ashMesh);
@@ -243,7 +262,7 @@ const ashGrowRate  = new Float32Array(ASH_POOL_SIZE);
 const ashLife      = new Float32Array(ASH_POOL_SIZE);
 const ashMaxLife   = new Float32Array(ASH_POOL_SIZE);
 const ashOpacity   = new Float32Array(ASH_POOL_SIZE);
-const ashColors    = [0x333333, 0x444444, 0x555555, 0x3a3020, 0x4a4a4a];
+const ashColors    = [0x606060, 0x707070, 0x787878, 0x686860, 0x686868];
 const ashColorObjs = ashColors.map(c => new THREE.Color(c));
 
 ashMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(ASH_POOL_SIZE * 3), 3);
@@ -360,10 +379,10 @@ function physicsStep(fixedDt) {
   // Speed modifiers
   const sprintActive = false;
 
-  // Compute water level from physicsTime — deterministic, framerate-independent
+  // Compute water level from matchTime — same time domain as waterRiseStart
   let physicsWaterLevel = -0.3;
   if (state.waterRising) {
-    const timeSinceRise = state.physicsTime - state.waterRiseStart;
+    const timeSinceRise = state.matchTime - state.waterRiseStart;
     if (timeSinceRise > 0) {
       let riseProgress;
       if (timeSinceRise < 10) {
@@ -375,7 +394,8 @@ function physicsStep(fixedDt) {
       physicsWaterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3);
     }
   }
-  const isSwimming = state.waterRising && physicsWaterLevel > getTerrainHeight(camera.position.x, camera.position.z) + 0.8;
+  const _playerFeetY = CONFIG.newPhysics ? phys.pos.y : (camera.position.y - state.smoothCameraHeight);
+  const isSwimming = state.waterRising && physicsWaterLevel > _playerFeetY + 0.8;
   // _cW must be < 0.96 (inner wall radius) so standing on the wall top doesn't count
   const _cp = camera.position, _cR = 85, _cW = 0.80;
   const _feetY = CONFIG.newPhysics ? phys.pos.y : (_cp.y - state.smoothCameraHeight);
@@ -675,15 +695,9 @@ function update() {
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
     state.eruptionStartTime = state.matchTime;
-    // Pre-distribute across full column for continuous stream — fade in fast
-    _eruptFadeT = 0;
-    for (let i = 0; i < ERUPT_COUNT; i++) {
-      eruptPhase[i] = Math.random() * Math.PI * 2;
-      eruptSpeed[i] = 16.9 + Math.random() * 8.5;  // +10% again
-      eruptPos[i*3+1] = Math.random() * ERUPT_MAX_H;
-      eruptPos[i*3] = (Math.random()-0.5) * 2;
-      eruptPos[i*3+2] = (Math.random()-0.5) * 2;
-    }
+    // Reset billboard plume for fresh eruption
+    _plumeFadeT = 0; _plumeCeiling = 0;
+    for (const p of _plumeData) { p.y = Math.random() * 5; p.mat.opacity = 0; }
     waterWarning.textContent = '⚠ VOLCANO ERUPTING — WATER RISING IN 15 SECONDS ⚠';
     waterWarning.style.fontSize = '28px';
     waterWarning.classList.add('show');
@@ -756,7 +770,7 @@ function update() {
     state.hazePlane = haze;
   }
 
-  if (state.erupted) updateEruptionPoints(renderDt);
+  if (state.erupted) updatePlume(renderDt);
 
   updateAshClouds(renderDt);
 
@@ -769,8 +783,8 @@ function update() {
     sunMesh.material.color.setHex(dimFactor > 0.6 ? 0xFFEE00 : 0xCC8800);
   }
 
-  if (state.erupted && state.matchTime < eruptionTime + 4 && !state.playerDead) {
-    const shakeIntensity = 0.234 * (1 - (state.matchTime - eruptionTime) / 4);  // +30%
+  if (state.erupted && state.matchTime < eruptionTime + 3 && !state.playerDead) {
+    const shakeIntensity = 0.234 * (1 - (state.matchTime - eruptionTime) / 3);
     state.shakeOffset.set(
       (Math.random() - 0.5) * shakeIntensity,
       (Math.random() - 0.5) * shakeIntensity * 0.5,
@@ -891,6 +905,7 @@ function update() {
   // Smoke
   smokeInst.visible = !state.erupted;
   ashMesh.visible = !state.erupted;
+  if (!state.erupted) _plumeGroup.visible = false;
   for (const s of smokeParticles) {
     const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
     const spread = 1 + riseT * 0.07;
