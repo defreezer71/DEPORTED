@@ -2363,12 +2363,13 @@ function createBot(x, z, name) {
     shootCooldown: 0,
     shootAccuracy: 0.12 + Math.random() * 0.16,
     aggroRange: 30 + Math.random() * 20,
-    ammoTimer: 60,  // arm after 60s then begin shooting
+    ammoTimer: 30,  // arm after 30s then begin shooting
     exitDelay: 0,
     exitedPrison: false,
     velocityY: 0,
     isGrounded: true,
     waypoint: null,
+    fleeTarget: null,
     parts: { body, head, legs: group.children.filter((_, i) => i >= 3 && i <= 4), arms: group.children.filter((_, i) => i >= 5) },
   };
   bots.push(bot);
@@ -2439,136 +2440,104 @@ function updateBots(dt) {
     const dz = camera.position.z - bz;
     const distToPlayer = Math.sqrt(dx * dx + dz * dz);
 
-    // Flee rising water — head uphill toward volcano
-    if (state.waterRising && state.waterLevel > getTerrainHeight(bx, bz) - 1) {
-      bot.moveDir.set(-bx, 0, -bz).normalize(); // Move toward center (volcano)
-      bot.speed = 3;
+    // Arm timer
+    if (!bot.hasAmmo) {
+      bot.ammoTimer -= dt;
+      for (const d of depotCorners) {
+        if (Math.sqrt((bx - d.x) ** 2 + (bz - d.z) ** 2) < 14) { bot.ammoTimer = 0; break; }
+      }
+      if (bot.ammoTimer <= 0) bot.hasAmmo = true;
     }
-    // If has ammo and player is in range — engage (with LOS check)
-    else if (bot.hasAmmo && distToPlayer < bot.aggroRange && !state.playerDead) {
-      // Line of sight check — can bot see player?
+
+    // ── TOP PRIORITY: engage player if in range ──
+    const engaging = bot.hasAmmo && distToPlayer < bot.aggroRange && !state.playerDead;
+    if (engaging) {
+      bot.group.rotation.y = Math.atan2(dx, dz);
       const botEye = new THREE.Vector3(bx, bot.group.position.y + 1.7, bz);
       const toPlayer = new THREE.Vector3(dx, camera.position.y - botEye.y, dz).normalize();
       const losRay = new THREE.Raycaster(botEye, toPlayer, 0, distToPlayer);
-      const losHits = losRay.intersectObjects(collidables, false); // raycaster handles its own BB
-
-      // Also check if shot path passes through volcano terrain
+      const losHits = losRay.intersectObjects(collidables, false);
       let volcanoBlocking = false;
-      {
-        const steps = 20;
-        const stepSize = distToPlayer / steps;
-        for (let s = 1; s < steps; s++) {
-          const t = s * stepSize;
-          const px = botEye.x + toPlayer.x * t;
-          const py = botEye.y + toPlayer.y * t;
-          const pz = botEye.z + toPlayer.z * t;
-          const volH = getVolcanoHeight(px, pz);
-          if (volH > 0.8 && py < volH - 0.1) { volcanoBlocking = true; break; }
-        }
+      const stepSize = distToPlayer / 20;
+      for (let s = 1; s < 20; s++) {
+        const t = s * stepSize;
+        const volH = getVolcanoHeight(botEye.x + toPlayer.x * t, botEye.z + toPlayer.z * t);
+        if (volH > 0.8 && botEye.y + toPlayer.y * t < volH - 0.1) { volcanoBlocking = true; break; }
       }
-
-      const hasLOS = losHits.length === 0 && !volcanoBlocking;
-
-      // Face player
-      bot.group.rotation.y = Math.atan2(dx, dz);
-
-      // Strafe slightly while shooting
-      const strafeDir = new THREE.Vector3(-dz, 0, dx).normalize();
-      bot.moveDir.copy(strafeDir).multiplyScalar(Math.sin(bot.walkPhase) > 0 ? 1 : -1);
-      bot.speed = 1.5;
-
-      // Shoot at player (only if LOS clear)
       bot.shootCooldown -= dt;
-      if (bot.shootCooldown <= 0 && hasLOS) {
-        bot.shootCooldown = 0.8 + Math.random() * 1.5; // Fire every 0.8-2.3 seconds
-        // Accuracy check — distance affects accuracy
-        const hitChance = Math.max(0.08, 0.48 - distToPlayer * 0.005 - bot.shootAccuracy); // 20% better
+      if (bot.shootCooldown <= 0 && losHits.length === 0 && !volcanoBlocking) {
+        bot.shootCooldown = 0.8 + Math.random() * 1.5;
+        const hitChance = Math.max(0.08, 0.48 - distToPlayer * 0.005 - bot.shootAccuracy);
         if (Math.random() < hitChance) {
-          // Hit player
-          const dmg = 8 + Math.floor(Math.random() * 7); // 8-14 damage
-          if (state.armor > 0) {
-            state.armor = Math.max(0, state.armor - dmg);
-          } else {
-            state.hp = Math.max(0, state.hp - dmg);
-          }
+          const dmg = 8 + Math.floor(Math.random() * 7);
+          if (state.armor > 0) { state.armor = Math.max(0, state.armor - dmg); }
+          else { state.hp = Math.max(0, state.hp - dmg); }
           updateHUD();
-          // Flash red vignette
           const dv = document.getElementById('damage-vignette');
           dv.classList.add('show');
           setTimeout(() => dv.classList.remove('show'), 350);
           SFX.hitmarker();
         }
-        // Bot gunshot sound (quieter, distant)
         playNoise(0.06, 0.08 * Math.max(0.2, 1 - distToPlayer / 80), 3000, 'bandpass');
       }
     }
-    // No ammo — wander to waypoints; arm when timer expires or depot is nearby
-    else if (!bot.hasAmmo) {
-      bot.ammoTimer -= dt;
-      for (const d of depotCorners) {
-        if (Math.sqrt((bx - d.x) ** 2 + (bz - d.z) ** 2) < 14) { bot.ammoTimer = 0; break; }
+
+    // ── MOVEMENT: always pick a destination and walk to it ──
+    if (state.waterRising) {
+      // Each bot gets a unique slice of the volcano slope (by index)
+      if (!bot.fleeTarget) {
+        const botIdx = bots.indexOf(bot);
+        const angle = (botIdx / bots.length) * Math.PI * 2;
+        const r = 15 + (botIdx % 5) * 5; // 15-35, 5 distinct rings
+        bot.fleeTarget = { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
       }
-      if (bot.ammoTimer <= 0) {
-        bot.hasAmmo = true;
-      } else {
-        // Pick a new waypoint if we don't have one or we've arrived
-        if (!bot.waypoint || Math.sqrt((bx - bot.waypoint.x) ** 2 + (bz - bot.waypoint.z) ** 2) < 6) {
-          // Spread across whole map — random point heavily biased toward outer half
-          const angle = Math.random() * Math.PI * 2;
-          const r = 50 + Math.random() * 60; // 50–110 units from center
-          bot.waypoint = { x: r * Math.cos(angle), z: r * Math.sin(angle) };
-        }
-        const wpDx = bot.waypoint.x - bx;
-        const wpDz = bot.waypoint.z - bz;
-        bot.moveDir.set(wpDx, 0, wpDz).normalize();
-        bot.speed = 3.5;
+      const arrived = Math.sqrt((bx - bot.fleeTarget.x) ** 2 + (bz - bot.fleeTarget.z) ** 2) < 4;
+      if (arrived) {
+        // Orbit around volcano at current radius once arrived
+        const curAngle = Math.atan2(bz, bx);
+        const orbitR = Math.sqrt(bx * bx + bz * bz) || 20;
+        const nextAngle = curAngle + 0.4;
+        bot.fleeTarget = { x: Math.cos(nextAngle) * orbitR, z: Math.sin(nextAngle) * orbitR };
       }
-    }
-    // Has ammo but player out of range — wander to waypoints
-    else {
+      bot.moveDir.set(bot.fleeTarget.x - bx, 0, bot.fleeTarget.z - bz).normalize();
+      bot.speed = 5;
+      bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
+    } else {
+      // Normal wander — always have a waypoint, never stall
       if (!bot.waypoint || Math.sqrt((bx - bot.waypoint.x) ** 2 + (bz - bot.waypoint.z) ** 2) < 6) {
         const angle = Math.random() * Math.PI * 2;
-        const r = 20 + Math.random() * 90;
-        bot.waypoint = { x: r * Math.cos(angle), z: r * Math.sin(angle) };
+        const r = 40 + Math.random() * 75;
+        bot.waypoint = { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
       }
-      const wpDx = bot.waypoint.x - bx;
-      const wpDz = bot.waypoint.z - bz;
-      bot.moveDir.set(wpDx, 0, wpDz).normalize();
-      bot.speed = 2.5 + Math.random() * 1.5;
+      bot.moveDir.set(bot.waypoint.x - bx, 0, bot.waypoint.z - bz).normalize();
+      bot.speed = engaging ? 2.0 : 3.0;
+      if (!engaging) bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     }
 
     const newX = bx + bot.moveDir.x * bot.speed * dt;
     const newZ = bz + bot.moveDir.z * bot.speed * dt;
 
-    let canMove = true;
-    if (Math.abs(newX) >= half - 12 || Math.abs(newZ) >= half - 12) canMove = false;
-    if (canMove && getVolcanoHeight(newX, newZ) > 18) canMove = false;
+    const atBoundary = Math.abs(newX) >= half - 12 || Math.abs(newZ) >= half - 12;
+    const atVolcano = getVolcanoHeight(newX, newZ) > (state.waterRising ? 40 : 18);
 
-    // When airborne, skip collision so bots fly over canal walls
-    const hitWall = canMove && checkBotCollision(newX, newZ, bot);
-    const distFromCenter = Math.sqrt(bx * bx + bz * bz);
-    const nearCanal = distFromCenter > 76 && distFromCenter < 94;
-    if (!bot.isGrounded) {
-      // airborne — allow horizontal movement regardless of wall collision
-      bot.group.position.x = newX;
-      bot.group.position.z = newZ;
-    } else if (hitWall && nearCanal) {
-      // Hit canal wall — jump over it, keep moving forward
-      bot.velocityY = 9;
-      bot.isGrounded = false;
-      bot.group.position.x = newX;
-      bot.group.position.z = newZ;
-    } else if (hitWall) {
-      // Hit any other obstacle — pick new waypoint away from here
-      bot.waypoint = null;
-      bot.moveDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-    } else if (canMove) {
+    // Detect canal wall crossing geometrically (square canal at r≈85)
+    const CANAL_INNER = 83.5, CANAL_OUTER = 86.5;
+    const maxNow = Math.max(Math.abs(bx), Math.abs(bz));
+    const maxNext = Math.max(Math.abs(newX), Math.abs(newZ));
+    if ((maxNow < CANAL_INNER && maxNext >= CANAL_INNER) ||
+        (maxNow > CANAL_OUTER && maxNext <= CANAL_OUTER)) {
+      if (bot.isGrounded) { bot.velocityY = 9; bot.isGrounded = false; }
+    }
+
+    if (!atBoundary && !atVolcano) {
       bot.group.position.x = newX;
       bot.group.position.z = newZ;
     } else {
-      // Hit map boundary or volcano — pick new direction
-      bot.moveDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-      bot.moveTimer = 1 + Math.random() * 2;
+      // Blocked — immediately pick a new waypoint so bot never stalls
+      const angle = Math.random() * Math.PI * 2;
+      const r = 30 + Math.random() * 50;
+      bot.waypoint = { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
+      bot.fleeTarget = null;
     }
 
     // Jump physics — gravity each frame
@@ -2579,10 +2548,6 @@ function updateBots(dt) {
       bot.group.position.y = th;
       bot.velocityY = 0;
       bot.isGrounded = true;
-    }
-
-    if (!bot.hasAmmo || distToPlayer >= bot.aggroRange || state.playerDead) {
-      bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     }
 
     bot.walkPhase += dt * bot.speed * 3;
