@@ -136,7 +136,7 @@ document.addEventListener('keydown', (e) => {
     case 'KeyA': state.moveLeft = true; break;
     case 'KeyD': state.moveRight = true; break;
     case 'Space':
-      if (state.isGrounded) { state.velocityY = CONFIG.jumpForce; state.isGrounded = false; }
+      if (state.isGrounded && !state.isSwimming) { state.velocityY = CONFIG.jumpForce; state.isGrounded = false; }
       break;
     case 'Digit1':
       if (state.currentWeapon !== 'm4' && !state.reloading && !state.switching) { switchWeapon('m4'); }
@@ -145,7 +145,7 @@ document.addEventListener('keydown', (e) => {
       if (state.currentWeapon !== 'pistol' && !state.reloading && !state.switching) { switchWeapon('pistol'); }
       break;
     case 'KeyR': reload(); break;
-    case 'KeyF': pickupLoot(); break;
+    case 'KeyF': if (!e.repeat) pickupLoot(); break;
     case 'Tab': break; // Don't capture tab
     case 'ShiftLeft': case 'ShiftRight': state.crouching = true; break;
   }
@@ -164,10 +164,10 @@ document.addEventListener('keyup', (e) => {
 document.addEventListener('mousedown', (e) => {
   if (!state.locked) return;
   if (e.button === 0) shoot();
-  if (e.button === 2) { state.ads = true; crosshair.classList.add('ads'); adsVignette.classList.add('active'); }
+  if (e.button === 2) { state.ads = true; crosshair.style.display = 'none'; adsVignette.classList.add('active'); }
 });
 document.addEventListener('mouseup', (e) => {
-  if (e.button === 2) { state.ads = false; crosshair.classList.remove('ads'); adsVignette.classList.remove('active'); }
+  if (e.button === 2) { state.ads = false; crosshair.style.display = ''; adsVignette.classList.remove('active'); }
 });
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 

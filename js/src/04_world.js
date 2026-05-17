@@ -187,9 +187,10 @@ const oakStud   = new THREE.MeshLambertMaterial({ color: 0x18120a }); // iron st
 const dt = pwt + 0.25;   // door thickness 0.85
 const dw = gateHalfW;    // door width 3
 const dh = pwh;           // door height 10
-const fx = -dt / 2 - 0.01; // exterior face x
+// dir: -1 = protrude toward -x (interior face), +1 = protrude toward +x (exterior face)
+function buildDoorFace(door, faceX, dir) {
+  const o = (n) => faceX + dir * n; // offset helper
 
-function buildDoorFace(door) {
   // ── Horizontal rails: top frieze, centre divider, bottom plinth ──
   const railDefs = [
     { cy: dh/2 - 0.52, rh: 0.95 },
@@ -198,25 +199,24 @@ function buildDoorFace(door) {
   ];
   for (const { cy, rh } of railDefs) {
     const rail = new THREE.Mesh(new THREE.BoxGeometry(0.10, rh, dw - 0.02), oakPanel);
-    rail.position.set(fx - 0.05, cy, 0);
+    rail.position.set(o(0.05), cy, 0);
     door.add(rail);
     const raise = new THREE.Mesh(new THREE.BoxGeometry(0.12, rh - 0.18, dw - 0.16), oakFrame);
-    raise.position.set(fx - 0.06, cy, 0);
+    raise.position.set(o(0.06), cy, 0);
     door.add(raise);
-    // Stud row along rail
     const studsZ = 7;
     for (let s = 0; s < studsZ; s++) {
       const sz = -dw/2 + 0.25 + s * ((dw - 0.5) / (studsZ - 1));
       const stud = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.10), oakStud);
-      stud.position.set(fx - 0.09, cy, sz);
+      stud.position.set(o(0.09), cy, sz);
       door.add(stud);
     }
   }
 
-  // ── Vertical stiles (left + right edge strips) ──
+  // ── Vertical stiles ──
   for (const sz of [-1, 1]) {
     const stile = new THREE.Mesh(new THREE.BoxGeometry(0.10, dh, 0.22), oakPanel);
-    stile.position.set(fx - 0.05, 0, sz * (dw/2 - 0.11));
+    stile.position.set(o(0.05), 0, sz * (dw/2 - 0.11));
     door.add(stile);
   }
 
@@ -227,35 +227,28 @@ function buildDoorFace(door) {
   ];
   for (const { cy, ph } of panelDefs) {
     const pw2 = dw - 0.55;
-    // Recessed background
     const bg = new THREE.Mesh(new THREE.BoxGeometry(0.07, ph, pw2), oakPanel);
-    bg.position.set(fx - 0.035, cy, 0);
+    bg.position.set(o(0.035), cy, 0);
     door.add(bg);
-    // Raised inner field
     const field = new THREE.Mesh(new THREE.BoxGeometry(0.10, ph - 0.28, pw2 - 0.28), oakFrame);
-    field.position.set(fx - 0.05, cy, 0);
+    field.position.set(o(0.05), cy, 0);
     door.add(field);
-    // Border molding — top, bottom, left, right strips
     for (const [isH, len, oz, oy] of [
-      [true,  pw2, 0,          ph/2 - 0.09],
-      [true,  pw2, 0,         -ph/2 + 0.09],
-      [false, ph,  pw2/2-0.09, 0           ],
-      [false, ph, -pw2/2+0.09, 0           ],
+      [true,  pw2, 0,           ph/2 - 0.09],
+      [true,  pw2, 0,          -ph/2 + 0.09],
+      [false, ph,  pw2/2-0.09, 0            ],
+      [false, ph, -pw2/2+0.09, 0            ],
     ]) {
-      const mw = isH ? len : 0.12;
-      const mh = isH ? 0.12 : len;
-      const mz = isH ? 0.12 : 0.12;
-      const mol = new THREE.Mesh(new THREE.BoxGeometry(0.12, mh, mw), oakMat);
-      mol.position.set(fx - 0.06, cy + oy, oz);
+      const mol = new THREE.Mesh(new THREE.BoxGeometry(0.12, isH ? 0.12 : len, isH ? len : 0.12), oakMat);
+      mol.position.set(o(0.06), cy + oy, oz);
       door.add(mol);
     }
-    // Stud row along top and bottom of panel
     const ps = 6;
     for (const oy of [ph/2 - 0.09, -ph/2 + 0.09]) {
       for (let s = 0; s < ps; s++) {
         const sz = -pw2/2 + 0.15 + s * ((pw2 - 0.3) / (ps - 1));
         const stud = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), oakStud);
-        stud.position.set(fx - 0.10, cy + oy, sz);
+        stud.position.set(o(0.10), cy + oy, sz);
         door.add(stud);
       }
     }
@@ -269,7 +262,8 @@ gateDoorL.position.set(0, dh / 2, dw / 2);
 gatePivotL.add(gateDoorL);
 scene.add(gatePivotL);
 collidables.push(gateDoorL);
-buildDoorFace(gateDoorL);
+buildDoorFace(gateDoorL, -dt/2 - 0.01, -1); // interior face
+buildDoorFace(gateDoorL, +dt/2 + 0.01, +1); // exterior face
 
 const gateDoorR = new THREE.Mesh(new THREE.BoxGeometry(dt, dh, dw), oakMat);
 const gatePivotR = new THREE.Group();
@@ -278,7 +272,8 @@ gateDoorR.position.set(0, dh / 2, -dw / 2);
 gatePivotR.add(gateDoorR);
 scene.add(gatePivotR);
 collidables.push(gateDoorR);
-buildDoorFace(gateDoorR);
+buildDoorFace(gateDoorR, -dt/2 - 0.01, -1); // interior face
+buildDoorFace(gateDoorR, +dt/2 + 0.01, +1); // exterior face
 let gateOpenProgress = 0;
 
 const towerH = pwh + 3.5;
@@ -414,26 +409,43 @@ towerCorners.forEach(tc => {
   const beamMat  = new THREE.MeshLambertMaterial({ color: 0x2e2c28 });
   const sideMat  = new THREE.MeshLambertMaterial({ color: 0x4a4844 });  // back / sides
 
-  // Canvas texture for the billboard face
-  const _bbCanvas = document.createElement('canvas');
-  _bbCanvas.width = 1024; _bbCanvas.height = 512;
-  const _bbCtx = _bbCanvas.getContext('2d');
-  _bbCtx.fillStyle = '#e8e4d8';
-  _bbCtx.fillRect(0, 0, 1024, 512);
-  _bbCtx.fillStyle = '#1a1a1a';
-  _bbCtx.font = 'bold 108px Arial Black, Arial, sans-serif';
-  _bbCtx.textAlign = 'center';
-  _bbCtx.textBaseline = 'middle';
-  // Scale font down until text fits within 90% of canvas width
-  while (_bbCtx.measureText('YOUR AD HERE').width > 921) {
-    const size = parseInt(_bbCtx.font) - 4;
-    _bbCtx.font = `bold ${size}px Arial Black, Arial, sans-serif`;
+  // ── Billboard canvas helper ──
+  function _drawBBCanvas(canvas, text, bgColor, fgColor, fontBase) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 1024, 512);
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, 1024, 512);
+    ctx.fillStyle = fgColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let size = fontBase;
+    ctx.font = `bold ${size}px "EB Garamond", Georgia, serif`;
+    while (ctx.measureText(text).width > 921) {
+      size -= 4;
+      ctx.font = `bold ${size}px "EB Garamond", Georgia, serif`;
+    }
+    ctx.fillText(text, 512, 256);
   }
-  _bbCtx.fillText('YOUR AD HERE', 512, 256);
-  const _bbTex = new THREE.CanvasTexture(_bbCanvas);
-  const faceMat = new THREE.MeshLambertMaterial({ map: _bbTex });
 
-  function _spawnBillboard(bx, bz, ry) {
+  const _adCanvas  = document.createElement('canvas'); _adCanvas.width  = 1024; _adCanvas.height = 512;
+  const _depCanvas = document.createElement('canvas'); _depCanvas.width = 1024; _depCanvas.height = 512;
+  _drawBBCanvas(_adCanvas,  'YOUR AD HERE', '#e8e4d8', '#1a1a1a', 130);
+  _drawBBCanvas(_depCanvas, 'DEPORTED',     '#141008', '#e2c87e', 154);
+
+  const _adTex  = new THREE.CanvasTexture(_adCanvas);
+  const _depTex = new THREE.CanvasTexture(_depCanvas);
+  const faceMat = new THREE.MeshLambertMaterial({ map: _adTex });
+  const depMat  = new THREE.MeshLambertMaterial({ map: _depTex });
+
+  // Redraw with EB Garamond once the web font is loaded
+  document.fonts.load('bold 128px "EB Garamond"').then(() => {
+    _drawBBCanvas(_adCanvas,  'YOUR AD HERE', '#e8e4d8', '#1a1a1a', 108);
+    _drawBBCanvas(_depCanvas, 'DEPORTED',     '#141008', '#e2c87e', 128);
+    _adTex.needsUpdate  = true;
+    _depTex.needsUpdate = true;
+  });
+
+  function _spawnBillboard(bx, bz, ry, mat) {
     const g = new THREE.Group();
     g.position.set(bx, WALL_TOP, bz);
     g.rotation.y = ry;
@@ -477,7 +489,7 @@ towerCorners.forEach(tc => {
     // Billboard face (facing local +Z = inward toward map)
     const face = new THREE.Mesh(
       new THREE.BoxGeometry(BB_W, BB_H, 0.10),
-      faceMat
+      mat || faceMat
     );
     face.position.set(0, POLE_H + BB_H / 2 + 0.42, 0.16);
     g.add(face);
@@ -486,10 +498,10 @@ towerCorners.forEach(tc => {
   }
 
   const wo = half + ct / 2;  // wall centre offset from map origin (= 131.5)
-  _spawnBillboard(  0,  -wo,   0            );  // North wall — faces south (+Z)
-  _spawnBillboard(  0,   wo,   Math.PI      );  // South wall — faces north (-Z)
-  _spawnBillboard(  wo,   0,  -Math.PI / 2  );  // East wall  — faces west  (-X)
-  _spawnBillboard( -wo,   0,   Math.PI / 2  );  // West wall  — faces east  (+X)
+  _spawnBillboard(  0,  -wo,   0,            depMat  );  // North — DEPORTED
+  _spawnBillboard(  0,   wo,   Math.PI,      faceMat );  // South — YOUR AD HERE
+  _spawnBillboard(  wo,   0,  -Math.PI / 2,  depMat  );  // East  — DEPORTED
+  _spawnBillboard( -wo,   0,   Math.PI / 2,  faceMat );  // West  — YOUR AD HERE
 }
 
 // ═══════════════════════════════════════════════════════════

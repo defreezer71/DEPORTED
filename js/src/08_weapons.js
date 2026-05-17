@@ -38,94 +38,83 @@ function createWeaponModel(type) {
 
   if (type === 'm4') {
 
-    // ── BARREL ──
-    add(Cy(0.013,0.015,0.500,12), mDark,   0, 0.000,-0.590, PI2,0,0);  // main profile
-    add(Cy(0.020,0.020,0.028,12), mMetal,  0, 0.000,-0.645, PI2,0,0);  // gas block
-    add(Cy(0.004,0.004,0.240, 6), mDark,   0, 0.022,-0.512, PI2,0,0);  // gas tube
-    // A2 birdcage flash hider
-    add(Cy(0.018,0.014,0.062, 6), mMetal,  0, 0.000,-0.880, PI2,0,0);
-    add(Cy(0.011,0.011,0.014, 6), mChrome, 0, 0.000,-0.914, PI2,0,0);  // crown
-    for (let t=0;t<5;t++) {
-      const a = t/5*Math.PI*2;
-      add(B(0.006,0.016,0.058), mEdge, Math.cos(a)*0.016, Math.sin(a)*0.016, -0.880, 0,0,a);
+    // ── BARREL (short AK-style, ~300mm) ──
+    add(Cy(0.015,0.017,0.330,10), mDark,   0, 0.000,-0.465, PI2,0,0);  // main barrel
+    add(Cy(0.024,0.024,0.022,10), mMetal,  0, 0.000,-0.520, PI2,0,0);  // gas block
+    add(Cy(0.005,0.005,0.185, 6), mDark,   0, 0.028,-0.445, PI2,0,0);  // gas tube
+    // Krink-style expansion chamber muzzle device
+    add(Cy(0.022,0.016,0.016,10), mMetal,  0, 0.000,-0.628, PI2,0,0);  // rear shoulder
+    add(Cy(0.028,0.028,0.038,10), mMetal,  0, 0.000,-0.650, PI2,0,0);  // expansion body
+    add(Cy(0.020,0.028,0.010,10), mEdge,   0, 0.000,-0.672, PI2,0,0);  // front taper
+    add(Cy(0.014,0.014,0.008, 8), mChrome, 0, 0.000,-0.680, PI2,0,0);  // crown
+
+    // ── HANDGUARD (solid polymer AK-style, no rails) ──
+    add(B(0.052,0.022,0.215), mDark,   0, 0.014,-0.425);
+    add(B(0.056,0.024,0.215), mDark,   0,-0.016,-0.425);
+    for (let s=0; s<4; s++) {
+      add(B(0.006,0.016,0.020), mBlack,  0.029, 0.008,-0.348+s*0.052);
+      add(B(0.006,0.016,0.020), mBlack, -0.029, 0.008,-0.348+s*0.052);
     }
 
-    // ── HANDGUARD (free-float M-LOK 13") ──
-    add(B(0.058,0.058,0.370), mDark,   0, 0.000,-0.500);
-    add(B(0.062,0.012,0.370), mMetal,  0, 0.029,-0.500);   // top Picatinny
-    add(B(0.062,0.012,0.370), mBlack,  0,-0.029,-0.500);   // bottom
-    add(B(0.012,0.058,0.370), mMetal,  0.029, 0.000,-0.500);
-    add(B(0.012,0.058,0.370), mMetal, -0.029, 0.000,-0.500);
-    add(Cy(0.032,0.032,0.022,12), mEdge, 0,0.000,-0.316, PI2,0,0);    // barrel nut ring
-    for (let s=0;s<6;s++) {
-      add(B(0.004,0.014,0.022), mBlack,  0.031, 0.000,-0.360+s*0.056); // M-LOK R
-      add(B(0.004,0.014,0.022), mBlack, -0.031, 0.000,-0.360+s*0.056); // M-LOK L
-    }
-
-    // ── UPPER RECEIVER ──
-    add(B(0.062,0.074,0.245), mDark,   0,-0.012,-0.234);
-    add(B(0.064,0.012,0.245), mMetal,  0, 0.031,-0.234);  // top rail
-    add(B(0.018,0.014,0.040), mMetal,  0, 0.030,-0.160);  // charging handle body
-    add(B(0.034,0.012,0.010), mEdge,   0, 0.028,-0.180);  // T latch
-    add(Cy(0.009,0.009,0.010,8), mMetal, 0.034,-0.006,-0.230, 0,0,PI2); // forward assist
-    add(B(0.005,0.026,0.056), mEdge,   0.033,-0.008,-0.214);  // ejection port
-    add(B(0.003,0.020,0.048), mBlack,  0.034,-0.008,-0.214);  // port shadow
+    // ── UPPER RECEIVER (AK dust cover) ──
+    add(B(0.058,0.026,0.205), mDark,   0, 0.013,-0.215);
+    add(B(0.060,0.008,0.205), mMetal,  0, 0.026,-0.215);   // top surface
+    // Side charging handle (right)
+    add(B(0.006,0.015,0.026), mMetal,  0.034, 0.006,-0.178);
+    add(B(0.018,0.010,0.010), mEdge,   0.044, 0.010,-0.178);
+    // Ejection port
+    add(B(0.005,0.022,0.048), mEdge,   0.033,-0.002,-0.210);
+    add(B(0.003,0.017,0.042), mBlack,  0.034,-0.002,-0.210);
 
     // ── LOWER RECEIVER ──
-    add(B(0.056,0.060,0.200), mDark,   0,-0.060,-0.234);
-    add(B(0.060,0.018,0.030), mMetal,  0,-0.026,-0.122);  // upper-lower junction ledge
-    add(Cy(0.004,0.004,0.064,8), mChrome, 0,-0.028,-0.272, 0,0,PI2); // rear takedown pin
-    add(Cy(0.004,0.004,0.064,8), mChrome, 0,-0.028,-0.170, 0,0,PI2); // front takedown pin
-    add(B(0.058,0.010,0.058), mMetal,  0,-0.086,-0.168);  // trigger guard top
-    add(Cy(0.008,0.008,0.058,8), mMetal, 0,-0.092,-0.168, 0,0,PI2);  // guard bow
-    add(B(0.010,0.028,0.008), mChrome, 0,-0.069,-0.170);  // trigger
-    add(Cy(0.008,0.008,0.008,8), mEdge, -0.030,-0.042,-0.222);        // selector switch
+    add(B(0.056,0.050,0.205), mDark,   0,-0.027,-0.215);
+    add(B(0.060,0.010,0.022), mMetal,  0,-0.002,-0.115);   // upper ledge
+    // AK-style selector lever (right side)
+    add(B(0.005,0.010,0.058), mMetal,  0.034,-0.004,-0.194);
+    add(B(0.005,0.022,0.010), mEdge,   0.034,-0.004,-0.174);
+    // Trigger guard
+    add(B(0.055,0.010,0.052), mMetal,  0,-0.074,-0.166);
+    add(Cy(0.008,0.008,0.055,8), mMetal, 0,-0.080,-0.166, 0,0,PI2);
+    add(B(0.008,0.022,0.007), mChrome, 0,-0.057,-0.166);   // trigger
 
-    // ── PMAG GEN3 ──
-    add(B(0.040,0.168,0.074), mBlack,  0,-0.162,-0.298,-0.14,0,0); // body
-    add(B(0.042,0.012,0.076), mDark,   0,-0.250,-0.306,-0.14,0,0); // base pad
-    add(B(0.044,0.014,0.076), mMetal,  0,-0.086,-0.292);             // mag catch groove
-    add(B(0.042,0.010,0.008), mMetal,  0,-0.148,-0.290,-0.14,0,0); // window stripe 1
-    add(B(0.042,0.010,0.008), mMetal,  0,-0.175,-0.295,-0.14,0,0); // window stripe 2
-    add(B(0.042,0.010,0.008), mMetal,  0,-0.202,-0.300,-0.14,0,0); // window stripe 3
+    // ── CURVED AK MAGAZINE ──
+    add(B(0.042,0.060,0.072), mBlack,  0,-0.106,-0.260, 0.09,0,0);   // top section
+    add(B(0.040,0.062,0.070), mBlack,  0,-0.168,-0.268, 0.19,0,0);   // mid curve
+    add(B(0.040,0.060,0.070), mDark,   0,-0.226,-0.258, 0.27,0,0);   // lower body
+    add(B(0.042,0.013,0.072), mMetal,  0,-0.268,-0.244, 0.27,0,0);   // base pad
+    add(B(0.006,0.175,0.010), mMetal,  0,-0.178,-0.265, 0.16,0,0);   // rear spine rib
+    add(B(0.044,0.010,0.010), mMetal,  0,-0.098,-0.258);              // mag catch groove
 
-    // ── MOE PISTOL GRIP ──
-    add(B(0.040,0.112,0.050), mBlack,  0,-0.136,-0.120,-0.28,0,0);
-    add(B(0.042,0.012,0.052), mDark,   0,-0.200,-0.130,-0.28,0,0); // plug
-    for (let f=0;f<3;f++) add(B(0.044,0.004,0.044), mDark, 0,-0.100+f*-0.026,-0.118,-0.28,0,0);
-    add(B(0.002,0.094,0.044), mEdge,   0.022,-0.134,-0.120,-0.28,0,0); // texture R
-    add(B(0.002,0.094,0.044), mEdge,  -0.022,-0.134,-0.120,-0.28,0,0); // texture L
+    // ── AK PISTOL GRIP ──
+    add(B(0.038,0.094,0.046), mBlack,  0,-0.126,-0.130,-0.30,0,0);
+    add(B(0.040,0.012,0.048), mDark,   0,-0.190,-0.138,-0.30,0,0);
+    for (let f=0;f<3;f++) add(B(0.040,0.004,0.040), mDark, 0,-0.108+f*-0.023,-0.128,-0.30,0,0);
+    add(B(0.002,0.082,0.040), mEdge,   0.021,-0.128,-0.129,-0.30,0,0);
+    add(B(0.002,0.082,0.040), mEdge,  -0.021,-0.128,-0.129,-0.30,0,0);
 
-    // ── CRANE STOCK (6-pos) ──
-    add(Cy(0.020,0.022,0.200,12), mMetal,  0,-0.018,-0.018, PI2,0,0); // buffer tube
-    add(B(0.050,0.064,0.014),     mDark,   0,-0.022,-0.120);           // end plate
-    add(B(0.046,0.058,0.144),     mBlack,  0,-0.020, 0.048);           // stock body
-    add(B(0.048,0.060,0.018),     mEdge,   0,-0.020, 0.120);           // butt pad
-    add(B(0.048,0.010,0.144),     mDark,   0,-0.050, 0.048);           // bottom lug
-    add(B(0.014,0.014,0.010),     mEdge,   0, 0.004, 0.026);           // lock button
+    // ── SKELETON SIDE-FOLDING STOCK (AKS-style) ──
+    add(B(0.016,0.040,0.012), mMetal, -0.028,-0.012,-0.020);  // hinge block
+    add(B(0.008,0.008,0.145), mDark,  -0.028, 0.002, 0.062);  // top arm
+    add(B(0.008,0.008,0.145), mDark,  -0.028,-0.032, 0.062);  // bottom arm
+    add(B(0.008,0.038,0.008), mDark,  -0.028,-0.015, 0.038);  // front brace
+    add(B(0.008,0.038,0.008), mDark,  -0.028,-0.015, 0.092);  // mid brace
+    add(B(0.012,0.064,0.020), mEdge,  -0.028,-0.015, 0.144);  // shoulder plate
 
-    // ── REAR NOTCH SIGHT ──
-    add(B(0.040,0.006,0.010), mChrome,  0, 0.036,-0.138);        // base
-    add(B(0.040,0.022,0.008), mMetal,   0, 0.044,-0.138);        // body
-    add(B(0.012,0.022,0.010), mBlack,   0, 0.044,-0.138);        // notch gap (dark)
-    add(B(0.010,0.022,0.009), mChrome, -0.018, 0.044,-0.138);    // left post
-    add(B(0.010,0.022,0.009), mChrome,  0.018, 0.044,-0.138);    // right post
-    // ── FRONT SIGHT POST ──
-    add(B(0.018,0.006,0.010), mMetal,   0, 0.034,-0.826);        // base wings
-    add(B(0.006,0.006,0.010), mMetal,   0, 0.034,-0.826);        // base block
-    add(B(0.004,0.020,0.004), mChrome,  0, 0.046,-0.826);        // post
+    // ── AK FRONT SIGHT (open U-hood, tapered post) ──
+    add(B(0.034,0.006,0.014), mMetal,  0, 0.031,-0.570);        // base wings
+    add(Cy(0.001,0.004,0.020,4), mChrome, 0, 0.040,-0.570);     // tapered sight post (pointy tip)
+    add(B(0.004,0.020,0.010), mMetal, -0.014, 0.040,-0.570);    // hood left
+    add(B(0.004,0.020,0.010), mMetal,  0.014, 0.040,-0.570);    // hood right
 
+    // ── AK REAR LEAF SIGHT — open U-notch (no leaf body/notch plug so view is clear) ──
+    add(B(0.040,0.006,0.014), mMetal,  0,      0.030,-0.152);   // base
+    add(B(0.010,0.022,0.010), mChrome,-0.018,  0.040,-0.152);   // left ear
+    add(B(0.010,0.022,0.010), mChrome, 0.018,  0.040,-0.152);   // right ear
 
-
-    // ── STUBBY VERTICAL FOREGRIP ──
-    add(B(0.028,0.082,0.024), mBlack,  0,-0.060,-0.512, 0.05,0,0);
-    add(Cy(0.013,0.010,0.016,10), mDark, 0,-0.106,-0.516, 0.05,0,0); // rounded tip
-    add(B(0.026,0.010,0.022), mMetal,  0,-0.026,-0.506);              // rail mount
-
-    // ── MUZZLE FLASH SETUP (M4 only) ──
+    // ── MUZZLE FLASH SETUP ──
     muzzleFlashMats  = [];
     muzzleFlashGroup = new THREE.Group();
-    muzzleFlashGroup.position.set(0, 0, -0.922);
+    muzzleFlashGroup.position.set(0, 0, -0.698);
     muzzleFlashGroup.visible = false;
     weaponGroup.add(muzzleFlashGroup);
     var mkFM = function(col) {
@@ -155,18 +144,18 @@ function createWeaponModel(type) {
     muzzleFlashLight = new THREE.PointLight(0xffcc33, 0, 10);
     muzzleFlashGroup.add(muzzleFlashLight);
 
-    // ── LEFT HAND (foregrip) ──
-    add(B(0.062,0.048,0.048), mGlove,  0,-0.052,-0.490, 0.05,0,0);
-    add(B(0.014,0.040,0.040), mGlvL,  -0.032,-0.046,-0.484, 0.04,0,0); // thumb
-    for (let f=0;f<4;f++) add(B(0.060,0.014,0.034), mGlvL, 0,-0.030+f*-0.020,-0.498, 0.05,0,0);
-    add(B(0.046,0.040,0.120), mSkin,  -0.006,-0.055,-0.392, 0, 0.14,0);
+    // ── LEFT HAND (wrapped around handguard) ──
+    add(B(0.060,0.046,0.050), mGlove,  0,-0.048,-0.450, 0.04,0,0);
+    add(B(0.014,0.038,0.042), mGlvL,  -0.032,-0.042,-0.444, 0.04,0,0); // thumb
+    for (let f=0;f<4;f++) add(B(0.058,0.012,0.036), mGlvL, 0,-0.028+f*-0.018,-0.462, 0.04,0,0);
+    add(B(0.044,0.038,0.118), mSkin,  -0.005,-0.050,-0.368, 0, 0.12,0);
 
-    // ── RIGHT HAND (trigger) ──
-    add(B(0.054,0.066,0.055), mGlove,  0,-0.110,-0.112);
-    add(B(0.014,0.060,0.050), mGlvL,  -0.030,-0.108,-0.110); // thumb
-    add(B(0.012,0.020,0.044), mGlvL,   0.022,-0.074,-0.110); // index on trigger
-    for (let f=0;f<3;f++) add(B(0.052,0.014,0.048), mGlvL, 0,-0.096+f*-0.018,-0.100);
-    add(B(0.046,0.040,0.118), mSkin,  -0.002,-0.083,-0.045, 0,-0.12,0);
+    // ── RIGHT HAND (trigger grip) ──
+    add(B(0.054,0.064,0.055), mGlove,  0,-0.108,-0.113);
+    add(B(0.014,0.058,0.050), mGlvL,  -0.030,-0.106,-0.111); // thumb
+    add(B(0.012,0.018,0.044), mGlvL,   0.022,-0.072,-0.111); // index on trigger
+    for (let f=0;f<3;f++) add(B(0.050,0.012,0.046), mGlvL, 0,-0.093+f*-0.018,-0.102);
+    add(B(0.044,0.038,0.116), mSkin,  -0.001,-0.080,-0.046, 0,-0.10,0);
 
   } else {
     // ── 1911 PISTOL (unchanged) ──
@@ -202,10 +191,13 @@ function createWeaponModel(type) {
     add(Cy(0.020,0.020,0.155,10), metalDark,  0.15,0.004,-0.305+pOff, PI2,0,0);
     for (let r=0;r<6;r++) add(Cy(0.022,0.022,0.006,10), metalMid, 0.15,0.004,-0.238+pOff-r*0.020, PI2,0,0);
     add(Cy(0.020,0.016,0.012,10), metalLight, 0.15,0.004,-0.387+pOff, PI2,0,0);
-    add(B(0.009,0.016,0.007), metalShine, 0.15, 0.027,-0.210+pOff);
-    add(B(0.026,0.013,0.007), metalShine, 0.15, 0.027,-0.005+pOff);
-    add(B(0.006,0.013,0.007), metalDark,  0.143,0.027,-0.005+pOff);
-    add(B(0.006,0.013,0.007), metalDark,  0.157,0.027,-0.005+pOff);
+    // ── REAR SIGHT — open U-notch (near hammer, z≈-0.185) ──
+    add(B(0.028,0.006,0.010), metalDark,  0.15,  0.022,-0.005+pOff);  // base
+    add(B(0.008,0.020,0.010), metalShine, 0.138, 0.032,-0.005+pOff);  // left ear
+    add(B(0.008,0.020,0.010), metalShine, 0.162, 0.032,-0.005+pOff);  // right ear
+    // ── FRONT SIGHT — tapered post (near muzzle, z≈-0.390) ──
+    add(B(0.024,0.005,0.010), metalDark,  0.15,  0.020,-0.210+pOff);  // base
+    add(Cy(0.002,0.004,0.018,4), metalShine, 0.15, 0.031,-0.210+pOff);  // tapered post
     add(B(0.064,0.052,0.072), glove,      0.15,-0.064, 0.002+pOff);
     add(B(0.014,0.048,0.068), gloveLight, 0.130,-0.062, 0.000+pOff);
     add(B(0.052,0.044,0.148), skin,       0.130,-0.064, 0.085+pOff, 0,-0.08,0);

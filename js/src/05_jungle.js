@@ -1,10 +1,51 @@
 // JUNGLE — Trees and Bushes
 // ═══════════════════════════════════════════════════════════
+
+// Depot temple exclusion — matches positions in 07_loot.js
+const _depotClearR2 = 13 * 13; // reduced from 22 — grass grows up to shed edge
+const _depotPos = [
+  [half - 16,  half - 16],
+  [half - 16, -(half - 16)],
+  [-(half - 16), -(half - 16)],
+];
+function _nearDepot(x, z) {
+  for (const [dx, dz] of _depotPos) {
+    const ddx = x - dx, ddz = z - dz;
+    if (ddx * ddx + ddz * ddz < _depotClearR2) return true;
+  }
+  return false;
+}
+
+// Stone cover wall positions — exclusion so nothing spawns inside them
+const _wallPositions = [
+  // Inner 15 — radius ~33–81
+  [  28,   18], [ -32,  -22], [  48,  -38],
+  [ -52,   42], [   4,   52], [   2,  -58],
+  [  62,   12], [ -66,  -14], [  38,   62],
+  [ -42,  -68], [ -60,   48], [  58,  -48],
+  [  22,  -72], [ -26,   74], [  78,  -22],
+  // Outer 10 — radius ~114, tight against the perimeter wall, every 36°
+  [ 114,    0], [  92,   67], [  35,  108],
+  [ -35,  108], [ -92,   67], [-114,    0],
+  [ -92,  -67], [ -35, -108], [  35, -108],
+  [  92,  -67],
+];
+const _wallClearR2 = 3.5 * 3.5;
+function _nearWall(x, z) {
+  for (const [wx, wz] of _wallPositions) {
+    const dx = x - wx, dz = z - wz;
+    if (dx * dx + dz * dz < _wallClearR2) return true;
+  }
+  return false;
+}
+
 function canPlaceAt(x, z) {
   if (getVolcanoHeight(x, z) > 1) return false;
   if (Math.abs(x - prison.x) < pw / 2 + 10 && Math.abs(z - prison.z) < pw / 2 + 10) return false;
   if (Math.abs(x) > half - 12 || Math.abs(z) > half - 12) return false;
   if (isInStream(x, z)) return false;
+  if (_nearDepot(x, z)) return false;
+  if (_nearWall(x, z)) return false;
   return true;
 }
 // Looser version for ground cover — allows placement right up to the wall base
@@ -13,6 +54,8 @@ function canPlaceGround(x, z) {
   if (Math.abs(x - prison.x) < pw / 2 + 3 && Math.abs(z - prison.z) < pw / 2 + 3) return false;
   if (Math.abs(x) > half - 2 || Math.abs(z) > half - 2) return false;
   if (isInCanalWater(x, z)) return false;
+  if (_nearDepot(x, z)) return false;
+  if (_nearWall(x, z)) return false;
   return true;
 }
 
@@ -238,9 +281,10 @@ const _crateTex     = _makeCrateTex();
 
   oakPlaces.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const trunkH = 2.0 + seededRand() * 8.0;
-    const trunkR = 0.28 + seededRand() * 0.36;
     const canopyR = 3.0 + seededRand() * 6.5;
+    // Ensure trunk is tall enough that the sphere bottom stays above player eye height (1.7)
+    const trunkH = Math.max(2.0 + seededRand() * 8.0, canopyR + 1.0);
+    const trunkR = 0.28 + seededRand() * 0.36;
     // Per-tree offset directions for secondary spheres — smaller offset so spheres overlap more
     const offAngle = seededRand() * 6.28;
     const offDist  = canopyR * 0.22;
@@ -397,7 +441,7 @@ const _crateTex     = _makeCrateTex();
   const _fDummy = new THREE.Object3D(), _fCol = new THREE.Color();
   fernPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const s = 1.0 + seededRand() * 1.4;
+    const s = 1.063 + seededRand() * 1.488;
     _fDummy.position.set(x, h, z);
     _fDummy.scale.set(s, s, s);
     _fDummy.rotation.set(0, seededRand()*6.28, 0);
@@ -505,7 +549,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     }
   }
 
-  const stoneMat   = new THREE.MeshLambertMaterial({ color: 0xddd8c4 });
+  const stoneMat   = new THREE.MeshLambertMaterial({ color: 0xBCB8B0 }); // match ammo shed
   const shaftGeo   = new THREE.CylinderGeometry(0.52, 0.63, 1, 8);
   const baseGeo    = new THREE.BoxGeometry(1.61, 0.37, 1.61);
   const capitalGeo = new THREE.BoxGeometry(1.78, 0.32, 1.78);
@@ -638,7 +682,7 @@ const _dirtPatches = [];
     [ 68,  48],   // outer left
     [-68,  48],   // outer right
   ];
-  const bH  = 0.32;   // blade length
+  const bH  = 0.256;  // blade length (20% shorter)
   const bBW = 0.026;  // base half-width
   const bTW = 0.005;  // tip half-width
   const BASE_COL = [0.06, 0.26, 0.04];   // very dark green at soil
@@ -799,3 +843,122 @@ const _dirtPatches = [];
 }
 
 // ═══════════════════════════════════════════════════════════
+
+// ── Roman stone cover walls — 15 scattered waist-high barriers ──
+{
+  const wallMat   = new THREE.MeshBasicMaterial({ color: 0xC8C4BB });
+  const pillarMat = new THREE.MeshBasicMaterial({ color: 0xBEBAB2 });
+
+  const wl = 3.5, wh = 1.29, wt = 0.55; // wh = 1.12 * 1.15
+  const pw = 0.46, ph = wh + 0.20;
+
+  const walls = _wallPositions.map(([wx, wz], i) => {
+    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW'];
+    return [wx, wz, facings[i]];
+  });
+
+  for (const [wx, wz, facing] of walls) {
+    // Skip canPlaceAt — it excludes _nearWall positions. Use direct checks instead.
+    if (getVolcanoHeight(wx, wz) > 1) continue;
+    if (Math.abs(wx) > half - 12 || Math.abs(wz) > half - 12) continue;
+    const isEW = facing === 'EW';
+    const h = getTerrainHeight(wx, wz);
+
+    const wallGeo = isEW
+      ? new THREE.BoxGeometry(wl, wh, wt)
+      : new THREE.BoxGeometry(wt, wh, wl);
+    const wall = new THREE.Mesh(wallGeo, wallMat);
+    wall.position.set(wx, h + wh / 2, wz);
+    scene.add(wall);
+    collidables.push(wall);
+
+    for (const gy of [0.35, 0.72]) {
+      const lineGeo = isEW
+        ? new THREE.BoxGeometry(wl + 0.02, 0.04, wt + 0.02)
+        : new THREE.BoxGeometry(wt + 0.02, 0.04, wl + 0.02);
+      const line = new THREE.Mesh(lineGeo, pillarMat);
+      line.position.set(wx, h + gy, wz);
+      scene.add(line);
+    }
+
+    for (const s of [-1, 1]) {
+      const ex = isEW ? wx + s * (wl / 2 + pw / 2) : wx;
+      const ez = isEW ? wz : wz + s * (wl / 2 + pw / 2);
+      const eh = getTerrainHeight(ex, ez);
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pw), pillarMat);
+      pillar.position.set(ex, eh + ph / 2, ez);
+      scene.add(pillar);
+      collidables.push(pillar);
+    }
+  }
+}
+
+// ── Canal-top grass — both inner AND outer wall top edges, matching ground grass look ──
+{
+  const CANAL_TOP_Y = 0.847;  // matches terrain.js canalH
+  const INNER_EDGE  = 83.75;  // CANAL_R(85) - canalOuter(1.25)
+  const OUTER_EDGE  = 86.25;  // CANAL_R(85) + canalOuter(1.25)
+  const SPACING     = 1.1;
+
+  // Ground grass palette — same as the grassPalette above so blades match
+  const cgPalette = [
+    new THREE.Color(0.55, 0.92, 0.28),
+    new THREE.Color(0.38, 0.72, 0.18),
+    new THREE.Color(0.28, 0.58, 0.12),
+    new THREE.Color(0.48, 0.85, 0.22),
+    new THREE.Color(0.32, 0.65, 0.14),
+  ];
+
+  // Same blade geometry as ground grass (BLADES=3, same bH/bBW/bTW)
+  const BLADES = 3, bH = 0.38, bBW = 0.052, bTW = 0.016;
+  const _cp = new Float32Array(BLADES*4*3), _cc = new Float32Array(BLADES*4*3), _ci = [];
+  // White vertex colors — instance color provides the actual hue variation
+  for (let b = 0; b < BLADES; b++) {
+    const vi = b*4, ang = (b/BLADES)*Math.PI;
+    const px = Math.cos(ang), pz = Math.sin(ang);
+    const lean = 0.18 + (b/BLADES)*0.12;
+    const tx = Math.sin(lean)*px*bH, ty = Math.cos(lean)*bH, tz = Math.sin(lean)*pz*bH;
+    [[-bBW*px,0,-bBW*pz],[bBW*px,0,bBW*pz],[tx-bTW*px,ty,tz-bTW*pz],[tx+bTW*px,ty,tz+bTW*pz]]
+      .forEach(([vx,vy,vz],k) => {
+        const pi=(vi+k)*3, isBase=k<2;
+        _cp[pi]=vx; _cp[pi+1]=vy; _cp[pi+2]=vz;
+        // base half-brightness so instanceColor controls the final shade
+        _cc[pi]=isBase?0.35:0.85; _cc[pi+1]=isBase?0.35:0.85; _cc[pi+2]=isBase?0.35:0.85;
+      });
+    _ci.push(vi,vi+1,vi+2, vi+1,vi+3,vi+2);
+  }
+  const cgGeo = new THREE.BufferGeometry();
+  cgGeo.setAttribute('position', new THREE.BufferAttribute(_cp, 3));
+  cgGeo.setAttribute('color',    new THREE.BufferAttribute(_cc, 3));
+  cgGeo.setIndex(_ci);
+  const cgMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+
+  // Both inner and outer edges, all 4 sides
+  const cgPos = [];
+  const hlen = INNER_EDGE - 0.1;
+  for (let t = -hlen; t <= hlen; t += SPACING) {
+    for (const edge of [INNER_EDGE, OUTER_EDGE]) {
+      cgPos.push([ t,     CANAL_TOP_Y, -edge ]);  // south
+      cgPos.push([ t,     CANAL_TOP_Y,  edge ]);  // north
+      cgPos.push([ edge,  CANAL_TOP_Y,  t    ]);  // east
+      cgPos.push([-edge,  CANAL_TOP_Y,  t    ]);  // west
+    }
+  }
+
+  const cgInst = new THREE.InstancedMesh(cgGeo, cgMat, cgPos.length);
+  cgInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cgPos.length*3), 3);
+  const _cgD = new THREE.Object3D(), _cgC = new THREE.Color();
+  cgPos.forEach(([px, py, pz], i) => {
+    _cgD.position.set(px, py, pz);
+    _cgD.rotation.y = (i * 2.399) % (Math.PI * 2);  // golden-angle spread
+    const sc = 0.82 + (Math.abs(Math.sin(i*7.3)) * 0.35);
+    _cgD.scale.set(sc, sc * (0.9 + Math.abs(Math.sin(i*3.1))*0.2), sc);
+    _cgD.updateMatrix();
+    cgInst.setMatrixAt(i, _cgD.matrix);
+    _cgC.copy(cgPalette[i % cgPalette.length]);
+    cgInst.setColorAt(i, _cgC);
+  });
+  cgInst.instanceMatrix.needsUpdate = true;
+  cgInst.instanceColor.needsUpdate  = true;
+  scene.add(cgInst);
+}

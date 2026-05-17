@@ -224,6 +224,7 @@ function switchWeapon(toWeapon) {
   setTimeout(() => {
     state.currentWeapon = toWeapon;
     createWeaponModel(toWeapon);
+    crosshair.classList.toggle('weapon-pistol', toWeapon === 'pistol');
     state.switchPhase = 'up';
     updateHUD();
     // Weapon comes back up

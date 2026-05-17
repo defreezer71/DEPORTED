@@ -877,16 +877,18 @@ function update() {
   state.nearbyLoot = null;
   let closestDist = 2.5;
   const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+  const _lootWP = new THREE.Vector3();
   const allLootSources = [...lootItems, ...depotCrates];
   for (const loot of allLootSources) {
-    const dx = loot.position.x - camera.position.x;
-    const dz = loot.position.z - camera.position.z;
+    loot.getWorldPosition(_lootWP);
+    const dx = _lootWP.x - camera.position.x;
+    const dz = _lootWP.z - camera.position.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist > closestDist) continue;
     if (loot.userData.depot) {
-      const { shedX, shedZ, shedHW, shedHD } = loot.userData;
-      if (Math.abs(camera.position.x - shedX) > shedHW ||
-          Math.abs(camera.position.z - shedZ) > shedHD) continue;
+      const { shedX, shedZ } = loot.userData;
+      const sdx = camera.position.x - shedX, sdz = camera.position.z - shedZ;
+      if (Math.sqrt(sdx * sdx + sdz * sdz) > 12) continue;
     }
     const toLoot = new THREE.Vector3(dx, 0, dz).normalize();
     const dot = lookDir.x * toLoot.x + lookDir.z * toLoot.z;
@@ -1007,7 +1009,8 @@ function update() {
   } else if (state.reloadPhase === 'up' || state.switchPhase === 'up') {
     targetPos = restPos.clone();
   } else if (state.ads) {
-    targetPos = new THREE.Vector3(0, -0.15, restPos.z - 0.05);
+    const adsX = state.currentWeapon === 'm4' ? 0 : -0.15;
+    targetPos = new THREE.Vector3(adsX, -0.04, restPos.z + 0.06);
   } else {
     targetPos = restPos.clone();
     if (isMoving) {
