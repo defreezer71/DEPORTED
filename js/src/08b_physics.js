@@ -100,6 +100,25 @@ function _depenetrate(pos, radius, height) {
     }
   }
 
+  // OBB depenetration — local center stored in shed-local space; Three.js inverse used.
+  // Three.js Y-rotation: world = shed + R*local  where R=[[cosR,sinR],[-sinR,cosR]]
+  // Inverse:            local = R^T*(world-shed) = [[cosR,-sinR],[sinR,cosR]]*(world-shed)
+  for (const obb of obbCollidables) {
+    if (obb.maxY <= pos.y || obb.minY >= pos.y + height) continue;
+    const dx = pos.x - obb.shedX;
+    const dz = pos.z - obb.shedZ;
+    const lx = (dx * obb.cosR - dz * obb.sinR) - obb.lcx;
+    const lz = (dx * obb.sinR + dz * obb.cosR) - obb.lcz;
+    const ox = obb.hx + radius - Math.abs(lx);
+    const oz = obb.hz + radius - Math.abs(lz);
+    if (ox <= 0 || oz <= 0) continue;
+    let pushLX = 0, pushLZ = 0;
+    if (ox < oz) { pushLX = ox * Math.sign(lx || 1); }
+    else          { pushLZ = oz * Math.sign(lz || 1); }
+    // R * push_local: world_x += cosR*pushLX + sinR*pushLZ
+    pos.x += pushLX * obb.cosR + pushLZ * obb.sinR;
+    pos.z += -pushLX * obb.sinR + pushLZ * obb.cosR;
+  }
 }
 
 // ── Horizontal sweep-and-slide ──
@@ -142,6 +161,33 @@ function _moveHorizontal(pos, deltaX, deltaZ, radius, height, stepHeight) {
       hitNX  = isStep ? 0 : hit.nx;
       hitNZ  = isStep ? 0 : hit.nz;
       if (isStep) stepUpY = Math.max(stepUpY, bbTop);
+    }
+
+    // OBB sweep — local center in shed space; Three.js inverse used (same as depenetrate)
+    for (const obb of obbCollidables) {
+      const bbTop = obb.maxY, bbBot = obb.minY;
+      const heightAboveFeet = bbTop - pos.y;
+      const couldStepO = heightAboveFeet > 0 && heightAboveFeet <= stepHeight;
+      const yOverlapO = !couldStepO && bbTop > pos.y + 0.01 && bbBot < pos.y + height - 0.01;
+      if (!yOverlapO && !couldStepO) continue;
+      const dx = pos.x - obb.shedX;
+      const dz = pos.z - obb.shedZ;
+      const lx  = (dx * obb.cosR - dz * obb.sinR) - obb.lcx;
+      const lz  = (dx * obb.sinR + dz * obb.cosR) - obb.lcz;
+      const ldx = rx * obb.cosR - rz * obb.sinR;
+      const ldz = rx * obb.sinR + rz * obb.cosR;
+      const hit = _sweep2D(lx, lz, ldx, ldz, -obb.hx, obb.hx, -obb.hz, obb.hz);
+      if (!hit || hit.t >= tMin) continue;
+      tMin = hit.t;
+      isStep = couldStepO;
+      if (isStep) {
+        hitNX = 0; hitNZ = 0;
+        stepUpY = Math.max(stepUpY, bbTop);
+      } else {
+        // R * local_normal: world_x = cosR*nx + sinR*nz
+        hitNX = hit.nx * obb.cosR + hit.nz * obb.sinR;
+        hitNZ = -hit.nx * obb.sinR + hit.nz * obb.cosR;
+      }
     }
 
     // Advance to contact point, pulled back by SKIN_WIDTH to avoid flush contact

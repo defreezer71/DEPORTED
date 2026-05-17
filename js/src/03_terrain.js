@@ -103,17 +103,17 @@ for (let i = 0; i < gPosAttr.count; i++) {
     const basaltR = 0.10 + surf * 0.5;
     const basaltG = 0.07 + surf * 0.3;
     const basaltB = 0.06 + surf * 0.2;
-    const rustR   = 0.23 + surf * 1.1;
-    const rustG   = 0.13 + surf * 0.55;
-    const rustB   = 0.04 + surf * 0.15;
-    // Upper zone: dark volcanic red — deep crimson rock near the summit
-    const ashR    = 0.52 + rough * 0.5 + strata * 0.8;
-    const ashG    = 0.10 + rough * 0.2 + strata * 0.3;
-    const ashB    = 0.06 + rough * 0.1 + strata * 0.2;
-    // Crater rim: very dark red-black
-    const rimR    = 0.28 + rough * 0.6;
-    const rimG    = 0.06 + rough * 0.2;
-    const rimB    = 0.04 + rough * 0.1;
+    const rustR   = 0.15 + surf * 0.715;
+    const rustG   = 0.085 + surf * 0.36;
+    const rustB   = 0.026 + surf * 0.098;
+    // Upper zone: dark volcanic red — deep crimson rock near the summit (35% darker)
+    const ashR    = 0.34 + rough * 0.325 + strata * 0.52;
+    const ashG    = 0.065 + rough * 0.13 + strata * 0.195;
+    const ashB    = 0.039 + rough * 0.065 + strata * 0.13;
+    // Crater rim: very dark red-black (35% darker)
+    const rimR    = 0.18 + rough * 0.39;
+    const rimG    = 0.039 + rough * 0.13;
+    const rimB    = 0.026 + rough * 0.065;
     r = basaltR + (rustR - basaltR) * rustBlend + (ashR - rustR) * ashBlend + (rimR - ashR) * rimBlend;
     g = basaltG + (rustG - basaltG) * rustBlend + (ashG - rustG) * ashBlend + (rimG - ashG) * rimBlend;
     b = basaltB + (rustB - basaltB) * rustBlend + (ashB - rustB) * ashBlend + (rimB - ashB) * rimBlend;
@@ -156,7 +156,7 @@ scene.add(ground);
 // ── Raised canal — square corners, axis-aligned sides ──
 {
   const CANAL_R    = 85;
-  const canalH     = 0.77;
+  const canalH     = 0.847; // +10%
   const canalOuter = 1.25;
   const wallThick  = 0.29;
   const canalInner = canalOuter - wallThick;
@@ -344,7 +344,7 @@ scene.add(crater);
 // ── Instanced Smoke — 1 draw call for all volcano smoke puffs ──
 const SMOKE_COUNT = 18;
 const smokeGeo = new THREE.SphereGeometry(1, 7, 6); // unit sphere, scaled per instance
-const smokeMat = new THREE.MeshBasicMaterial({ color: 0x999999, transparent: true, opacity: 0.22 });
+const smokeMat = new THREE.MeshBasicMaterial({ color: 0x6b4a28, transparent: true, opacity: 0.30 });
 const smokeInst = new THREE.InstancedMesh(smokeGeo, smokeMat, SMOKE_COUNT);
 smokeInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 scene.add(smokeInst);

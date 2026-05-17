@@ -36,52 +36,122 @@ scene.fog = new THREE.FogExp2(0x4a9fe8, 0.0018);
   scene.add(window.skyDome);
 }
 
-// ── Clouds — instanced cross-billboard quads with procedural canvas texture ──
+// ── Clouds — wispy horizontal streaks ──
 {
+  // 512×96 canvas: elongated streak with feathery edges
   const cc = document.createElement('canvas');
-  cc.width = cc.height = 256;
+  cc.width = 512; cc.height = 96;
   const cx = cc.getContext('2d');
-  [ [128,115,88], [72,145,58], [178,125,62], [105,80,52], [158,158,68] ]
-    .forEach(([bx, by, br]) => {
-      const g = cx.createRadialGradient(bx, by, 0, bx, by, br);
-      g.addColorStop(0,   'rgba(255,255,255,0.88)');
-      g.addColorStop(0.45,'rgba(235,245,255,0.42)');
-      g.addColorStop(1,   'rgba(255,255,255,0)');
-      cx.fillStyle = g;
-      cx.fillRect(0, 0, 256, 256);
-    });
+
+  // Spread overlapping soft blobs horizontally to form one long wispy streak
+  [
+    [256, 48, 210, 52, 0.90],
+    [130, 46, 140, 36, 0.72],
+    [385, 50, 130, 34, 0.68],
+    [ 60, 50,  80, 28, 0.45],
+    [450, 46,  70, 26, 0.42],
+    [200, 44,  90, 30, 0.55],
+    [320, 52,  85, 28, 0.50],
+  ].forEach(([bx, by, rx, ry, a]) => {
+    // Simulate elliptical gradient by scaling context
+    cx.save();
+    cx.translate(bx, by);
+    cx.scale(1, ry / rx);
+    const g = cx.createRadialGradient(0, 0, 0, 0, 0, rx);
+    g.addColorStop(0,    `rgba(255,255,255,${a})`);
+    g.addColorStop(0.38, `rgba(248,252,255,${(a * 0.55).toFixed(2)})`);
+    g.addColorStop(0.70, `rgba(240,248,255,${(a * 0.18).toFixed(2)})`);
+    g.addColorStop(1,    'rgba(255,255,255,0)');
+    cx.fillStyle = g;
+    cx.fillRect(-rx, -rx * (rx / ry), rx * 2, rx * 2 * (rx / ry));
+    cx.restore();
+  });
+
+  // Bright horizontal centre line to add the crisp streak look
+  const sl = cx.createLinearGradient(0, 0, 0, 96);
+  sl.addColorStop(0,    'rgba(255,255,255,0)');
+  sl.addColorStop(0.38, 'rgba(255,255,255,0.28)');
+  sl.addColorStop(0.50, 'rgba(255,255,255,0.48)');
+  sl.addColorStop(0.62, 'rgba(255,255,255,0.28)');
+  sl.addColorStop(1,    'rgba(255,255,255,0)');
+  cx.fillStyle = sl;
+  cx.fillRect(55, 0, 400, 96);
+
   const cloudTex = new THREE.CanvasTexture(cc);
   const cloudMat = new THREE.MeshBasicMaterial({
-    map: cloudTex, transparent: true, opacity: 0.82,
+    map: cloudTex, transparent: true, opacity: 0.88,
     depthWrite: false, side: THREE.DoubleSide, fog: false
   });
 
-  const CLOUD_COUNT = 30;
-  const cloudInst = new THREE.InstancedMesh(
-    new THREE.PlaneGeometry(1, 1), cloudMat, CLOUD_COUNT * 2
+  // Wispy streak clouds — spread wider
+  const STREAK_COUNT = 10;
+  const strkInst = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1), cloudMat, STREAK_COUNT
   );
-  cloudInst.renderOrder = 1;  // render after sun so clouds layer in front
+  strkInst.renderOrder = 1;
   const _cd = new THREE.Object3D();
-  let ci = 0;
-  for (let i = 0; i < CLOUD_COUNT; i++) {
+  for (let i = 0; i < STREAK_COUNT; i++) {
     const angle  = seededRand() * Math.PI * 2;
-    const radius = 170 + seededRand() * 280;
+    const radius = seededRand() * 200;         // stay over / near the island
     const cx2    = Math.cos(angle) * radius;
     const cz2    = Math.sin(angle) * radius;
-    const cy2    = 110 + seededRand() * 140;
-    const cw     = 80 + seededRand() * 130;
-    const ch     = 20 + seededRand() * 30;
+    const cy2    = 220 + seededRand() * 80;    // high enough that long contrails never appear to dive into terrain
+    const cw     = 200 + seededRand() * 300;    // long contrail-style streaks
+    const ch     = 14  + seededRand() * 22;
+    const yRot   = seededRand() * Math.PI;
+    _cd.position.set(cx2, cy2, cz2);
+    _cd.scale.set(cw, ch, 1);
+    _cd.rotation.set(-Math.PI / 2, 0, yRot); // perfectly flat; Z-spin = compass direction in world XZ
+    _cd.updateMatrix();
+    strkInst.setMatrixAt(i, _cd.matrix);
+  }
+  strkInst.instanceMatrix.needsUpdate = true;
+  scene.add(strkInst);
+
+  // ── Round/puffy cumulus clouds — separate texture and mesh ──
+  const rc = document.createElement('canvas');
+  rc.width = rc.height = 256;
+  const rx = rc.getContext('2d');
+  [ [128,128,105], [80,110,72], [170,120,68], [95,148,60], [155,95,58], [128,80,50] ]
+    .forEach(([bx, by, br]) => {
+      const g = rx.createRadialGradient(bx, by, 0, bx, by, br);
+      g.addColorStop(0,    'rgba(255,255,255,0.92)');
+      g.addColorStop(0.40, 'rgba(245,250,255,0.58)');
+      g.addColorStop(0.72, 'rgba(235,245,255,0.22)');
+      g.addColorStop(1,    'rgba(255,255,255,0)');
+      rx.fillStyle = g; rx.fillRect(0, 0, 256, 256);
+    });
+  const puffTex = new THREE.CanvasTexture(rc);
+  const puffMat = new THREE.MeshBasicMaterial({
+    map: puffTex, transparent: true, opacity: 0.80,
+    depthWrite: false, side: THREE.DoubleSide, fog: false
+  });
+
+  const PUFF_COUNT = 10;
+  const puffInst = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1), puffMat, PUFF_COUNT * 2
+  );
+  puffInst.renderOrder = 1;
+  let pi = 0;
+  for (let i = 0; i < PUFF_COUNT; i++) {
+    const angle  = (i / PUFF_COUNT) * Math.PI * 2 + seededRand() * 0.5; // evenly spaced angles
+    const radius = 40 + seededRand() * 580;
+    const cx2    = Math.cos(angle) * radius;
+    const cz2    = Math.sin(angle) * radius;
+    const cy2    = 95 + seededRand() * 100;
+    const cw     = (55 + seededRand() * 80) * 1.2;   // 20% larger
+    const ch     = (40 + seededRand() * 55) * 1.2;
     const yRot   = seededRand() * Math.PI;
     for (const ao of [0, 1]) {
       _cd.position.set(cx2, cy2, cz2);
       _cd.scale.set(cw, ch, 1);
       _cd.rotation.set(0, yRot + ao * Math.PI * 0.5, 0);
       _cd.updateMatrix();
-      cloudInst.setMatrixAt(ci++, _cd.matrix);
+      puffInst.setMatrixAt(pi++, _cd.matrix);
     }
   }
-  cloudInst.instanceMatrix.needsUpdate = true;
-  scene.add(cloudInst);
+  puffInst.instanceMatrix.needsUpdate = true;
+  scene.add(puffInst);
 }
 
 // Sun

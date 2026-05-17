@@ -2361,10 +2361,14 @@ function createBot(x, z, name) {
     speed: 1.5 + Math.random() * 1.5,
     walkPhase: Math.random() * 6.28,
     shootCooldown: 0,
-    shootAccuracy: 0.12 + Math.random() * 0.16, // 20% better (was 0.15+0.20)
+    shootAccuracy: 0.12 + Math.random() * 0.16,
     aggroRange: 30 + Math.random() * 20,
+    ammoTimer: 60,  // arm after 60s then begin shooting
     exitDelay: 0,
     exitedPrison: false,
+    velocityY: 0,
+    isGrounded: true,
+    waypoint: null,
     parts: { body, head, legs: group.children.filter((_, i) => i >= 3 && i <= 4), arms: group.children.filter((_, i) => i >= 5) },
   };
   bots.push(bot);
@@ -2498,35 +2502,39 @@ function updateBots(dt) {
         playNoise(0.06, 0.08 * Math.max(0.2, 1 - distToPlayer / 80), 3000, 'bandpass');
       }
     }
-    // No ammo — navigate to nearest Roman ammo shed to arm up
+    // No ammo — wander to waypoints; arm when timer expires or depot is nearby
     else if (!bot.hasAmmo) {
-      let nearestDepot = null, nearestDepotDist = Infinity;
+      bot.ammoTimer -= dt;
       for (const d of depotCorners) {
-        const ld = Math.sqrt((bx - d.x) ** 2 + (bz - d.z) ** 2);
-        if (ld < nearestDepotDist) { nearestDepotDist = ld; nearestDepot = d; }
+        if (Math.sqrt((bx - d.x) ** 2 + (bz - d.z) ** 2) < 14) { bot.ammoTimer = 0; break; }
       }
-      if (nearestDepot && nearestDepotDist > 10) {
-        bot.moveDir.set(nearestDepot.x - bx, 0, nearestDepot.z - bz).normalize();
-        bot.speed = 2.8;
-      } else if (nearestDepot && nearestDepotDist <= 10) {
-        bot.hasAmmo = true;  // arrived at shed — armed
+      if (bot.ammoTimer <= 0) {
+        bot.hasAmmo = true;
       } else {
-        bot.moveTimer -= dt;
-        if (bot.moveTimer <= 0) {
-          bot.moveDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-          bot.moveTimer = 2 + Math.random() * 5;
+        // Pick a new waypoint if we don't have one or we've arrived
+        if (!bot.waypoint || Math.sqrt((bx - bot.waypoint.x) ** 2 + (bz - bot.waypoint.z) ** 2) < 6) {
+          // Spread across whole map — random point heavily biased toward outer half
+          const angle = Math.random() * Math.PI * 2;
+          const r = 50 + Math.random() * 60; // 50–110 units from center
+          bot.waypoint = { x: r * Math.cos(angle), z: r * Math.sin(angle) };
         }
-        bot.speed = 2;
+        const wpDx = bot.waypoint.x - bx;
+        const wpDz = bot.waypoint.z - bz;
+        bot.moveDir.set(wpDx, 0, wpDz).normalize();
+        bot.speed = 3.5;
       }
     }
-    // Has ammo but player out of range — wander
+    // Has ammo but player out of range — wander to waypoints
     else {
-      bot.moveTimer -= dt;
-      if (bot.moveTimer <= 0) {
-        bot.moveDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-        bot.moveTimer = 2 + Math.random() * 5;
-        bot.speed = 1.5 + Math.random() * 1.5;
+      if (!bot.waypoint || Math.sqrt((bx - bot.waypoint.x) ** 2 + (bz - bot.waypoint.z) ** 2) < 6) {
+        const angle = Math.random() * Math.PI * 2;
+        const r = 20 + Math.random() * 90;
+        bot.waypoint = { x: r * Math.cos(angle), z: r * Math.sin(angle) };
       }
+      const wpDx = bot.waypoint.x - bx;
+      const wpDz = bot.waypoint.z - bz;
+      bot.moveDir.set(wpDx, 0, wpDz).normalize();
+      bot.speed = 2.5 + Math.random() * 1.5;
     }
 
     const newX = bx + bot.moveDir.x * bot.speed * dt;
@@ -2535,18 +2543,44 @@ function updateBots(dt) {
     let canMove = true;
     if (Math.abs(newX) >= half - 12 || Math.abs(newZ) >= half - 12) canMove = false;
     if (canMove && getVolcanoHeight(newX, newZ) > 18) canMove = false;
-    if (canMove && checkBotCollision(newX, newZ, bot)) canMove = false;
 
-    if (canMove) {
+    // When airborne, skip collision so bots fly over canal walls
+    const hitWall = canMove && checkBotCollision(newX, newZ, bot);
+    const distFromCenter = Math.sqrt(bx * bx + bz * bz);
+    const nearCanal = distFromCenter > 76 && distFromCenter < 94;
+    if (!bot.isGrounded) {
+      // airborne — allow horizontal movement regardless of wall collision
+      bot.group.position.x = newX;
+      bot.group.position.z = newZ;
+    } else if (hitWall && nearCanal) {
+      // Hit canal wall — jump over it, keep moving forward
+      bot.velocityY = 9;
+      bot.isGrounded = false;
+      bot.group.position.x = newX;
+      bot.group.position.z = newZ;
+    } else if (hitWall) {
+      // Hit any other obstacle — pick new waypoint away from here
+      bot.waypoint = null;
+      bot.moveDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+    } else if (canMove) {
       bot.group.position.x = newX;
       bot.group.position.z = newZ;
     } else {
+      // Hit map boundary or volcano — pick new direction
       bot.moveDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
       bot.moveTimer = 1 + Math.random() * 2;
     }
 
+    // Jump physics — gravity each frame
+    bot.velocityY -= 22 * dt;
+    bot.group.position.y += bot.velocityY * dt;
     const th = getGroundHeight(bot.group.position.x, bot.group.position.z);
-    bot.group.position.y += (th - bot.group.position.y) * Math.min(1, dt * 18);
+    if (bot.group.position.y <= th) {
+      bot.group.position.y = th;
+      bot.velocityY = 0;
+      bot.isGrounded = true;
+    }
+
     if (!bot.hasAmmo || distToPlayer >= bot.aggroRange || state.playerDead) {
       bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     }
