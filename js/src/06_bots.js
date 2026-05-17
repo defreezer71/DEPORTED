@@ -203,25 +203,19 @@ function updateBots(dt) {
         playNoise(0.06, 0.08 * Math.max(0.2, 1 - distToPlayer / 80), 3000, 'bandpass');
       }
     }
-    // No ammo — seek loot
+    // No ammo — navigate to nearest Roman ammo shed to arm up
     else if (!bot.hasAmmo) {
-      let nearestLoot = null, nearestDist = Infinity;
-      for (const loot of lootItems) {
-        if (loot.userData.lootType !== 'ammo_m4' && loot.userData.lootType !== 'ammo_pistol') continue;
-        const ld = Math.sqrt((bx - loot.position.x) ** 2 + (bz - loot.position.z) ** 2);
-        if (ld < nearestDist) { nearestDist = ld; nearestLoot = loot; }
+      let nearestDepot = null, nearestDepotDist = Infinity;
+      for (const d of depotCorners) {
+        const ld = Math.sqrt((bx - d.x) ** 2 + (bz - d.z) ** 2);
+        if (ld < nearestDepotDist) { nearestDepotDist = ld; nearestDepot = d; }
       }
-      if (nearestLoot && nearestDist > 2) {
-        bot.moveDir.set(nearestLoot.position.x - bx, 0, nearestLoot.position.z - bz).normalize();
-        bot.speed = 2.5;
-      } else if (nearestLoot && nearestDist <= 2) {
-        // Pick up ammo
-        bot.hasAmmo = true;
-        scene.remove(nearestLoot); nearestLoot.geometry.dispose(); nearestLoot.material.dispose();
-        const idx = lootItems.indexOf(nearestLoot);
-        if (idx >= 0) lootItems.splice(idx, 1);
+      if (nearestDepot && nearestDepotDist > 10) {
+        bot.moveDir.set(nearestDepot.x - bx, 0, nearestDepot.z - bz).normalize();
+        bot.speed = 2.8;
+      } else if (nearestDepot && nearestDepotDist <= 10) {
+        bot.hasAmmo = true;  // arrived at shed — armed
       } else {
-        // Wander randomly
         bot.moveTimer -= dt;
         if (bot.moveTimer <= 0) {
           bot.moveDir.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();

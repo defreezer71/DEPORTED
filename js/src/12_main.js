@@ -144,26 +144,56 @@ ashMesh.frustumCulled = false;
 ashMesh.renderOrder = 2;
 ashMesh.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 150, 0), 800);
 
-// ── Eruption — large overlapping camera-facing billboard smoke puffs ──
-// Camera-facing planes avoid the "ball" look that PointsMaterial always produces.
+// ── Eruption plume — organic camera-facing smoke ──
 
-// Soft irregular smoke texture (256×256)
-const _plumeCanvas = document.createElement('canvas');
-_plumeCanvas.width = _plumeCanvas.height = 256;
-const _plumeCtx = _plumeCanvas.getContext('2d');
-// Hard-edged smoke puff — stays fully opaque to ~70% radius then cuts off sharply
-const _pg = _plumeCtx.createRadialGradient(128,128,0,128,128,118);
-_pg.addColorStop(0,   'rgba(36,36,36,0.98)');
-_pg.addColorStop(0.55,'rgba(35,35,35,0.97)');  // flat opaque core
-_pg.addColorStop(0.72,'rgba(28,28,28,0.70)');  // begin edge
-_pg.addColorStop(0.86,'rgba(12,12,12,0.18)');  // steep drop
-_pg.addColorStop(0.95,'rgba(2,2,2,0.03)');
-_pg.addColorStop(1.0, 'rgba(0,0,0,0)');
-_plumeCtx.fillStyle = _pg; _plumeCtx.fillRect(0,0,256,256);
-const _plumeTex = new THREE.CanvasTexture(_plumeCanvas);
+// Build N organic blob textures (spline-outlined, not circular)
+function _makePlumeTexture(variant) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const ctx = c.getContext('2d'), cx = 128, cy = 128;
+  // Generate control points around an irregular closed curve
+  const N = 8 + (variant % 3);
+  const pts = [];
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2 + variant * 0.8;
+    const baseR = 72 + 22 * Math.sin(variant * 2.3 + i * 1.9);
+    const r = baseR + ((i * 7 + variant * 13) % 28) - 14;
+    pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  // Smooth closed catmull-rom path
+  ctx.beginPath();
+  const L = pts.length;
+  for (let i = 0; i < L; i++) {
+    const p0 = pts[(i - 1 + L) % L], p1 = pts[i];
+    const p2 = pts[(i + 1) % L],     p3 = pts[(i + 2) % L];
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6, cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6, cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+    if (i === 0) ctx.moveTo(p1[0], p1[1]);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2[0], p2[1]);
+  }
+  ctx.closePath();
+  const dark = 38 + (variant % 3) * 8;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 95);
+  g.addColorStop(0,    `rgba(${dark+22},${dark+22},${dark+22},0.90)`);
+  g.addColorStop(0.45, `rgba(${dark+10},${dark+10},${dark+10},0.78)`);
+  g.addColorStop(0.78, `rgba(${dark},${dark},${dark},0.40)`);
+  g.addColorStop(1,    'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fill();
+  // Add a couple of offset sub-blobs to break circularity further
+  for (let b = 0; b < 3; b++) {
+    const ba = variant * 1.1 + b * 2.1, br = 28 + b * 9;
+    const bx = cx + Math.cos(ba) * 38, by = cy + Math.sin(ba) * 32;
+    const bg = ctx.createRadialGradient(bx, by, 0, bx, by, br);
+    bg.addColorStop(0,   `rgba(${dark+15},${dark+15},${dark+15},0.55)`);
+    bg.addColorStop(0.6, `rgba(${dark},${dark},${dark},0.25)`);
+    bg.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2); ctx.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+const _plumeTex = Array.from({ length: 6 }, (_, i) => _makePlumeTexture(i));
 
-// 50 billboard puffs: first 22 = column, rest = crown
-const PLUME_COUNT = 75;
+const PLUME_COUNT = 140;
+const PLUME_MAX_Y = 165;
 const _plumeGroup = new THREE.Group();
 _plumeGroup.position.set(0, CONFIG.volcanoHeight, 0);
 _plumeGroup.visible = false;
@@ -172,86 +202,79 @@ scene.add(_plumeGroup);
 
 const _plumeData = [];
 const _plumeQuat = new THREE.Quaternion();
-let _plumeFadeT = 0, _plumeCeiling = 0;
+const _spinAxis  = new THREE.Vector3(0, 0, 1);
+const _spinQ     = new THREE.Quaternion();
+let _plumeFadeT  = 0;
 
 for (let i = 0; i < PLUME_COUNT; i++) {
   const mat = new THREE.MeshBasicMaterial({
-    map: _plumeTex, transparent: true, opacity: 0,
+    map: _plumeTex[i % 6], transparent: true, opacity: 0,
     depthWrite: false, side: THREE.DoubleSide, fog: false
   });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1,1), mat);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
   mesh.renderOrder = 2; mesh.frustumCulled = false;
   _plumeGroup.add(mesh);
-  const ang = Math.random() * 6.28;
-  const isCrown = i >= 30;
   _plumeData.push({
     mesh, mat,
-    y:       Math.random() * (isCrown ? 155 : 110),
-    speed:   10.1 + Math.random() * 11.5,
-    angle:   ang,
-    radMult: 0.55 + Math.random() * 0.90,
-    size:    13 + Math.random() * 14,
-    isCrown,
+    y:          (i / PLUME_COUNT) * PLUME_MAX_Y,   // evenly staggered — no gaps
+    speed:      11 + Math.random() * 10,
+    angle:      Math.random() * Math.PI * 2,
+    radMult:    0.5 + Math.random() * 1.0,
+    baseSize:   9 + Math.random() * 10,
+    scaleRatio: 0.75 + Math.random() * 0.55,        // oval asymmetry
+    wobbleAmp:  0.6 + Math.random() * 1.0,
+    wobbleFreq: 0.6 + Math.random() * 1.2,
+    wobbleOff:  Math.random() * Math.PI * 2,
+    spinAngle:  Math.random() * Math.PI * 2,
+    spinRate:   (Math.random() - 0.5) * 0.8,        // slow screen-space spin
   });
 }
 
 function updatePlume(dt) {
   _plumeGroup.visible = true;
-
-  // Violent phase: first 5s after eruption — 50% faster rise, 30% narrower
-  const tSinceErupt = state.matchTime - state.eruptionStartTime;
-  const violent = tSinceErupt < 5;
-  const speedMult   = violent ? 1.5 : 1.0;
-  const ceilSpeed   = violent ? 28.05 : 18.7;
-  const collarScale = violent ? 0.70 : 1.0;  // column + crown width
-
-  _plumeFadeT = Math.min(1, _plumeFadeT + dt * 0.7);
-  _plumeCeiling = Math.min(155, _plumeCeiling + ceilSpeed * dt);
+  _plumeFadeT = Math.min(1, _plumeFadeT + dt * 0.5);
   _plumeQuat.copy(camera.quaternion);
 
-  const crownReady = _plumeCeiling > 50;
+  const tSinceErupt = state.matchTime - state.eruptionStartTime;
+  // Violent phase lasts 9s, then smoothly eases to normal over 4s
+  const violentFrac = 1 - Math.min(1, Math.max(0, (tSinceErupt - 9) / 4));
+  const speedMult = 1.0 + violentFrac * 1.0;   // 2.0 → 1.0 smooth
 
   for (const p of _plumeData) {
-    if (p.isCrown && !crownReady) { p.mat.opacity = 0; continue; }
-
     p.y += p.speed * speedMult * dt;
-    const maxY = p.isCrown ? 155 : 120;
-    if (p.y > Math.min(maxY, _plumeCeiling)) {
-      p.y = p.isCrown ? 38 + Math.random() * 14 : Math.random() * 4;
-    }
+    if (p.y > PLUME_MAX_Y) p.y -= PLUME_MAX_Y;   // seamless wrap
 
-    const f = Math.min(1, p.y / 155);
+    const f   = p.y / PLUME_MAX_Y;               // 0 = mouth, 1 = top
+    const rad = 1.5 + Math.pow(f, 1.5) * 62 * p.radMult;
 
-    let xr, zr;
-    if (!p.isCrown) {
-      const mouthTaper = Math.min(1.0, 0.75 + 0.25 * (p.y / 30));
-      xr = Math.sin(p.y * 0.18 + p.angle)       * 2.2 * collarScale * mouthTaper;
-      zr = Math.cos(p.y * 0.18 + p.angle * 1.3) * 2.2 * collarScale * mouthTaper;
-    } else {
-      const cf  = Math.max(0, (f - 0.40) / 0.60);
-      const rad = (4 + Math.pow(cf, 1.2) * 88 * p.radMult) * collarScale;
-      xr = Math.cos(p.angle) * rad;
-      zr = Math.sin(p.angle) * rad;
-    }
+    // Pure radial spread — no spiral, just outward in fixed angle + small wobble
+    p.wobbleOff += p.wobbleFreq * dt;
+    const wx = Math.sin(p.wobbleOff) * p.wobbleAmp * 1.8;
+    const wz = Math.cos(p.wobbleOff * 0.7 + 1.3) * p.wobbleAmp * 1.8;
+    p.mesh.position.set(Math.cos(p.angle) * rad + wx, p.y, Math.sin(p.angle) * rad + wz);
 
-    p.mesh.position.set(xr, p.y, zr);
-    p.mesh.quaternion.copy(_plumeQuat);
+    // Camera-facing + per-sprite screen-space spin for organic variety
+    p.spinAngle += p.spinRate * dt;
+    _spinQ.setFromAxisAngle(_spinAxis, p.spinAngle);
+    p.mesh.quaternion.multiplyQuaternions(_plumeQuat, _spinQ);
 
-    const s = p.size * (1 + f * 2.2);
-    p.mesh.scale.set(s, s, 1);
+    // Oval scale (x/y ratio varies per sprite)
+    const s = (p.baseSize + f * 28) * (1.0 + violentFrac * 0.35);
+    p.mesh.scale.set(s, s * p.scaleRatio, 1);
 
-    const fadeIn    = Math.min(1, p.y / 15) * _plumeFadeT;
-    const crownFade = p.isCrown ? Math.min(1, (_plumeCeiling - 85) / 20) : 1;
-    p.mat.opacity   = 0.82 * fadeIn * crownFade;
+    // Fade in from mouth, full opacity mid-column, fade out at very top
+    const fadeIn  = Math.min(1, p.y / 8) * _plumeFadeT;
+    const fadeOut = 1 - Math.max(0, (f - 0.82) / 0.18);
+    p.mat.opacity = 0.80 * fadeIn * fadeOut;
   }
 }
 
-// Stub so existing eruption-start code doesn't break
+// Stubs expected by eruption-start / legacy code
 const ERUPT_COUNT = 1;
 const eruptPhase = new Float32Array(1);
 const eruptSpeed = new Float32Array(1);
 const eruptPos   = new Float32Array(3);
-const ERUPT_MAX_H = 155;
+const ERUPT_MAX_H = 165;
 
 
 scene.add(ashMesh);
@@ -697,9 +720,12 @@ function update() {
   if (state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
     state.eruptionStartTime = state.matchTime;
-    // Reset billboard plume for fresh eruption
-    _plumeFadeT = 0; _plumeCeiling = 0;
-    for (const p of _plumeData) { p.y = Math.random() * 5; p.mat.opacity = 0; }
+    // Reset plume — evenly stagger so no wave gap on startup
+    _plumeFadeT = 0;
+    for (let i = 0; i < _plumeData.length; i++) {
+      _plumeData[i].y = (i / _plumeData.length) * PLUME_MAX_Y;
+      _plumeData[i].mat.opacity = 0;
+    }
     waterWarning.textContent = '⚠ VOLCANO ERUPTING — WATER RISING IN 15 SECONDS ⚠';
     waterWarning.style.fontSize = '28px';
     waterWarning.classList.add('show');
