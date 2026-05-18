@@ -2777,10 +2777,10 @@ depotCorners.forEach(({ x, z }) => {
   const bw = 19.8, bd = 13.2, wallH = 8.25, wt = 0.75;
   const colR = 0.666, colH = wallH;
 
-  // Roman temple materials — MeshBasicMaterial = unlit, always renders exact color
-  const stone   = new THREE.MeshBasicMaterial({ color: 0xF0EDE8 }); // warm white marble
-  const stoneDk = new THREE.MeshBasicMaterial({ color: 0xC8C4BC }); // slightly darker white
-  const roofMat = new THREE.MeshBasicMaterial({ color: 0x5B2C8B }); // royal purple roof
+  // Roman temple materials — Lambert responds to scene lighting (depth/shading)
+  const stone   = new THREE.MeshLambertMaterial({ color: 0xD8D2C8 }); // warm limestone
+  const stoneDk = new THREE.MeshLambertMaterial({ color: 0xB8B2A8 }); // unused, kept for safety
+  const roofMat = new THREE.MeshBasicMaterial({ color: 0x5B2C8B });   // royal purple roof (unlit — no z-fight)
 
   // Helper — add mesh as child of rotated group (local coords)
   const addM = (geo, mat, lx, ly, lz, rx, ry, rz) => {
@@ -2794,15 +2794,19 @@ depotCorners.forEach(({ x, z }) => {
     return m;
   };
 
-  // ── Podium steps — wide overhangs for visibility, height kept ≤0.60 so player eye stays above ──
-  addM(new THREE.BoxGeometry(bw + 5.0, 0.22, bd + 5.0), stone, 0, 0.11, 0);
-  addM(new THREE.BoxGeometry(bw + 3.0, 0.20, bd + 3.0), stone, 0, 0.32, 0);
-  addM(new THREE.BoxGeometry(bw + 1.0, 0.18, bd + 1.0), stone, 0, 0.51, 0);
+  // ── Podium steps — 5 steps, total platform height 0.96 ──
+  addM(new THREE.BoxGeometry(bw + 9.0, 0.22, bd + 9.0), stone, 0, 0.11, 0);  // outermost
+  addM(new THREE.BoxGeometry(bw + 7.0, 0.20, bd + 7.0), stone, 0, 0.32, 0);
+  addM(new THREE.BoxGeometry(bw + 5.0, 0.18, bd + 5.0), stone, 0, 0.51, 0);
+  addM(new THREE.BoxGeometry(bw + 3.0, 0.18, bd + 3.0), stone, 0, 0.69, 0);
+  addM(new THREE.BoxGeometry(bw + 1.0, 0.18, bd + 1.0), stone, 0, 0.87, 0);  // innermost
 
-  // Podium step floors — each step is one OBB floor level; player snaps up incrementally
-  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 5.0) / 2, hd: (bd + 5.0) / 2, topY: h + 0.22 });
-  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 3.0) / 2, hd: (bd + 3.0) / 2, topY: h + 0.42 });
-  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 1.0) / 2, hd: (bd + 1.0) / 2, topY: h + 0.60 });
+  // OBB floor entries — one per step, player snaps up incrementally
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 9.0) / 2, hd: (bd + 9.0) / 2, topY: h + 0.22 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 7.0) / 2, hd: (bd + 7.0) / 2, topY: h + 0.42 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 5.0) / 2, hd: (bd + 5.0) / 2, topY: h + 0.60 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 3.0) / 2, hd: (bd + 3.0) / 2, topY: h + 0.78 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 1.0) / 2, hd: (bd + 1.0) / 2, topY: h + 0.96 });
 
   // ── Solid side walls (local ±X) ──
   for (const sx of [-1, 1]) {
@@ -2885,7 +2889,7 @@ depotCorners.forEach(({ x, z }) => {
   }
 
   // ── Crates — 2×2 grid inside the shed ──
-  const cs = 1.05, crateLocalY = 0.60 + cs / 2; // sit on top of podium (podium top = 0.60)
+  const cs = 1.05, crateLocalY = 0.96 + cs / 2; // sit on top of podium (podium top = 0.96)
 
   [
     { lx: -3.0, lz: -2.5, mat: crateM4Mat,  type: 'depot_ammo_m4',    label: '[F] +10 M4 Ammo',     icon: 'ammo_large'  },
