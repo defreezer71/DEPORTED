@@ -2674,6 +2674,7 @@ function spawnLoot(x, z, type) {
   lootGroup.userData = { lootType: type, label: info.label, baseY: lootGroup.position.y };
   scene.add(lootGroup);
   lootItems.push(lootGroup);
+  if (lootGroup.children.length > 0) windowPanes.push(lootGroup.children[0]);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2712,15 +2713,15 @@ depotCorners.forEach(({ x, z }) => {
   group.rotation.y = rotY;
   scene.add(group);
 
-  // Dimensions
-  const bw = 18, bd = 12, wallH = 7.5, wt = 0.75;
-  const colR = 0.605, colH = wallH;
+  // Dimensions — 10% larger than original
+  const bw = 19.8, bd = 13.2, wallH = 8.25, wt = 0.75;
+  const colR = 0.666, colH = wallH;
 
   // Roman temple materials — MeshBasicMaterial = unlit, always renders exact color
-  const stone   = new THREE.MeshBasicMaterial({ color: 0xBCB8B0 }); // muted warm stone
-  const stoneDk = new THREE.MeshBasicMaterial({ color: 0xBCB8B0 }); // uniform with stone
-  const red     = new THREE.MeshBasicMaterial({ color: 0x5B2C8B,   // royal purple
-    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }); // prevent z-fight flicker
+  const stone   = new THREE.MeshBasicMaterial({ color: 0xF0EDE8 }); // warm white marble
+  const stoneDk = new THREE.MeshBasicMaterial({ color: 0xC8C4BC }); // clearly darker for step contrast
+  const purple  = new THREE.MeshBasicMaterial({ color: 0x5B2C8B,   // royal purple accent
+    polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });
   const roofMat = new THREE.MeshBasicMaterial({ color: 0x5C2E15 }); // terracotta tile
 
   // Helper — add mesh as child of rotated group (local coords)
@@ -2735,17 +2736,17 @@ depotCorners.forEach(({ x, z }) => {
     return m;
   };
 
-  // ── Podium steps ──
-  addM(new THREE.BoxGeometry(bw + 4.0, 0.22, bd + 4.0), stoneDk, 0, 0.11, 0);
-  addM(new THREE.BoxGeometry(bw + 2.4, 0.20, bd + 2.4), stone,   0, 0.32, 0);
-  addM(new THREE.BoxGeometry(bw + 0.8, 0.18, bd + 0.8), stoneDk, 0, 0.50, 0);
+  // ── Podium steps — wide overhangs for visibility, height kept ≤0.60 so player eye stays above ──
+  addM(new THREE.BoxGeometry(bw + 5.0, 0.22, bd + 5.0), stoneDk, 0, 0.11, 0);
+  addM(new THREE.BoxGeometry(bw + 3.0, 0.20, bd + 3.0), stone,   0, 0.32, 0);
+  addM(new THREE.BoxGeometry(bw + 1.0, 0.18, bd + 1.0), stoneDk, 0, 0.51, 0);
 
   // ── Solid side walls (local ±X) ──
   for (const sx of [-1, 1]) {
     const wx = sx * (bw / 2 - wt / 2);
     addM(new THREE.BoxGeometry(wt, wallH, bd), stone, wx, wallH / 2, 0);
     for (const fy of [0.27, 0.58]) {
-      addM(new THREE.BoxGeometry(wt + 0.06, 0.30, bd + 0.06), red, wx, wallH * fy, 0);
+      addM(new THREE.BoxGeometry(wt + 0.14, 0.30, bd + 0.14), purple, wx, wallH * fy, 0);
     }
   }
 
@@ -2753,8 +2754,7 @@ depotCorners.forEach(({ x, z }) => {
   const addCol = (lx, lz) => {
     addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stoneDk, lx, 0.11, lz);
     addM(new THREE.CylinderGeometry(colR, colR * 1.06, colH, 12), stone, lx, colH / 2, lz);
-    addM(new THREE.CylinderGeometry(colR + 0.04, colR + 0.04, colH * 0.36, 12), red, lx, colH * 0.24, lz);
-    addM(new THREE.BoxGeometry(colR * 2.5, 0.24, colR * 2.5), stoneDk, lx, colH + 0.12, lz);
+    addM(new THREE.CylinderGeometry(colR + 0.10, colR + 0.10, colH * 0.36, 12), purple, lx, colH * 0.24, lz);
   };
 
   // Front face (+Z = bd/2) — 5 columns, player walks between them (gap ≈ 2.65 units)
@@ -2771,7 +2771,7 @@ depotCorners.forEach(({ x, z }) => {
   // ── Entablature ──
   const entY = wallH, entH = 1.0;
   addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stone, 0, entY + entH / 2, 0);
-  addM(new THREE.BoxGeometry(bw + colR * 2 + 1.0, entH * 0.42, bd + colR * 2 + 1.0), red,  0, entY + entH * 0.70, 0);
+  addM(new THREE.BoxGeometry(bw + colR * 2 + 1.4, entH * 0.42, bd + colR * 2 + 1.4), purple, 0, entY + entH * 0.70, 0);
   addM(new THREE.BoxGeometry(bw + colR * 2 + 1.2, 0.22, bd + colR * 2 + 1.2), stoneDk, 0, entY + entH + 0.11, 0);
 
   // ── Pediment (triangular gable) — front (+Z) and back (-Z) ──
@@ -2783,7 +2783,7 @@ depotCorners.forEach(({ x, z }) => {
   for (const pz of [-1, 1]) {
     const pzp = pz * (bd / 2 + colR + 0.4);
     addM(new THREE.BoxGeometry(pedW, ridgeH, wt), stone, 0, pedBaseY + ridgeH / 2, pzp);
-    addM(new THREE.BoxGeometry(pedW + 0.2, 0.22, wt + 0.06), red, 0, pedBaseY + 0.11, pzp);
+    addM(new THREE.BoxGeometry(pedW + 0.3, 0.22, wt + 0.14), purple, 0, pedBaseY + 0.11, pzp);
     for (const sx of [-1, 1]) {
       addM(new THREE.BoxGeometry(rakeLen, 0.22, wt + 0.08), stoneDk,
         sx * pedW / 4, pedBaseY + ridgeH / 2, pzp, null, null, -sx * rakeAng);
@@ -2826,7 +2826,7 @@ depotCorners.forEach(({ x, z }) => {
   }
 
   // ── Crates — 2×2 grid inside the shed ──
-  const cs = 1.05, crateLocalY = 0.59 + cs / 2; // sit on top of podium (podium top = 0.59)
+  const cs = 1.05, crateLocalY = 0.60 + cs / 2; // sit on top of podium (podium top = 0.60)
 
   [
     { lx: -3.0, lz: -2.5, mat: crateM4Mat,  type: 'depot_ammo_m4',    label: '[F] +10 M4 Ammo',     icon: 'ammo_large'  },
@@ -2842,7 +2842,7 @@ depotCorners.forEach(({ x, z }) => {
     crate.castShadow = true;
     crate.userData = { lootType: type, label, depot: true, baseY: cy,
                        shedX: x, shedZ: z, shedHW: bw / 2, shedHD: bd / 2 };
-    group.add(crate); depotCrates.push(crate); collidables.push(crate);
+    group.add(crate); depotCrates.push(crate); windowPanes.push(crate);
 
     for (const py of [-0.32, 0, 0.32]) {
       const line = new THREE.Mesh(new THREE.BoxGeometry(cs + 0.03, 0.055, cs + 0.03), crateBlack);
