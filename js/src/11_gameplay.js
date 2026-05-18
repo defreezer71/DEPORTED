@@ -33,6 +33,10 @@ function applyHitEvent(evt) {
     if (evt.targetHp !== undefined)    state.hp    = evt.targetHp;
     else state.hp = Math.max(0, state.hp - evt.damage);
     if (evt.targetArmor !== undefined) state.armor = evt.targetArmor;
+    if (state.hp <= 0 && evt.shooter) {
+      state.killCamShooterId = evt.shooter;
+      state.killCamBotIndex = -1;
+    }
     updateHUD();
     return;
   }
@@ -72,6 +76,7 @@ function shoot() {
   }
 
   state.ammo[state.currentWeapon]--;
+  state.shotsFired++;
   state.canFire = false;
 
   const isM4 = state.currentWeapon === 'm4';
@@ -188,6 +193,7 @@ function shoot() {
         if (isHead) SFX.headshot();
         else SFX.hitmarker();
 
+        state.shotsHit++;
         const wasAlive = bot.alive;
         damageBot(bot, dmg, isHead);
         if (wasAlive && !bot.alive) SFX.kill_chaching();
@@ -200,6 +206,7 @@ function shoot() {
           clearTimeout(hitmarkerTimeout);
           hitmarkerTimeout = setTimeout(() => hitmarker.classList.remove('show'), 120);
           if (isHead) SFX.headshot(); else SFX.hitmarker();
+          state.shotsHit++;
           // No friendly fire during warmup lobby — hitmarker shows but no damage sent
           if (!state.inLobby) sendShoot(remoteHit.id, dmg, isHead);
         }

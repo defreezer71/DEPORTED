@@ -274,6 +274,21 @@
   }
   #countdown-overlay .num.show { opacity: 1; }
 
+  /* Kill-cam overlay */
+  #killcam-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    pointer-events: none;
+    opacity: 0; transition: opacity 0.3s;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  #killcam-overlay.show { opacity: 1; }
+  .killcam-bar { background: #000; height: 72px; width: 100%; flex-shrink: 0; }
+  #killcam-label {
+    position: absolute; top: 80px; left: 20px;
+    color: #fff; font-size: 11px; letter-spacing: 4px;
+    font-family: monospace; text-transform: uppercase; opacity: 0.65;
+  }
+
   /* Game over screen */
   #game-over-screen {
     position: fixed; inset: 0; z-index: 110;
@@ -286,13 +301,16 @@
   #game-over-screen.show { opacity: 1; pointer-events: auto; }
   #game-over-screen h1 { font-size: 64px; color: #ff4444; letter-spacing: 6px; text-transform: uppercase; }
   #game-over-screen p { color: #ccc; font-size: 16px; margin-top: 10px; }
-  #game-over-screen .stats { color: #aaa; font-size: 14px; margin-top: 20px; }
+  #game-over-screen .stats { color: #aaa; font-size: 14px; margin-top: 12px; }
   #game-over-screen .btn {
-    margin-top: 30px; padding: 12px 40px; font-size: 16px;
+    padding: 10px 28px; font-size: 14px;
     background: rgba(255,255,255,0.1); color: #fff; border: 1px solid #666;
     cursor: pointer; letter-spacing: 2px; text-transform: uppercase;
   }
   #game-over-screen .btn:hover { background: rgba(255,255,255,0.2); }
+  #go-spec-row { display: flex; gap: 10px; margin-top: 22px; }
+  #go-spec-row .btn { margin-top: 0; }
+  #go-restart { margin-top: 14px; }
 
   /* Victory screen */
   #victory-screen {
@@ -318,10 +336,11 @@
   #spectate-banner {
     position: fixed; bottom: 60px; left: 50%;
     transform: translateX(-50%);
-    color: #aaa; font-size: 13px; z-index: 55;
+    color: #ccc; font-size: 13px; z-index: 55;
     pointer-events: none; letter-spacing: 1px;
     text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
     opacity: 0; transition: opacity 0.3s;
+    background: rgba(0,0,0,0.35); padding: 4px 14px; border-radius: 20px;
   }
   #spectate-banner.show { opacity: 1; }
 
@@ -624,14 +643,22 @@
 <div id="countdown-overlay"><div class="num" id="countdown-num"></div></div>
 <div id="damage-vignette"></div>
 <div id="water-vignette"></div>
-<div id="spectate-banner">SPECTATING — Click to follow next player</div>
+<div id="killcam-overlay">
+  <div class="killcam-bar"></div>
+  <div id="killcam-label">&#9632; KILL CAM</div>
+  <div class="killcam-bar"></div>
+</div>
+<div id="spectate-banner">SPECTATING &nbsp;<span id="spec-name"></span>&nbsp; — Click to cycle</div>
 <div id="perf-stats"></div>
 
 <div id="game-over-screen">
   <h1 style="font-size:3.645em">TERMINATED</h1>
-  
-  
   <div class="stats">Kills: <span id="go-kills">0</span> &nbsp;|&nbsp; Survived: <span id="go-time">0:00</span></div>
+  <div class="stats">Shots: <span id="go-shots">0</span> &nbsp;|&nbsp; Accuracy: <span id="go-accuracy">0%</span></div>
+  <div id="go-spec-row">
+    <button class="btn" onclick="startSpectate('1st')">1ST PERSON</button>
+    <button class="btn" onclick="startSpectate('3rd')">3RD PERSON</button>
+  </div>
   <button class="btn" id="go-restart">Play Again</button>
 </div>
 

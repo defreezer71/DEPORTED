@@ -103,9 +103,10 @@ depotCorners.forEach(({ x, z }) => {
   const colR = 0.666, colH = wallH;
 
   // Roman temple materials — Lambert responds to scene lighting (depth/shading)
-  const stone   = new THREE.MeshLambertMaterial({ color: 0xD8D2C8 }); // warm limestone
-  const stoneDk = new THREE.MeshLambertMaterial({ color: 0xB8B2A8 }); // unused, kept for safety
-  const roofMat = new THREE.MeshBasicMaterial({ color: 0x5B2C8B });   // royal purple roof (unlit — no z-fight)
+  const stone     = new THREE.MeshLambertMaterial({ color: 0xD8D2C8 }); // warm limestone
+  const stoneDk   = new THREE.MeshLambertMaterial({ color: 0xB8B2A8 }); // unused, kept for safety
+  const stoneCeil = new THREE.MeshBasicMaterial({ color: 0xB0ACA4 });   // unlit ceiling — avoids green hemisphere tint
+  const roofMat   = new THREE.MeshBasicMaterial({ color: 0x5B2C8B });   // royal purple roof (unlit — no z-fight)
 
   // Helper — add mesh as child of rotated group (local coords)
   const addM = (geo, mat, lx, ly, lz, rx, ry, rz) => {
@@ -116,6 +117,7 @@ depotCorners.forEach(({ x, z }) => {
     if (rz != null) m.rotation.z = rz;
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
+    targets.push(m); // bullet impacts on shed surfaces
     return m;
   };
 
@@ -159,7 +161,7 @@ depotCorners.forEach(({ x, z }) => {
 
   // ── Entablature ──
   const entY = wallH, entH = 1.0;
-  addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stone, 0, entY + entH / 2, 0);
+  addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stoneCeil, 0, entY + entH / 2, 0);
   addM(new THREE.BoxGeometry(bw + colR * 2 + 1.2, 0.22, bd + colR * 2 + 1.2), roofMat, 0, entY + entH + 0.11, 0);
 
   // ── Pediment (triangular gable) — front (+Z) and back (-Z) ──

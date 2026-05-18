@@ -68,6 +68,7 @@ window.toggleMenuMusic = function toggleMenuMusic() {
 }
 
 overlay.addEventListener('click', (e) => {
+  if (state.playerDead) return;
   if (e.target.id === 'music-toggle-btn' || e.target.closest('#music-toggle-btn')) return;
   if (state.pendingLock) {
     state.pendingLock = false;
@@ -81,6 +82,7 @@ overlay.addEventListener('click', (e) => {
   renderer.domElement.requestPointerLock();
 });
 renderer.domElement.addEventListener('click', () => {
+  if (state.playerDead) return; // keep mouse free for menu buttons
   // Always lock on click if match just started (pendingLock set by startMatch handler)
   if (state.pendingLock) {
     state.pendingLock = false;

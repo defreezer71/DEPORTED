@@ -75,6 +75,7 @@ function createBot(x, z, name) {
     isGrounded: true,
     waypoint: null,
     fleeTarget: null,
+    snapshots: [],  // position history for kill-cam
     parts: { body, head, legs: group.children.filter((_, i) => i >= 3 && i <= 4), arms: group.children.filter((_, i) => i >= 5) },
   };
   bots.push(bot);
@@ -175,8 +176,13 @@ function updateBots(dt) {
         const hitChance = Math.max(0.08, 0.48 - distToPlayer * 0.005 - bot.shootAccuracy);
         if (Math.random() < hitChance) {
           const dmg = 8 + Math.floor(Math.random() * 7);
+          const prevHp = state.hp;
           if (state.armor > 0) { state.armor = Math.max(0, state.armor - dmg); }
           else { state.hp = Math.max(0, state.hp - dmg); }
+          if (prevHp > 0 && state.hp <= 0) {
+            state.killCamBotIndex = bots.indexOf(bot);
+            state.killCamShooterId = null;
+          }
           updateHUD();
           const dv = document.getElementById('damage-vignette');
           dv.classList.add('show');
@@ -261,6 +267,15 @@ function updateBots(dt) {
     if (bot.parts.legs[1]) bot.parts.legs[1].rotation.x = -swing;
     if (bot.parts.arms[0]) bot.parts.arms[0].rotation.x = -swing * 0.6;
     if (bot.parts.arms[1]) bot.parts.arms[1].rotation.x = swing * 0.6;
+
+    // Record position snapshot for kill-cam (20Hz, keep last 4s)
+    const snapNow = Date.now();
+    const lastSnap = bot.snapshots[bot.snapshots.length - 1];
+    if (!lastSnap || snapNow - lastSnap.t >= 50) {
+      bot.snapshots.push({ t: snapNow, x: bot.group.position.x, y: bot.group.position.y, z: bot.group.position.z, yaw: bot.group.rotation.y });
+      const snapCutoff = snapNow - 4000;
+      while (bot.snapshots.length > 2 && bot.snapshots[0].t < snapCutoff) bot.snapshots.shift();
+    }
   }
 }
 

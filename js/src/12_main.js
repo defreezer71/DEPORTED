@@ -556,7 +556,7 @@ function update() {
   // Canal boost HUD
   if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
-  if (!state.locked) {
+  if (!state.locked && !state.playerDead) {
     updateDroneCamera(renderDt);
     if (window.skyDome) window.skyDome.position.copy(droneCamera.position);
     droneRenderer.render(scene, droneCamera);
@@ -606,13 +606,9 @@ function update() {
   if (state.phase === 'playing' && state.hp <= 0 && !state.playerDead) {
     state.playerDead = true;
     state.phase = 'gameover';
-    const goScreen = document.getElementById('game-over-screen');
-    document.getElementById('go-kills').textContent = state.kills;
-    const m = Math.floor(state.matchTime / 60);
-    const s = Math.floor(state.matchTime % 60);
-    document.getElementById('go-time').textContent = m + ':' + String(s).padStart(2, '0');
-    setTimeout(() => goScreen.classList.add('show'), 500);
-    document.getElementById('spectate-banner').classList.add('show');
+    state.killCamVictimPos = camera.position.clone();
+    if (document.pointerLockElement) document.exitPointerLock();
+    startKillCam();
   }
 
   // Check victory
@@ -633,14 +629,78 @@ function update() {
     }
   }
 
+  // Kill-cam playback
+  if (state.killCamActive) {
+    state.killCamPlayTime += renderDt * 0.8;
+    const t = Math.min(state.killCamPlayTime, state.killCamDuration);
+    const buf = state.killCamBuffer;
+    if (buf && buf.length >= 1) {
+      let s0 = buf[0], s1 = buf[buf.length - 1];
+      for (let i = 0; i < buf.length - 1; i++) {
+        if (buf[i].relT <= t && buf[i + 1].relT > t) { s0 = buf[i]; s1 = buf[i + 1]; break; }
+      }
+      const alpha = (s1.relT === s0.relT) ? 1 : Math.max(0, Math.min(1, (t - s0.relT) / (s1.relT - s0.relT)));
+      const kx = s0.x + (s1.x - s0.x) * alpha;
+      const ky = s0.y + (s1.y - s0.y) * alpha;
+      const kz = s0.z + (s1.z - s0.z) * alpha;
+      let dyaw = s1.yaw - s0.yaw;
+      while (dyaw >  Math.PI) dyaw -= Math.PI * 2;
+      while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      state.yaw = s0.yaw + dyaw * alpha;
+      // Pitch: aim toward victim death position
+      const vp = state.killCamVictimPos;
+      if (vp) {
+        const dx = vp.x - kx, dy = (vp.y - 0.85) - (ky + 1.6), dz = vp.z - kz;
+        state.pitch = -Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+        state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
+      }
+      camera.position.set(kx, ky + 1.6, kz);
+    }
+    if (state.killCamPlayTime >= state.killCamDuration + 0.5) {
+      state.killCamActive = false;
+      document.getElementById('killcam-overlay').classList.remove('show');
+      showPostDeathMenu();
+    }
+    updateBots(renderDt);
+
   // Spectate mode
-  if (state.playerDead) {
+  } else if (state.playerDead && state.spectateMode) {
     const aliveBots = bots.filter(b => b.alive);
-    if (aliveBots.length > 0) {
-      const specBot = aliveBots[state.spectateIndex % aliveBots.length];
-      const specPos = specBot.group.position;
-      camera.position.lerp(new THREE.Vector3(specPos.x - 5, specPos.y + 4, specPos.z - 5), renderDt * 3);
-      camera.lookAt(specPos.x, specPos.y + 1.5, specPos.z);
+    const aliveRemote = Object.values(state.remotePlayers).filter(rp => !rp.dead);
+    const allTargets = [
+      ...aliveBots.map(b => ({ type: 'bot', obj: b })),
+      ...aliveRemote.map(rp => ({ type: 'player', obj: rp })),
+    ];
+    if (allTargets.length > 0) {
+      const tgt = allTargets[state.spectateIndex % allTargets.length];
+      let specPos, specYaw;
+      if (tgt.type === 'bot') {
+        specPos = tgt.obj.group.position;
+        specYaw = tgt.obj.group.rotation.y || 0;
+      } else {
+        specPos = tgt.obj.mesh.position;
+        const snaps = tgt.obj.snapshots;
+        specYaw = snaps.length > 0 ? snaps[snaps.length - 1].yaw : 0;
+      }
+      if (state.spectateMode === '1st') {
+        camera.position.lerp(new THREE.Vector3(specPos.x, specPos.y + 1.6, specPos.z), renderDt * 12);
+        let dy = specYaw - state.spectateYaw;
+        while (dy >  Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        state.spectateYaw += dy * Math.min(1, renderDt * 12);
+        state.yaw = state.spectateYaw;
+        state.pitch = 0;
+      } else {
+        const behind = new THREE.Vector3(
+          specPos.x - Math.sin(specYaw) * 5,
+          specPos.y + 4,
+          specPos.z - Math.cos(specYaw) * 5
+        );
+        camera.position.lerp(behind, renderDt * 4);
+        camera.lookAt(specPos.x, specPos.y + 1.5, specPos.z);
+      }
+      const nameEl = document.getElementById('spec-name');
+      if (nameEl) nameEl.textContent = tgt.type === 'bot' ? 'BOT' : ('Player ' + tgt.obj.mesh.userData.id);
     }
     updateBots(renderDt);
   }
@@ -658,7 +718,7 @@ function update() {
     gatePivotR.rotation.y = -angle;
   }
 
-  if (!state.playerDead) updateBots(renderDt);
+  if (!state.playerDead && !state.killCamActive) updateBots(renderDt);
 
   // Snapshot interpolation — render each remote player at (now - INTERP_DELAY),
   // smoothly interpolating between two real received snapshots. No rubber-banding.
@@ -1103,8 +1163,10 @@ function update() {
   if (window.skyDome) window.skyDome.position.copy(camera.position);
   renderer.clear();
   renderer.render(scene, camera);
-  renderer.clearDepth();
-  renderer.render(weaponScene, weaponCamera);
+  if (!state.killCamActive && !state.playerDead) {
+    renderer.clearDepth();
+    renderer.render(weaponScene, weaponCamera);
+  }
   camera.position.y -= headBobY;
   camera.position.sub(state.shakeOffset);
   // Restore physics quaternion
@@ -1176,8 +1238,85 @@ document.getElementById('go-restart').addEventListener('click', () => location.r
 document.getElementById('win-restart').addEventListener('click', () => location.reload());
 
 document.addEventListener('click', () => {
-  if (state.playerDead) state.spectateIndex++;
+  if (state.playerDead && state.spectateMode) state.spectateIndex++;
 });
+
+// ── Kill-cam: build replay buffer from killer's snapshot history ──
+function startKillCam() {
+  state.killCamPlayTime = 0;
+  state.killCamActive = true;
+  state.killCamBuffer = [];
+  const now = Date.now();
+  const cutoff = now - 3000;
+
+  let snaps = null;
+  if (state.killCamShooterId && state.remotePlayers[state.killCamShooterId]) {
+    snaps = state.remotePlayers[state.killCamShooterId].snapshots.filter(s => s.t >= cutoff);
+  }
+
+  if (snaps && snaps.length > 0) {
+    const baseT = snaps[0].t;
+    state.killCamBuffer = snaps.map(s => ({
+      relT: (s.t - baseT) / 1000,
+      x: s.x, y: s.y, z: s.z, yaw: s.yaw,
+    }));
+    state.killCamDuration = (snaps[snaps.length - 1].t - baseT) / 1000;
+  } else if (state.killCamBotIndex >= 0 && bots[state.killCamBotIndex]) {
+    const bot = bots[state.killCamBotIndex];
+    const vp = state.killCamVictimPos || camera.position;
+    const rawSnaps = bot.snapshots.filter(s => s.t >= cutoff);
+    if (rawSnaps.length > 0) {
+      const baseT = rawSnaps[0].t;
+      state.killCamBuffer = rawSnaps.map(s => ({
+        relT: (s.t - baseT) / 1000,
+        x: s.x, y: s.y, z: s.z,
+        yaw: Math.atan2(vp.x - s.x, vp.z - s.z), // always aimed at player
+      }));
+      state.killCamDuration = (rawSnaps[rawSnaps.length - 1].t - baseT) / 1000;
+    } else {
+      // No history — static frame from bot's current position
+      const bp = bot.group.position;
+      const byaw = Math.atan2(vp.x - bp.x, vp.z - bp.z);
+      state.killCamBuffer = [
+        { relT: 0, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
+        { relT: 3, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
+      ];
+      state.killCamDuration = 3.0;
+    }
+  } else {
+    // Unknown killer — place cam near death position
+    const vp = state.killCamVictimPos || camera.position;
+    state.killCamBuffer = [
+      { relT: 0, x: vp.x - 4, y: vp.y - 1.0, z: vp.z, yaw: 0 },
+      { relT: 3, x: vp.x - 4, y: vp.y - 1.0, z: vp.z, yaw: 0 },
+    ];
+    state.killCamDuration = 3.0;
+  }
+
+  document.getElementById('killcam-overlay').classList.add('show');
+  const crosshairEl = document.getElementById('crosshair');
+  if (crosshairEl) crosshairEl.style.display = 'none';
+}
+
+// ── Show post-death stat card + spectate choice menu ──
+function showPostDeathMenu() {
+  const goScreen = document.getElementById('game-over-screen');
+  document.getElementById('go-kills').textContent = state.kills;
+  const m = Math.floor(state.matchTime / 60);
+  const s = Math.floor(state.matchTime % 60);
+  document.getElementById('go-time').textContent = m + ':' + String(s).padStart(2, '0');
+  const acc = state.shotsFired > 0 ? Math.round(state.shotsHit / state.shotsFired * 100) : 0;
+  document.getElementById('go-shots').textContent = state.shotsFired;
+  document.getElementById('go-accuracy').textContent = acc + '%';
+  setTimeout(() => goScreen.classList.add('show'), 300);
+}
+
+window.startSpectate = function(mode) {
+  state.spectateMode = mode;
+  state.spectateIndex = 0;
+  document.getElementById('game-over-screen').classList.remove('show');
+  document.getElementById('spectate-banner').classList.add('show');
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MULTIPLAYER — WebSocket client
@@ -1313,8 +1452,8 @@ function updateRemotePlayers(playerList) {
     rp.mesh.visible = !p.dead;
 
     rp.snapshots.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
-    // Keep ~600ms of history; always retain at least 2 for interpolation
-    const cutoff = now - 600;
+    // Keep 4s of history for kill-cam; interpolation only needs 2 at a time
+    const cutoff = now - 4000;
     while (rp.snapshots.length > 2 && rp.snapshots[0].t < cutoff) rp.snapshots.shift();
   }
 

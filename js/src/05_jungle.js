@@ -2,7 +2,7 @@
 // ═══════════════════════════════════════════════════════════
 
 // Depot temple exclusion — matches positions in 07_loot.js
-const _depotClearR2 = 13 * 13; // reduced from 22 — grass grows up to shed edge
+const _depotClearR2 = 20 * 20; // covers outermost step diagonal (~17.8u) with buffer
 const _depotPos = [
   [half - 16,  half - 16],
   [half - 16, -(half - 16)],
@@ -18,12 +18,13 @@ function _nearDepot(x, z) {
 
 // Stone cover wall positions — exclusion so nothing spawns inside them
 const _wallPositions = [
-  // Inner 15 — radius ~33–81
+  // Inner 16 — radius ~33–81
   [  28,   18], [ -32,  -22], [  48,  -38],
   [ -52,   42], [   4,   52], [   2,  -58],
   [  62,   12], [ -66,  -14], [  38,   62],
   [ -42,  -68], [ -60,   48], [  58,  -48],
   [  22,  -72], [ -26,   74], [  78,  -22],
+  [  44,   36],
   // Outer 10 — radius ~114, tight against the perimeter wall, every 36°
   [ 114,    0], [  92,   67], [  35,  108],
   [ -35,  108], [ -92,   67], [-114,    0],
@@ -402,7 +403,7 @@ const _crateTex     = _makeCrateTex();
 // ── Instanced Ferns (replaces bushes) — 1 draw call ──
 {
   const fernPlacements = [];
-  const fernGrid = 10;
+  const fernGrid = 9.75;
   for (let gx = -half+20; gx < half-20; gx += fernGrid) {
     for (let gz = -half+20; gz < half-20; gz += fernGrid) {
       const x = gx + (seededRand()-0.5)*fernGrid*0.8 + fernGrid/2;
@@ -853,7 +854,7 @@ const _dirtPatches = [];
   const pw = 0.46, ph = wh + 0.20;
 
   const walls = _wallPositions.map(([wx, wz], i) => {
-    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW'];
+    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW'];
     return [wx, wz, facings[i]];
   });
 
@@ -893,8 +894,8 @@ const _dirtPatches = [];
   }
 }
 
-// ── Canal-top grass — both inner AND outer wall top edges, matching ground grass look ──
-{
+// Canal-top grass removed — keep brick surfaces clean
+if (false) {
   const CANAL_TOP_Y = 0.847;  // matches terrain.js canalH
   const INNER_EDGE  = 83.75;  // CANAL_R(85) - canalOuter(1.25)
   const OUTER_EDGE  = 86.25;  // CANAL_R(85) + canalOuter(1.25)
@@ -970,7 +971,7 @@ const _dirtPatches = [];
 
   const bushPositions = [];
   let attempts = 0;
-  while (bushPositions.length < 20 && attempts++ < 2000) {
+  while (bushPositions.length < 21 && attempts++ < 2000) {
     const angle = rng() * Math.PI * 2;
     const r = 25 + rng() * 80; // spread across map, avoid center
     const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
@@ -989,7 +990,7 @@ const _dirtPatches = [];
 
     const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
     const darkColor = (baseColor & 0xFEFEFE) >> 1; // 50% darker
-    const scale = (0.9 + rng() * 0.7) * 0.6325; // size variety
+    const scale = (0.9 + rng() * 0.7) * 0.569; // size variety
 
     // Layered blob structure: wide base, narrower mid, small top
     const blobs = [
@@ -1019,5 +1020,51 @@ const _dirtPatches = [];
     _bCol.position.set(bx, bh + 0.7 * scale, bz);
     _bCol.updateMatrixWorld(true);
     collidables.push(_bCol);
+  }
+
+  // ── 20 additional outer-ring bushes — beyond the canal (r = 88-115) ──
+  const outerBushPositions = [];
+  let outerAttempts = 0;
+  while (outerBushPositions.length < 21 && outerAttempts++ < 2000) {
+    const angle = rng() * Math.PI * 2;
+    const r = 88 + rng() * 27; // outside the canal (canal at r=85), up to near cliff
+    const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
+    if (!canPlaceAt(bx, bz)) continue;
+    if (isInCanalWater(bx, bz)) continue;
+    if (_tooClose(bx, bz, 10)) continue;
+    outerBushPositions.push([bx, bz]);
+    _placedObjList.push({ x: bx, z: bz, r: 8 });
+  }
+
+  for (const [bx, bz] of outerBushPositions) {
+    const bh = getTerrainHeight(bx, bz);
+    const group = new THREE.Group();
+    group.position.set(bx, bh, bz);
+    group.rotation.y = rng() * Math.PI * 2;
+    const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
+    const darkColor = (baseColor & 0xFEFEFE) >> 1;
+    const scale = (0.9 + rng() * 0.7) * 0.569;
+    const blobs = [
+      { r: 1.10 * scale, y: 0.55 * scale, x:  0,            z:  0 },
+      { r: 0.85 * scale, y: 0.90 * scale, x:  0.5 * scale,  z:  0.2 * scale },
+      { r: 0.80 * scale, y: 0.85 * scale, x: -0.4 * scale,  z: -0.3 * scale },
+      { r: 0.65 * scale, y: 1.20 * scale, x:  0.15 * scale, z:  0.1 * scale },
+      { r: 0.45 * scale, y: 1.50 * scale, x: -0.1 * scale,  z: -0.1 * scale },
+    ];
+    blobs.forEach(({ r, y, x, z }, i) => {
+      const col = i < 2 ? darkColor : baseColor;
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 5),
+        new THREE.MeshLambertMaterial({ color: col }));
+      mesh.position.set(x, y, z);
+      group.add(mesh);
+    });
+    scene.add(group);
+    const _bCol2 = new THREE.Mesh(
+      new THREE.BoxGeometry(2.0 * scale, 1.4 * scale, 2.0 * scale),
+      new THREE.MeshBasicMaterial()
+    );
+    _bCol2.position.set(bx, bh + 0.7 * scale, bz);
+    _bCol2.updateMatrixWorld(true);
+    collidables.push(_bCol2);
   }
 }

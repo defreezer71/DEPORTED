@@ -96,7 +96,20 @@ const state = {
   countdownTime: 10,
   playerDead: false,
   spectateIndex: 0,
+  spectateMode: null,      // null | '1st' | '3rd'
+  spectateYaw: 0,
   erupted: false,
+  // Kill-cam
+  killCamActive: false,
+  killCamShooterId: null,
+  killCamBotIndex: -1,
+  killCamBuffer: [],
+  killCamPlayTime: 0,
+  killCamDuration: 3.0,
+  killCamVictimPos: null,
+  // Stat tracking
+  shotsFired: 0,
+  shotsHit: 0,
 };
 // ═══════════════════════════════════════════════════════════
 // THREE.JS SETUP
@@ -1333,7 +1346,7 @@ towerCorners.forEach(tc => {
 // ═══════════════════════════════════════════════════════════
 
 // Depot temple exclusion — matches positions in 07_loot.js
-const _depotClearR2 = 13 * 13; // reduced from 22 — grass grows up to shed edge
+const _depotClearR2 = 20 * 20; // covers outermost step diagonal (~17.8u) with buffer
 const _depotPos = [
   [half - 16,  half - 16],
   [half - 16, -(half - 16)],
@@ -1349,12 +1362,13 @@ function _nearDepot(x, z) {
 
 // Stone cover wall positions — exclusion so nothing spawns inside them
 const _wallPositions = [
-  // Inner 15 — radius ~33–81
+  // Inner 16 — radius ~33–81
   [  28,   18], [ -32,  -22], [  48,  -38],
   [ -52,   42], [   4,   52], [   2,  -58],
   [  62,   12], [ -66,  -14], [  38,   62],
   [ -42,  -68], [ -60,   48], [  58,  -48],
   [  22,  -72], [ -26,   74], [  78,  -22],
+  [  44,   36],
   // Outer 10 — radius ~114, tight against the perimeter wall, every 36°
   [ 114,    0], [  92,   67], [  35,  108],
   [ -35,  108], [ -92,   67], [-114,    0],
@@ -1733,7 +1747,7 @@ const _crateTex     = _makeCrateTex();
 // ── Instanced Ferns (replaces bushes) — 1 draw call ──
 {
   const fernPlacements = [];
-  const fernGrid = 10;
+  const fernGrid = 9.75;
   for (let gx = -half+20; gx < half-20; gx += fernGrid) {
     for (let gz = -half+20; gz < half-20; gz += fernGrid) {
       const x = gx + (seededRand()-0.5)*fernGrid*0.8 + fernGrid/2;
@@ -2184,7 +2198,7 @@ const _dirtPatches = [];
   const pw = 0.46, ph = wh + 0.20;
 
   const walls = _wallPositions.map(([wx, wz], i) => {
-    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW'];
+    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW'];
     return [wx, wz, facings[i]];
   });
 
@@ -2224,8 +2238,8 @@ const _dirtPatches = [];
   }
 }
 
-// ── Canal-top grass — both inner AND outer wall top edges, matching ground grass look ──
-{
+// Canal-top grass removed — keep brick surfaces clean
+if (false) {
   const CANAL_TOP_Y = 0.847;  // matches terrain.js canalH
   const INNER_EDGE  = 83.75;  // CANAL_R(85) - canalOuter(1.25)
   const OUTER_EDGE  = 86.25;  // CANAL_R(85) + canalOuter(1.25)
@@ -2301,7 +2315,7 @@ const _dirtPatches = [];
 
   const bushPositions = [];
   let attempts = 0;
-  while (bushPositions.length < 20 && attempts++ < 2000) {
+  while (bushPositions.length < 21 && attempts++ < 2000) {
     const angle = rng() * Math.PI * 2;
     const r = 25 + rng() * 80; // spread across map, avoid center
     const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
@@ -2320,7 +2334,7 @@ const _dirtPatches = [];
 
     const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
     const darkColor = (baseColor & 0xFEFEFE) >> 1; // 50% darker
-    const scale = (0.9 + rng() * 0.7) * 0.6325; // size variety
+    const scale = (0.9 + rng() * 0.7) * 0.569; // size variety
 
     // Layered blob structure: wide base, narrower mid, small top
     const blobs = [
@@ -2350,6 +2364,52 @@ const _dirtPatches = [];
     _bCol.position.set(bx, bh + 0.7 * scale, bz);
     _bCol.updateMatrixWorld(true);
     collidables.push(_bCol);
+  }
+
+  // ── 20 additional outer-ring bushes — beyond the canal (r = 88-115) ──
+  const outerBushPositions = [];
+  let outerAttempts = 0;
+  while (outerBushPositions.length < 21 && outerAttempts++ < 2000) {
+    const angle = rng() * Math.PI * 2;
+    const r = 88 + rng() * 27; // outside the canal (canal at r=85), up to near cliff
+    const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
+    if (!canPlaceAt(bx, bz)) continue;
+    if (isInCanalWater(bx, bz)) continue;
+    if (_tooClose(bx, bz, 10)) continue;
+    outerBushPositions.push([bx, bz]);
+    _placedObjList.push({ x: bx, z: bz, r: 8 });
+  }
+
+  for (const [bx, bz] of outerBushPositions) {
+    const bh = getTerrainHeight(bx, bz);
+    const group = new THREE.Group();
+    group.position.set(bx, bh, bz);
+    group.rotation.y = rng() * Math.PI * 2;
+    const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
+    const darkColor = (baseColor & 0xFEFEFE) >> 1;
+    const scale = (0.9 + rng() * 0.7) * 0.569;
+    const blobs = [
+      { r: 1.10 * scale, y: 0.55 * scale, x:  0,            z:  0 },
+      { r: 0.85 * scale, y: 0.90 * scale, x:  0.5 * scale,  z:  0.2 * scale },
+      { r: 0.80 * scale, y: 0.85 * scale, x: -0.4 * scale,  z: -0.3 * scale },
+      { r: 0.65 * scale, y: 1.20 * scale, x:  0.15 * scale, z:  0.1 * scale },
+      { r: 0.45 * scale, y: 1.50 * scale, x: -0.1 * scale,  z: -0.1 * scale },
+    ];
+    blobs.forEach(({ r, y, x, z }, i) => {
+      const col = i < 2 ? darkColor : baseColor;
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 5),
+        new THREE.MeshLambertMaterial({ color: col }));
+      mesh.position.set(x, y, z);
+      group.add(mesh);
+    });
+    scene.add(group);
+    const _bCol2 = new THREE.Mesh(
+      new THREE.BoxGeometry(2.0 * scale, 1.4 * scale, 2.0 * scale),
+      new THREE.MeshBasicMaterial()
+    );
+    _bCol2.position.set(bx, bh + 0.7 * scale, bz);
+    _bCol2.updateMatrixWorld(true);
+    collidables.push(_bCol2);
   }
 }
 // BOTS — AI with shooting, prison spawn, ammo seeking
@@ -2429,6 +2489,7 @@ function createBot(x, z, name) {
     isGrounded: true,
     waypoint: null,
     fleeTarget: null,
+    snapshots: [],  // position history for kill-cam
     parts: { body, head, legs: group.children.filter((_, i) => i >= 3 && i <= 4), arms: group.children.filter((_, i) => i >= 5) },
   };
   bots.push(bot);
@@ -2529,8 +2590,13 @@ function updateBots(dt) {
         const hitChance = Math.max(0.08, 0.48 - distToPlayer * 0.005 - bot.shootAccuracy);
         if (Math.random() < hitChance) {
           const dmg = 8 + Math.floor(Math.random() * 7);
+          const prevHp = state.hp;
           if (state.armor > 0) { state.armor = Math.max(0, state.armor - dmg); }
           else { state.hp = Math.max(0, state.hp - dmg); }
+          if (prevHp > 0 && state.hp <= 0) {
+            state.killCamBotIndex = bots.indexOf(bot);
+            state.killCamShooterId = null;
+          }
           updateHUD();
           const dv = document.getElementById('damage-vignette');
           dv.classList.add('show');
@@ -2615,6 +2681,15 @@ function updateBots(dt) {
     if (bot.parts.legs[1]) bot.parts.legs[1].rotation.x = -swing;
     if (bot.parts.arms[0]) bot.parts.arms[0].rotation.x = -swing * 0.6;
     if (bot.parts.arms[1]) bot.parts.arms[1].rotation.x = swing * 0.6;
+
+    // Record position snapshot for kill-cam (20Hz, keep last 4s)
+    const snapNow = Date.now();
+    const lastSnap = bot.snapshots[bot.snapshots.length - 1];
+    if (!lastSnap || snapNow - lastSnap.t >= 50) {
+      bot.snapshots.push({ t: snapNow, x: bot.group.position.x, y: bot.group.position.y, z: bot.group.position.z, yaw: bot.group.rotation.y });
+      const snapCutoff = snapNow - 4000;
+      while (bot.snapshots.length > 2 && bot.snapshots[0].t < snapCutoff) bot.snapshots.shift();
+    }
   }
 }
 
@@ -2778,9 +2853,10 @@ depotCorners.forEach(({ x, z }) => {
   const colR = 0.666, colH = wallH;
 
   // Roman temple materials — Lambert responds to scene lighting (depth/shading)
-  const stone   = new THREE.MeshLambertMaterial({ color: 0xD8D2C8 }); // warm limestone
-  const stoneDk = new THREE.MeshLambertMaterial({ color: 0xB8B2A8 }); // unused, kept for safety
-  const roofMat = new THREE.MeshBasicMaterial({ color: 0x5B2C8B });   // royal purple roof (unlit — no z-fight)
+  const stone     = new THREE.MeshLambertMaterial({ color: 0xD8D2C8 }); // warm limestone
+  const stoneDk   = new THREE.MeshLambertMaterial({ color: 0xB8B2A8 }); // unused, kept for safety
+  const stoneCeil = new THREE.MeshBasicMaterial({ color: 0xB0ACA4 });   // unlit ceiling — avoids green hemisphere tint
+  const roofMat   = new THREE.MeshBasicMaterial({ color: 0x5B2C8B });   // royal purple roof (unlit — no z-fight)
 
   // Helper — add mesh as child of rotated group (local coords)
   const addM = (geo, mat, lx, ly, lz, rx, ry, rz) => {
@@ -2791,6 +2867,7 @@ depotCorners.forEach(({ x, z }) => {
     if (rz != null) m.rotation.z = rz;
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
+    targets.push(m); // bullet impacts on shed surfaces
     return m;
   };
 
@@ -2834,7 +2911,7 @@ depotCorners.forEach(({ x, z }) => {
 
   // ── Entablature ──
   const entY = wallH, entH = 1.0;
-  addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stone, 0, entY + entH / 2, 0);
+  addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stoneCeil, 0, entY + entH / 2, 0);
   addM(new THREE.BoxGeometry(bw + colR * 2 + 1.2, 0.22, bd + colR * 2 + 1.2), roofMat, 0, entY + entH + 0.11, 0);
 
   // ── Pediment (triangular gable) — front (+Z) and back (-Z) ──
@@ -4187,6 +4264,7 @@ window.toggleMenuMusic = function toggleMenuMusic() {
 }
 
 overlay.addEventListener('click', (e) => {
+  if (state.playerDead) return;
   if (e.target.id === 'music-toggle-btn' || e.target.closest('#music-toggle-btn')) return;
   if (state.pendingLock) {
     state.pendingLock = false;
@@ -4200,6 +4278,7 @@ overlay.addEventListener('click', (e) => {
   renderer.domElement.requestPointerLock();
 });
 renderer.domElement.addEventListener('click', () => {
+  if (state.playerDead) return; // keep mouse free for menu buttons
   // Always lock on click if match just started (pendingLock set by startMatch handler)
   if (state.pendingLock) {
     state.pendingLock = false;
@@ -4326,6 +4405,10 @@ function applyHitEvent(evt) {
     if (evt.targetHp !== undefined)    state.hp    = evt.targetHp;
     else state.hp = Math.max(0, state.hp - evt.damage);
     if (evt.targetArmor !== undefined) state.armor = evt.targetArmor;
+    if (state.hp <= 0 && evt.shooter) {
+      state.killCamShooterId = evt.shooter;
+      state.killCamBotIndex = -1;
+    }
     updateHUD();
     return;
   }
@@ -4365,6 +4448,7 @@ function shoot() {
   }
 
   state.ammo[state.currentWeapon]--;
+  state.shotsFired++;
   state.canFire = false;
 
   const isM4 = state.currentWeapon === 'm4';
@@ -4481,6 +4565,7 @@ function shoot() {
         if (isHead) SFX.headshot();
         else SFX.hitmarker();
 
+        state.shotsHit++;
         const wasAlive = bot.alive;
         damageBot(bot, dmg, isHead);
         if (wasAlive && !bot.alive) SFX.kill_chaching();
@@ -4493,6 +4578,7 @@ function shoot() {
           clearTimeout(hitmarkerTimeout);
           hitmarkerTimeout = setTimeout(() => hitmarker.classList.remove('show'), 120);
           if (isHead) SFX.headshot(); else SFX.hitmarker();
+          state.shotsHit++;
           // No friendly fire during warmup lobby — hitmarker shows but no damage sent
           if (!state.inLobby) sendShoot(remoteHit.id, dmg, isHead);
         }
@@ -5243,7 +5329,7 @@ function update() {
   // Canal boost HUD
   if (streamBoostEl) streamBoostEl.style.display = state.inCanal ? "block" : "none";
 
-  if (!state.locked) {
+  if (!state.locked && !state.playerDead) {
     updateDroneCamera(renderDt);
     if (window.skyDome) window.skyDome.position.copy(droneCamera.position);
     droneRenderer.render(scene, droneCamera);
@@ -5293,13 +5379,9 @@ function update() {
   if (state.phase === 'playing' && state.hp <= 0 && !state.playerDead) {
     state.playerDead = true;
     state.phase = 'gameover';
-    const goScreen = document.getElementById('game-over-screen');
-    document.getElementById('go-kills').textContent = state.kills;
-    const m = Math.floor(state.matchTime / 60);
-    const s = Math.floor(state.matchTime % 60);
-    document.getElementById('go-time').textContent = m + ':' + String(s).padStart(2, '0');
-    setTimeout(() => goScreen.classList.add('show'), 500);
-    document.getElementById('spectate-banner').classList.add('show');
+    state.killCamVictimPos = camera.position.clone();
+    if (document.pointerLockElement) document.exitPointerLock();
+    startKillCam();
   }
 
   // Check victory
@@ -5320,14 +5402,78 @@ function update() {
     }
   }
 
+  // Kill-cam playback
+  if (state.killCamActive) {
+    state.killCamPlayTime += renderDt * 0.8;
+    const t = Math.min(state.killCamPlayTime, state.killCamDuration);
+    const buf = state.killCamBuffer;
+    if (buf && buf.length >= 1) {
+      let s0 = buf[0], s1 = buf[buf.length - 1];
+      for (let i = 0; i < buf.length - 1; i++) {
+        if (buf[i].relT <= t && buf[i + 1].relT > t) { s0 = buf[i]; s1 = buf[i + 1]; break; }
+      }
+      const alpha = (s1.relT === s0.relT) ? 1 : Math.max(0, Math.min(1, (t - s0.relT) / (s1.relT - s0.relT)));
+      const kx = s0.x + (s1.x - s0.x) * alpha;
+      const ky = s0.y + (s1.y - s0.y) * alpha;
+      const kz = s0.z + (s1.z - s0.z) * alpha;
+      let dyaw = s1.yaw - s0.yaw;
+      while (dyaw >  Math.PI) dyaw -= Math.PI * 2;
+      while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      state.yaw = s0.yaw + dyaw * alpha;
+      // Pitch: aim toward victim death position
+      const vp = state.killCamVictimPos;
+      if (vp) {
+        const dx = vp.x - kx, dy = (vp.y - 0.85) - (ky + 1.6), dz = vp.z - kz;
+        state.pitch = -Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
+        state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
+      }
+      camera.position.set(kx, ky + 1.6, kz);
+    }
+    if (state.killCamPlayTime >= state.killCamDuration + 0.5) {
+      state.killCamActive = false;
+      document.getElementById('killcam-overlay').classList.remove('show');
+      showPostDeathMenu();
+    }
+    updateBots(renderDt);
+
   // Spectate mode
-  if (state.playerDead) {
+  } else if (state.playerDead && state.spectateMode) {
     const aliveBots = bots.filter(b => b.alive);
-    if (aliveBots.length > 0) {
-      const specBot = aliveBots[state.spectateIndex % aliveBots.length];
-      const specPos = specBot.group.position;
-      camera.position.lerp(new THREE.Vector3(specPos.x - 5, specPos.y + 4, specPos.z - 5), renderDt * 3);
-      camera.lookAt(specPos.x, specPos.y + 1.5, specPos.z);
+    const aliveRemote = Object.values(state.remotePlayers).filter(rp => !rp.dead);
+    const allTargets = [
+      ...aliveBots.map(b => ({ type: 'bot', obj: b })),
+      ...aliveRemote.map(rp => ({ type: 'player', obj: rp })),
+    ];
+    if (allTargets.length > 0) {
+      const tgt = allTargets[state.spectateIndex % allTargets.length];
+      let specPos, specYaw;
+      if (tgt.type === 'bot') {
+        specPos = tgt.obj.group.position;
+        specYaw = tgt.obj.group.rotation.y || 0;
+      } else {
+        specPos = tgt.obj.mesh.position;
+        const snaps = tgt.obj.snapshots;
+        specYaw = snaps.length > 0 ? snaps[snaps.length - 1].yaw : 0;
+      }
+      if (state.spectateMode === '1st') {
+        camera.position.lerp(new THREE.Vector3(specPos.x, specPos.y + 1.6, specPos.z), renderDt * 12);
+        let dy = specYaw - state.spectateYaw;
+        while (dy >  Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        state.spectateYaw += dy * Math.min(1, renderDt * 12);
+        state.yaw = state.spectateYaw;
+        state.pitch = 0;
+      } else {
+        const behind = new THREE.Vector3(
+          specPos.x - Math.sin(specYaw) * 5,
+          specPos.y + 4,
+          specPos.z - Math.cos(specYaw) * 5
+        );
+        camera.position.lerp(behind, renderDt * 4);
+        camera.lookAt(specPos.x, specPos.y + 1.5, specPos.z);
+      }
+      const nameEl = document.getElementById('spec-name');
+      if (nameEl) nameEl.textContent = tgt.type === 'bot' ? 'BOT' : ('Player ' + tgt.obj.mesh.userData.id);
     }
     updateBots(renderDt);
   }
@@ -5345,7 +5491,7 @@ function update() {
     gatePivotR.rotation.y = -angle;
   }
 
-  if (!state.playerDead) updateBots(renderDt);
+  if (!state.playerDead && !state.killCamActive) updateBots(renderDt);
 
   // Snapshot interpolation — render each remote player at (now - INTERP_DELAY),
   // smoothly interpolating between two real received snapshots. No rubber-banding.
@@ -5790,8 +5936,10 @@ function update() {
   if (window.skyDome) window.skyDome.position.copy(camera.position);
   renderer.clear();
   renderer.render(scene, camera);
-  renderer.clearDepth();
-  renderer.render(weaponScene, weaponCamera);
+  if (!state.killCamActive && !state.playerDead) {
+    renderer.clearDepth();
+    renderer.render(weaponScene, weaponCamera);
+  }
   camera.position.y -= headBobY;
   camera.position.sub(state.shakeOffset);
   // Restore physics quaternion
@@ -5863,8 +6011,85 @@ document.getElementById('go-restart').addEventListener('click', () => location.r
 document.getElementById('win-restart').addEventListener('click', () => location.reload());
 
 document.addEventListener('click', () => {
-  if (state.playerDead) state.spectateIndex++;
+  if (state.playerDead && state.spectateMode) state.spectateIndex++;
 });
+
+// ── Kill-cam: build replay buffer from killer's snapshot history ──
+function startKillCam() {
+  state.killCamPlayTime = 0;
+  state.killCamActive = true;
+  state.killCamBuffer = [];
+  const now = Date.now();
+  const cutoff = now - 3000;
+
+  let snaps = null;
+  if (state.killCamShooterId && state.remotePlayers[state.killCamShooterId]) {
+    snaps = state.remotePlayers[state.killCamShooterId].snapshots.filter(s => s.t >= cutoff);
+  }
+
+  if (snaps && snaps.length > 0) {
+    const baseT = snaps[0].t;
+    state.killCamBuffer = snaps.map(s => ({
+      relT: (s.t - baseT) / 1000,
+      x: s.x, y: s.y, z: s.z, yaw: s.yaw,
+    }));
+    state.killCamDuration = (snaps[snaps.length - 1].t - baseT) / 1000;
+  } else if (state.killCamBotIndex >= 0 && bots[state.killCamBotIndex]) {
+    const bot = bots[state.killCamBotIndex];
+    const vp = state.killCamVictimPos || camera.position;
+    const rawSnaps = bot.snapshots.filter(s => s.t >= cutoff);
+    if (rawSnaps.length > 0) {
+      const baseT = rawSnaps[0].t;
+      state.killCamBuffer = rawSnaps.map(s => ({
+        relT: (s.t - baseT) / 1000,
+        x: s.x, y: s.y, z: s.z,
+        yaw: Math.atan2(vp.x - s.x, vp.z - s.z), // always aimed at player
+      }));
+      state.killCamDuration = (rawSnaps[rawSnaps.length - 1].t - baseT) / 1000;
+    } else {
+      // No history — static frame from bot's current position
+      const bp = bot.group.position;
+      const byaw = Math.atan2(vp.x - bp.x, vp.z - bp.z);
+      state.killCamBuffer = [
+        { relT: 0, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
+        { relT: 3, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
+      ];
+      state.killCamDuration = 3.0;
+    }
+  } else {
+    // Unknown killer — place cam near death position
+    const vp = state.killCamVictimPos || camera.position;
+    state.killCamBuffer = [
+      { relT: 0, x: vp.x - 4, y: vp.y - 1.0, z: vp.z, yaw: 0 },
+      { relT: 3, x: vp.x - 4, y: vp.y - 1.0, z: vp.z, yaw: 0 },
+    ];
+    state.killCamDuration = 3.0;
+  }
+
+  document.getElementById('killcam-overlay').classList.add('show');
+  const crosshairEl = document.getElementById('crosshair');
+  if (crosshairEl) crosshairEl.style.display = 'none';
+}
+
+// ── Show post-death stat card + spectate choice menu ──
+function showPostDeathMenu() {
+  const goScreen = document.getElementById('game-over-screen');
+  document.getElementById('go-kills').textContent = state.kills;
+  const m = Math.floor(state.matchTime / 60);
+  const s = Math.floor(state.matchTime % 60);
+  document.getElementById('go-time').textContent = m + ':' + String(s).padStart(2, '0');
+  const acc = state.shotsFired > 0 ? Math.round(state.shotsHit / state.shotsFired * 100) : 0;
+  document.getElementById('go-shots').textContent = state.shotsFired;
+  document.getElementById('go-accuracy').textContent = acc + '%';
+  setTimeout(() => goScreen.classList.add('show'), 300);
+}
+
+window.startSpectate = function(mode) {
+  state.spectateMode = mode;
+  state.spectateIndex = 0;
+  document.getElementById('game-over-screen').classList.remove('show');
+  document.getElementById('spectate-banner').classList.add('show');
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MULTIPLAYER — WebSocket client
@@ -6000,8 +6225,8 @@ function updateRemotePlayers(playerList) {
     rp.mesh.visible = !p.dead;
 
     rp.snapshots.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
-    // Keep ~600ms of history; always retain at least 2 for interpolation
-    const cutoff = now - 600;
+    // Keep 4s of history for kill-cam; interpolation only needs 2 at a time
+    const cutoff = now - 4000;
     while (rp.snapshots.length > 2 && rp.snapshots[0].t < cutoff) rp.snapshots.shift();
   }
 

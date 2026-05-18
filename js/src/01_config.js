@@ -96,5 +96,18 @@ const state = {
   countdownTime: 10,
   playerDead: false,
   spectateIndex: 0,
+  spectateMode: null,      // null | '1st' | '3rd'
+  spectateYaw: 0,
   erupted: false,
+  // Kill-cam
+  killCamActive: false,
+  killCamShooterId: null,
+  killCamBotIndex: -1,
+  killCamBuffer: [],
+  killCamPlayTime: 0,
+  killCamDuration: 3.0,
+  killCamVictimPos: null,
+  // Stat tracking
+  shotsFired: 0,
+  shotsHit: 0,
 };
