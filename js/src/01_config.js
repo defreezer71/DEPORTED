@@ -88,7 +88,7 @@ const state = {
   sprintTimer: 0,
   waterRising: false,
   waterLevel: 0.05,
-  waterRiseStart: 150,
+  waterRiseStart: 146,
   matchDuration: 600,
   waterDmgTimer: 0,
   // Game phase: 'lobby' → 'countdown' → 'playing' → 'gameover' | 'victory'

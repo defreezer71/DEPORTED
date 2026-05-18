@@ -830,11 +830,13 @@ function update() {
 
     const timeSinceRise = state.matchTime - state.waterRiseStart;
     let riseProgress;
-    if (timeSinceRise < 10) {
-      riseProgress = (timeSinceRise / 10) * 0.02;
+    if (timeSinceRise < 20) {
+      // Slow grace period — crawls up for 20s to give distant players time to reach volcano
+      riseProgress = (timeSinceRise / 20) * 0.015;
     } else {
-      const normalProgress = (timeSinceRise - 10) / (state.matchDuration - state.waterRiseStart - 10);
-      riseProgress = 0.02 + Math.pow(normalProgress, 0.70) * 0.98;
+      // After 20s — accelerated rise, shrinks playable volcano area quickly
+      const normalProgress = (timeSinceRise - 20) / (state.matchDuration - state.waterRiseStart - 20);
+      riseProgress = 0.015 + Math.pow(normalProgress, 0.55) * 0.985;
     }
     state.waterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3);
     water.position.y = state.waterLevel;

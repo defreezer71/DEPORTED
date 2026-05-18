@@ -129,8 +129,10 @@ depotCorners.forEach(({ x, z }) => {
   for (const sx of [-1, 1]) {
     const wx = sx * (bw / 2 - wt / 2);
     addM(new THREE.BoxGeometry(wt, wallH, bd), stone, wx, wallH / 2, 0);
+    // Accent bands sit ONLY on the exterior wall face — no interior protrusion
+    const bandCX = sx * (bw / 2 + 0.05); // flush against outer face, protrudes 0.10 outward
     for (const fy of [0.27, 0.58]) {
-      addM(new THREE.BoxGeometry(wt + 0.14, 0.30, bd + 0.14), purple, wx, wallH * fy, 0);
+      addM(new THREE.BoxGeometry(0.10, 0.30, bd + 0.14), purple, bandCX, wallH * fy, 0);
     }
   }
 
@@ -155,7 +157,16 @@ depotCorners.forEach(({ x, z }) => {
   // ── Entablature ──
   const entY = wallH, entH = 1.0;
   addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stone, 0, entY + entH / 2, 0);
-  addM(new THREE.BoxGeometry(bw + colR * 2 + 1.4, entH * 0.42, bd + colR * 2 + 1.4), purple, 0, entY + entH * 0.70, 0);
+  // Purple frieze — 4 thin strips on exterior faces only, no interior overlap
+  {
+    const eHW = (bw + colR * 2 + 0.8) / 2;
+    const eHD = (bd + colR * 2 + 0.8) / 2;
+    const fH = entH * 0.42, fY = entY + entH * 0.70, fT = 0.10;
+    addM(new THREE.BoxGeometry(eHW * 2 + fT * 2, fH, fT), purple, 0, fY,  eHD + fT / 2);
+    addM(new THREE.BoxGeometry(eHW * 2 + fT * 2, fH, fT), purple, 0, fY, -eHD - fT / 2);
+    addM(new THREE.BoxGeometry(fT, fH, eHD * 2),           purple, -eHW - fT / 2, fY, 0);
+    addM(new THREE.BoxGeometry(fT, fH, eHD * 2),           purple,  eHW + fT / 2, fY, 0);
+  }
   addM(new THREE.BoxGeometry(bw + colR * 2 + 1.2, 0.22, bd + colR * 2 + 1.2), stoneDk, 0, entY + entH + 0.11, 0);
 
   // ── Pediment (triangular gable) — front (+Z) and back (-Z) ──
@@ -167,7 +178,7 @@ depotCorners.forEach(({ x, z }) => {
   for (const pz of [-1, 1]) {
     const pzp = pz * (bd / 2 + colR + 0.4);
     addM(new THREE.BoxGeometry(pedW, ridgeH, wt), stone, 0, pedBaseY + ridgeH / 2, pzp);
-    addM(new THREE.BoxGeometry(pedW + 0.3, 0.22, wt + 0.14), purple, 0, pedBaseY + 0.11, pzp);
+    addM(new THREE.BoxGeometry(pedW + 0.3, 0.22, 0.10), purple, 0, pedBaseY + 0.11, pzp + pz * 0.05);
     for (const sx of [-1, 1]) {
       addM(new THREE.BoxGeometry(rakeLen, 0.22, wt + 0.08), stoneDk,
         sx * pedW / 4, pedBaseY + ridgeH / 2, pzp, null, null, -sx * rakeAng);
