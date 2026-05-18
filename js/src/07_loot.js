@@ -68,6 +68,7 @@ function spawnLoot(x, z, type) {
 // ═══════════════════════════════════════════════════════════
 const windowPanes = [];
 const obbCollidables = []; // read by 08b_physics.js _moveHorizontal/_depenetrate
+const obbFloors = [];      // raised floor surfaces (shed podium steps) — checked in _physStep
 
 const depotCorners = [
   { x:  half - 16, z:  half - 16 },
@@ -122,6 +123,11 @@ depotCorners.forEach(({ x, z }) => {
   addM(new THREE.BoxGeometry(bw + 5.0, 0.22, bd + 5.0), stoneDk, 0, 0.11, 0);
   addM(new THREE.BoxGeometry(bw + 3.0, 0.20, bd + 3.0), stone,   0, 0.32, 0);
   addM(new THREE.BoxGeometry(bw + 1.0, 0.18, bd + 1.0), stoneDk, 0, 0.51, 0);
+
+  // Podium step floors — each step is one OBB floor level; player snaps up incrementally
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 5.0) / 2, hd: (bd + 5.0) / 2, topY: h + 0.22 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 3.0) / 2, hd: (bd + 3.0) / 2, topY: h + 0.42 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 1.0) / 2, hd: (bd + 1.0) / 2, topY: h + 0.60 });
 
   // ── Solid side walls (local ±X) ──
   for (const sx of [-1, 1]) {

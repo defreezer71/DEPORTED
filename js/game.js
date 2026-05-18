@@ -2013,7 +2013,7 @@ const _dirtPatches = [];
     [ 68,  48],   // outer left
     [-68,  48],   // outer right
   ];
-  const bH  = 0.256;  // blade length (20% shorter)
+  const bH  = 0.218;  // blade length
   const bBW = 0.026;  // base half-width
   const bTW = 0.005;  // tip half-width
   const BASE_COL = [0.06, 0.26, 0.04];   // very dark green at soil
@@ -2320,7 +2320,7 @@ const _dirtPatches = [];
 
     const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
     const darkColor = (baseColor & 0xFEFEFE) >> 1; // 50% darker
-    const scale = (0.9 + rng() * 0.7) * 0.55; // size variety
+    const scale = (0.9 + rng() * 0.7) * 0.6325; // size variety
 
     // Layered blob structure: wide base, narrower mid, small top
     const blobs = [
@@ -2342,6 +2342,14 @@ const _dirtPatches = [];
     });
 
     scene.add(group);
+    // Collision proxy — same footprint as the bush cluster
+    const _bCol = new THREE.Mesh(
+      new THREE.BoxGeometry(2.0 * scale, 1.4 * scale, 2.0 * scale),
+      new THREE.MeshBasicMaterial()
+    );
+    _bCol.position.set(bx, bh + 0.7 * scale, bz);
+    _bCol.updateMatrixWorld(true);
+    collidables.push(_bCol);
   }
 }
 // BOTS — AI with shooting, prison spawn, ammo seeking
@@ -2735,6 +2743,7 @@ function spawnLoot(x, z, type) {
 // ═══════════════════════════════════════════════════════════
 const windowPanes = [];
 const obbCollidables = []; // read by 08b_physics.js _moveHorizontal/_depenetrate
+const obbFloors = [];      // raised floor surfaces (shed podium steps) — checked in _physStep
 
 const depotCorners = [
   { x:  half - 16, z:  half - 16 },
@@ -2789,6 +2798,11 @@ depotCorners.forEach(({ x, z }) => {
   addM(new THREE.BoxGeometry(bw + 5.0, 0.22, bd + 5.0), stoneDk, 0, 0.11, 0);
   addM(new THREE.BoxGeometry(bw + 3.0, 0.20, bd + 3.0), stone,   0, 0.32, 0);
   addM(new THREE.BoxGeometry(bw + 1.0, 0.18, bd + 1.0), stoneDk, 0, 0.51, 0);
+
+  // Podium step floors — each step is one OBB floor level; player snaps up incrementally
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 5.0) / 2, hd: (bd + 5.0) / 2, topY: h + 0.22 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 3.0) / 2, hd: (bd + 3.0) / 2, topY: h + 0.42 });
+  obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 1.0) / 2, hd: (bd + 1.0) / 2, topY: h + 0.60 });
 
   // ── Solid side walls (local ±X) ──
   for (const sx of [-1, 1]) {
@@ -2999,6 +3013,8 @@ function createWeaponModel(type) {
   const mEdge   = new THREE.MeshPhongMaterial({ color: 0x424242, shininess: 140, specular: new THREE.Color(0x888888) });
   const mChrome = new THREE.MeshPhongMaterial({ color: 0x585858, shininess: 220, specular: new THREE.Color(0xbbbbbb) });
   const mLens   = new THREE.MeshPhongMaterial({ color: 0x001122, shininess: 300, specular: new THREE.Color(0x224488), emissive: new THREE.Color(0x000811) });
+  const mWood   = new THREE.MeshPhongMaterial({ color: 0x7a4a1a, shininess: 15 });
+  const mWoodDk = new THREE.MeshPhongMaterial({ color: 0x5a3010, shininess: 10 });
   const mGlove  = new THREE.MeshPhongMaterial({ color: 0x1a2410, shininess: 8 });
   const mGlvL   = new THREE.MeshPhongMaterial({ color: 0x283418, shininess: 12 });
   const mSkin   = new THREE.MeshPhongMaterial({ color: 0xc4a882, shininess: 5 });
@@ -3026,9 +3042,9 @@ function createWeaponModel(type) {
     add(Cy(0.020,0.028,0.010,10), mEdge,   0, 0.000,-0.672, PI2,0,0);  // front taper
     add(Cy(0.014,0.014,0.008, 8), mChrome, 0, 0.000,-0.680, PI2,0,0);  // crown
 
-    // ── HANDGUARD (solid polymer AK-style, no rails) ──
-    add(B(0.052,0.022,0.215), mDark,   0, 0.014,-0.425);
-    add(B(0.056,0.024,0.215), mDark,   0,-0.016,-0.425);
+    // ── HANDGUARD (wood) ──
+    add(B(0.052,0.022,0.215), mWood,   0, 0.014,-0.425);
+    add(B(0.056,0.024,0.215), mWoodDk, 0,-0.016,-0.425);
     for (let s=0; s<4; s++) {
       add(B(0.006,0.016,0.020), mBlack,  0.029, 0.008,-0.348+s*0.052);
       add(B(0.006,0.016,0.020), mBlack, -0.029, 0.008,-0.348+s*0.052);
@@ -3063,8 +3079,8 @@ function createWeaponModel(type) {
     add(B(0.006,0.175,0.010), mMetal,  0,-0.178,-0.265, 0.16,0,0);   // rear spine rib
     add(B(0.044,0.010,0.010), mMetal,  0,-0.098,-0.258);              // mag catch groove
 
-    // ── AK PISTOL GRIP ──
-    add(B(0.038,0.094,0.046), mBlack,  0,-0.126,-0.130,-0.30,0,0);
+    // ── AK PISTOL GRIP (wood) ──
+    add(B(0.038,0.094,0.046), mWood,   0,-0.126,-0.130,-0.30,0,0);
     add(B(0.040,0.012,0.048), mDark,   0,-0.190,-0.138,-0.30,0,0);
     for (let f=0;f<3;f++) add(B(0.040,0.004,0.040), mDark, 0,-0.108+f*-0.023,-0.128,-0.30,0,0);
     add(B(0.002,0.082,0.040), mEdge,   0.021,-0.128,-0.129,-0.30,0,0);
@@ -3567,6 +3583,20 @@ function _physStep(fixedDt, inputDir, speed) {
       const feetH = phys.pos.y;
       if (feetH >= bb.max.y - 0.6 && feetH <= bb.max.y + 1.2) {
         floorY = Math.max(floorY, bb.max.y);
+      }
+    }
+  }
+
+  // OBB floor check — shed podium steps (rotation-aware)
+  for (const fl of obbFloors) {
+    const fdx = phys.pos.x - fl.shedX;
+    const fdz = phys.pos.z - fl.shedZ;
+    const flx = fdx * fl.cosR - fdz * fl.sinR;
+    const flz = fdx * fl.sinR + fdz * fl.cosR;
+    if (Math.abs(flx) <= fl.hw && Math.abs(flz) <= fl.hd) {
+      const fh = phys.pos.y;
+      if (fh >= fl.topY - 0.65 && fh <= fl.topY + 1.5) {
+        floorY = Math.max(floorY, fl.topY);
       }
     }
   }

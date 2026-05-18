@@ -260,6 +260,20 @@ function _physStep(fixedDt, inputDir, speed) {
     }
   }
 
+  // OBB floor check — shed podium steps (rotation-aware)
+  for (const fl of obbFloors) {
+    const fdx = phys.pos.x - fl.shedX;
+    const fdz = phys.pos.z - fl.shedZ;
+    const flx = fdx * fl.cosR - fdz * fl.sinR;
+    const flz = fdx * fl.sinR + fdz * fl.cosR;
+    if (Math.abs(flx) <= fl.hw && Math.abs(flz) <= fl.hd) {
+      const fh = phys.pos.y;
+      if (fh >= fl.topY - 0.65 && fh <= fl.topY + 1.5) {
+        floorY = Math.max(floorY, fl.topY);
+      }
+    }
+  }
+
   // Promote step-up ledge to floor so we land on it
   if (stepUpY > 0) floorY = Math.max(floorY, stepUpY);
 

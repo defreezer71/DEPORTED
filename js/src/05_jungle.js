@@ -682,7 +682,7 @@ const _dirtPatches = [];
     [ 68,  48],   // outer left
     [-68,  48],   // outer right
   ];
-  const bH  = 0.256;  // blade length (20% shorter)
+  const bH  = 0.218;  // blade length
   const bBW = 0.026;  // base half-width
   const bTW = 0.005;  // tip half-width
   const BASE_COL = [0.06, 0.26, 0.04];   // very dark green at soil
@@ -989,7 +989,7 @@ const _dirtPatches = [];
 
     const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
     const darkColor = (baseColor & 0xFEFEFE) >> 1; // 50% darker
-    const scale = (0.9 + rng() * 0.7) * 0.55; // size variety
+    const scale = (0.9 + rng() * 0.7) * 0.6325; // size variety
 
     // Layered blob structure: wide base, narrower mid, small top
     const blobs = [
@@ -1011,5 +1011,13 @@ const _dirtPatches = [];
     });
 
     scene.add(group);
+    // Collision proxy — same footprint as the bush cluster
+    const _bCol = new THREE.Mesh(
+      new THREE.BoxGeometry(2.0 * scale, 1.4 * scale, 2.0 * scale),
+      new THREE.MeshBasicMaterial()
+    );
+    _bCol.position.set(bx, bh + 0.7 * scale, bz);
+    _bCol.updateMatrixWorld(true);
+    collidables.push(_bCol);
   }
 }
