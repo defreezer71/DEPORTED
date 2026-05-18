@@ -2795,9 +2795,9 @@ depotCorners.forEach(({ x, z }) => {
   };
 
   // ── Podium steps — wide overhangs for visibility, height kept ≤0.60 so player eye stays above ──
-  addM(new THREE.BoxGeometry(bw + 5.0, 0.22, bd + 5.0), stoneDk, 0, 0.11, 0);
-  addM(new THREE.BoxGeometry(bw + 3.0, 0.20, bd + 3.0), stone,   0, 0.32, 0);
-  addM(new THREE.BoxGeometry(bw + 1.0, 0.18, bd + 1.0), stoneDk, 0, 0.51, 0);
+  addM(new THREE.BoxGeometry(bw + 5.0, 0.22, bd + 5.0), stone, 0, 0.11, 0);
+  addM(new THREE.BoxGeometry(bw + 3.0, 0.20, bd + 3.0), stone, 0, 0.32, 0);
+  addM(new THREE.BoxGeometry(bw + 1.0, 0.18, bd + 1.0), stone, 0, 0.51, 0);
 
   // Podium step floors — each step is one OBB floor level; player snaps up incrementally
   obbFloors.push({ shedX: x, shedZ: z, cosR, sinR, hw: (bw + 5.0) / 2, hd: (bd + 5.0) / 2, topY: h + 0.22 });
@@ -2812,9 +2812,9 @@ depotCorners.forEach(({ x, z }) => {
 
   // ── Column helper: base + shaft + accent band + capital ──
   const addCol = (lx, lz) => {
-    addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stoneDk, lx, 0.11, lz);
+    addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stone, lx, 0.11, lz);
     addM(new THREE.CylinderGeometry(colR, colR * 1.06, colH, 12), stone, lx, colH / 2, lz);
-    addM(new THREE.CylinderGeometry(colR + 0.04, colR + 0.04, colH * 0.36, 12), stoneDk, lx, colH * 0.24, lz);
+    addM(new THREE.CylinderGeometry(colR + 0.04, colR + 0.04, colH * 0.36, 12), stone, lx, colH * 0.24, lz);
   };
 
   // Front face (+Z = bd/2) — 5 columns, player walks between them (gap ≈ 2.65 units)
@@ -2831,7 +2831,7 @@ depotCorners.forEach(({ x, z }) => {
   // ── Entablature ──
   const entY = wallH, entH = 1.0;
   addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stone, 0, entY + entH / 2, 0);
-  addM(new THREE.BoxGeometry(bw + colR * 2 + 1.2, 0.22, bd + colR * 2 + 1.2), stoneDk, 0, entY + entH + 0.11, 0);
+  addM(new THREE.BoxGeometry(bw + colR * 2 + 1.2, 0.22, bd + colR * 2 + 1.2), roofMat, 0, entY + entH + 0.11, 0);
 
   // ── Pediment (triangular gable) — front (+Z) and back (-Z) ──
   const pedBaseY = entY + entH + 0.22;
@@ -2842,9 +2842,9 @@ depotCorners.forEach(({ x, z }) => {
   for (const pz of [-1, 1]) {
     const pzp = pz * (bd / 2 + colR + 0.4);
     addM(new THREE.BoxGeometry(pedW, ridgeH, wt), stone, 0, pedBaseY + ridgeH / 2, pzp);
-    addM(new THREE.BoxGeometry(pedW + 0.2, 0.22, wt + 0.06), stoneDk, 0, pedBaseY + 0.11, pzp);
+    addM(new THREE.BoxGeometry(pedW + 0.2, 0.22, wt + 0.06), stone, 0, pedBaseY + 0.11, pzp);
     for (const sx of [-1, 1]) {
-      addM(new THREE.BoxGeometry(rakeLen, 0.22, wt + 0.08), stoneDk,
+      addM(new THREE.BoxGeometry(rakeLen, 0.22, wt + 0.08), roofMat,
         sx * pedW / 4, pedBaseY + ridgeH / 2, pzp, null, null, -sx * rakeAng);
     }
   }
@@ -3588,16 +3588,14 @@ function _physStep(fixedDt, inputDir, speed) {
   }
 
   // OBB floor check — shed podium steps (rotation-aware)
+  // No lower-Y guard: use Math.max so terrain always wins if higher than podium
   for (const fl of obbFloors) {
     const fdx = phys.pos.x - fl.shedX;
     const fdz = phys.pos.z - fl.shedZ;
     const flx = fdx * fl.cosR - fdz * fl.sinR;
     const flz = fdx * fl.sinR + fdz * fl.cosR;
     if (Math.abs(flx) <= fl.hw && Math.abs(flz) <= fl.hd) {
-      const fh = phys.pos.y;
-      if (fh >= fl.topY - 0.65 && fh <= fl.topY + 1.5) {
-        floorY = Math.max(floorY, fl.topY);
-      }
+      floorY = Math.max(floorY, fl.topY);
     }
   }
 
