@@ -962,3 +962,54 @@ const _dirtPatches = [];
   cgInst.instanceColor.needsUpdate  = true;
   scene.add(cgInst);
 }
+
+// ── Decorative low bushes — 20 scattered, visual cover only, no colliders ──
+{
+  const bushColors = [0x3a7a1a, 0x2d6614, 0x4a8c20, 0x336018, 0x528c24];
+  const rng = (() => { let s = 9371; return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; }; })();
+
+  const bushPositions = [];
+  let attempts = 0;
+  while (bushPositions.length < 20 && attempts++ < 2000) {
+    const angle = rng() * Math.PI * 2;
+    const r = 25 + rng() * 80; // spread across map, avoid center
+    const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
+    if (!canPlaceAt(bx, bz)) continue;
+    if (isInCanalWater(bx, bz)) continue;
+    if (_tooClose(bx, bz, 12)) continue;
+    bushPositions.push([bx, bz]);
+    _placedObjList.push({ x: bx, z: bz, r: 10 });
+  }
+
+  for (const [bx, bz] of bushPositions) {
+    const bh = getTerrainHeight(bx, bz);
+    const group = new THREE.Group();
+    group.position.set(bx, bh, bz);
+    group.rotation.y = rng() * Math.PI * 2;
+
+    const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
+    const darkColor = (baseColor & 0xFEFEFE) >> 1; // 50% darker
+    const scale = (0.9 + rng() * 0.7) * 0.55; // size variety
+
+    // Layered blob structure: wide base, narrower mid, small top
+    const blobs = [
+      { r: 1.10 * scale, y: 0.55 * scale, x:  0,              z:  0 },
+      { r: 0.85 * scale, y: 0.90 * scale, x:  0.5 * scale,    z:  0.2 * scale },
+      { r: 0.80 * scale, y: 0.85 * scale, x: -0.4 * scale,    z: -0.3 * scale },
+      { r: 0.65 * scale, y: 1.20 * scale, x:  0.15 * scale,   z:  0.1 * scale },
+      { r: 0.45 * scale, y: 1.50 * scale, x: -0.1 * scale,    z: -0.1 * scale },
+    ];
+
+    blobs.forEach(({ r, y, x, z }, i) => {
+      const col = i < 2 ? darkColor : baseColor;
+      const mat = new THREE.MeshLambertMaterial({ color: col });
+      const geo = new THREE.SphereGeometry(r, 6, 5);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y, z);
+      mesh.castShadow = true;
+      group.add(mesh);
+    });
+
+    scene.add(group);
+  }
+}

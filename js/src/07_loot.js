@@ -103,10 +103,8 @@ depotCorners.forEach(({ x, z }) => {
 
   // Roman temple materials — MeshBasicMaterial = unlit, always renders exact color
   const stone   = new THREE.MeshBasicMaterial({ color: 0xF0EDE8 }); // warm white marble
-  const stoneDk = new THREE.MeshBasicMaterial({ color: 0xC8C4BC }); // clearly darker for step contrast
-  const purple  = new THREE.MeshBasicMaterial({ color: 0x5B2C8B,   // royal purple accent
-    polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });
-  const roofMat = new THREE.MeshBasicMaterial({ color: 0x5C2E15 }); // terracotta tile
+  const stoneDk = new THREE.MeshBasicMaterial({ color: 0xC8C4BC }); // slightly darker white
+  const roofMat = new THREE.MeshBasicMaterial({ color: 0x5B2C8B }); // royal purple roof
 
   // Helper — add mesh as child of rotated group (local coords)
   const addM = (geo, mat, lx, ly, lz, rx, ry, rz) => {
@@ -129,18 +127,13 @@ depotCorners.forEach(({ x, z }) => {
   for (const sx of [-1, 1]) {
     const wx = sx * (bw / 2 - wt / 2);
     addM(new THREE.BoxGeometry(wt, wallH, bd), stone, wx, wallH / 2, 0);
-    // Accent bands sit ONLY on the exterior wall face — no interior protrusion
-    const bandCX = sx * (bw / 2 + 0.05); // flush against outer face, protrudes 0.10 outward
-    for (const fy of [0.27, 0.58]) {
-      addM(new THREE.BoxGeometry(0.10, 0.30, bd + 0.14), purple, bandCX, wallH * fy, 0);
-    }
   }
 
   // ── Column helper: base + shaft + accent band + capital ──
   const addCol = (lx, lz) => {
     addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stoneDk, lx, 0.11, lz);
     addM(new THREE.CylinderGeometry(colR, colR * 1.06, colH, 12), stone, lx, colH / 2, lz);
-    addM(new THREE.CylinderGeometry(colR + 0.10, colR + 0.10, colH * 0.36, 12), purple, lx, colH * 0.24, lz);
+    addM(new THREE.CylinderGeometry(colR + 0.04, colR + 0.04, colH * 0.36, 12), stoneDk, lx, colH * 0.24, lz);
   };
 
   // Front face (+Z = bd/2) — 5 columns, player walks between them (gap ≈ 2.65 units)
@@ -157,16 +150,6 @@ depotCorners.forEach(({ x, z }) => {
   // ── Entablature ──
   const entY = wallH, entH = 1.0;
   addM(new THREE.BoxGeometry(bw + colR * 2 + 0.8, entH, bd + colR * 2 + 0.8), stone, 0, entY + entH / 2, 0);
-  // Purple frieze — 4 thin strips on exterior faces only, no interior overlap
-  {
-    const eHW = (bw + colR * 2 + 0.8) / 2;
-    const eHD = (bd + colR * 2 + 0.8) / 2;
-    const fH = entH * 0.42, fY = entY + entH * 0.70, fT = 0.10;
-    addM(new THREE.BoxGeometry(eHW * 2 + fT * 2, fH, fT), purple, 0, fY,  eHD + fT / 2);
-    addM(new THREE.BoxGeometry(eHW * 2 + fT * 2, fH, fT), purple, 0, fY, -eHD - fT / 2);
-    addM(new THREE.BoxGeometry(fT, fH, eHD * 2),           purple, -eHW - fT / 2, fY, 0);
-    addM(new THREE.BoxGeometry(fT, fH, eHD * 2),           purple,  eHW + fT / 2, fY, 0);
-  }
   addM(new THREE.BoxGeometry(bw + colR * 2 + 1.2, 0.22, bd + colR * 2 + 1.2), stoneDk, 0, entY + entH + 0.11, 0);
 
   // ── Pediment (triangular gable) — front (+Z) and back (-Z) ──
@@ -178,7 +161,7 @@ depotCorners.forEach(({ x, z }) => {
   for (const pz of [-1, 1]) {
     const pzp = pz * (bd / 2 + colR + 0.4);
     addM(new THREE.BoxGeometry(pedW, ridgeH, wt), stone, 0, pedBaseY + ridgeH / 2, pzp);
-    addM(new THREE.BoxGeometry(pedW + 0.3, 0.22, 0.10), purple, 0, pedBaseY + 0.11, pzp + pz * 0.05);
+    addM(new THREE.BoxGeometry(pedW + 0.2, 0.22, wt + 0.06), stoneDk, 0, pedBaseY + 0.11, pzp);
     for (const sx of [-1, 1]) {
       addM(new THREE.BoxGeometry(rakeLen, 0.22, wt + 0.08), stoneDk,
         sx * pedW / 4, pedBaseY + ridgeH / 2, pzp, null, null, -sx * rakeAng);
@@ -194,7 +177,7 @@ depotCorners.forEach(({ x, z }) => {
     addM(new THREE.BoxGeometry(panelDiag, 0.30, panelD), roofMat,
       sx * panelHW / 2, pedBaseY + ridgeH / 2, 0, null, null, -sx * roofAng);
   }
-  addM(new THREE.BoxGeometry(0.40, 0.42, panelD), stoneDk, 0, pedBaseY + ridgeH - 0.1, 0);
+  addM(new THREE.BoxGeometry(0.40, 0.42, panelD), roofMat, 0, pedBaseY + ridgeH - 0.1, 0);
 
   // No floor collider needed — terrain height handles the floor naturally.
 
@@ -238,6 +221,10 @@ depotCorners.forEach(({ x, z }) => {
     crate.userData = { lootType: type, label, depot: true, baseY: cy,
                        shedX: x, shedZ: z, shedHW: bw / 2, shedHD: bd / 2 };
     group.add(crate); depotCrates.push(crate); windowPanes.push(crate);
+    // OBB collider so player can't walk through crates
+    obbCollidables.push({ shedX: x, shedZ: z, lcx: lx, lcz: lz,
+      hx: cs / 2 + 0.1, hz: cs / 2 + 0.1, cosR, sinR,
+      minY: h + crateLocalY - cs / 2, maxY: h + crateLocalY + cs / 2 });
 
     for (const py of [-0.32, 0, 0.32]) {
       const line = new THREE.Mesh(new THREE.BoxGeometry(cs + 0.03, 0.055, cs + 0.03), crateBlack);
