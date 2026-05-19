@@ -49,9 +49,9 @@ function createBot(x, z, name) {
 
   // Weapon with stock
   const gun = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
-  gun.position.set(0.45, 1.1, -0.3); group.add(gun);
+  gun.position.set(0.45, 1.1, 0.3); group.add(gun);
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.14), new THREE.MeshLambertMaterial({ color: 0x3d2812 }));
-  stock.position.set(0.45, 1.1, -0.02); group.add(stock);
+  stock.position.set(0.45, 1.1, 0.02); group.add(stock);
 
   scene.add(group);
   group.children.forEach(c => targets.push(c));

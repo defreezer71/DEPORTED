@@ -2463,9 +2463,9 @@ function createBot(x, z, name) {
 
   // Weapon with stock
   const gun = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
-  gun.position.set(0.45, 1.1, -0.3); group.add(gun);
+  gun.position.set(0.45, 1.1, 0.3); group.add(gun);
   const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.14), new THREE.MeshLambertMaterial({ color: 0x3d2812 }));
-  stock.position.set(0.45, 1.1, -0.02); group.add(stock);
+  stock.position.set(0.45, 1.1, 0.02); group.add(stock);
 
   scene.add(group);
   group.children.forEach(c => targets.push(c));
@@ -5446,32 +5446,48 @@ function update() {
     ];
     if (allTargets.length > 0) {
       const tgt = allTargets[state.spectateIndex % allTargets.length];
-      let specPos, specYaw;
+      let specPos, facingYaw;
       if (tgt.type === 'bot') {
         specPos = tgt.obj.group.position;
-        specYaw = tgt.obj.group.rotation.y || 0;
+        // bot mesh +Z = forward; camera -Z = forward → add π to convert
+        facingYaw = (tgt.obj.group.rotation.y || 0) + Math.PI;
       } else {
         specPos = tgt.obj.mesh.position;
         const snaps = tgt.obj.snapshots;
-        specYaw = snaps.length > 0 ? snaps[snaps.length - 1].yaw : 0;
+        facingYaw = snaps.length > 0 ? snaps[snaps.length - 1].yaw : 0;
       }
+
       if (state.spectateMode === '1st') {
         camera.position.lerp(new THREE.Vector3(specPos.x, specPos.y + 1.6, specPos.z), renderDt * 12);
-        let dy = specYaw - state.spectateYaw;
+        let dy = facingYaw - state.spectateYaw;
         while (dy >  Math.PI) dy -= Math.PI * 2;
         while (dy < -Math.PI) dy += Math.PI * 2;
         state.spectateYaw += dy * Math.min(1, renderDt * 12);
         state.yaw = state.spectateYaw;
         state.pitch = 0;
       } else {
+        // 3rd person: camera behind + above target.
+        // "behind" = opposite of facing direction. Camera faces (-sin, 0, -cos)(facingYaw),
+        // so behind-offset = +(sin, 0, cos)(facingYaw).
         const behind = new THREE.Vector3(
-          specPos.x - Math.sin(specYaw) * 5,
-          specPos.y + 4,
-          specPos.z - Math.cos(specYaw) * 5
+          specPos.x + Math.sin(facingYaw) * 7,
+          specPos.y + 5,
+          specPos.z + Math.cos(facingYaw) * 7
         );
         camera.position.lerp(behind, renderDt * 4);
-        camera.lookAt(specPos.x, specPos.y + 1.5, specPos.z);
+
+        // Compute state.yaw / state.pitch so the render step points camera at target.
+        // camera.lookAt() is overridden by euler.set(pitch, yaw) at render time.
+        const tx = specPos.x, ty = specPos.y + 1.5, tz = specPos.z;
+        const cdx = camera.position.x - tx;
+        const cdy = camera.position.y - ty;
+        const cdz = camera.position.z - tz;
+        const cxzLen = Math.sqrt(cdx * cdx + cdz * cdz);
+        state.yaw   = Math.atan2(cdx, cdz);
+        state.pitch = Math.atan2(-cdy, cxzLen);
+        state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
       }
+
       const nameEl = document.getElementById('spec-name');
       if (nameEl) nameEl.textContent = tgt.type === 'bot' ? 'BOT' : ('Player ' + tgt.obj.mesh.userData.id);
     }
@@ -6043,13 +6059,13 @@ function startKillCam() {
       state.killCamBuffer = rawSnaps.map(s => ({
         relT: (s.t - baseT) / 1000,
         x: s.x, y: s.y, z: s.z,
-        yaw: Math.atan2(vp.x - s.x, vp.z - s.z), // always aimed at player
+        yaw: Math.atan2(s.x - vp.x, s.z - vp.z), // camera looks toward victim (−Z default needs inversion)
       }));
       state.killCamDuration = (rawSnaps[rawSnaps.length - 1].t - baseT) / 1000;
     } else {
       // No history — static frame from bot's current position
       const bp = bot.group.position;
-      const byaw = Math.atan2(vp.x - bp.x, vp.z - bp.z);
+      const byaw = Math.atan2(bp.x - vp.x, bp.z - vp.z);
       state.killCamBuffer = [
         { relT: 0, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
         { relT: 3, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
