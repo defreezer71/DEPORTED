@@ -675,9 +675,9 @@ function update() {
       const tgt = allTargets[state.spectateIndex % allTargets.length];
       let specPos, facingYaw;
       if (tgt.type === 'bot') {
-        specPos = tgt.obj.group.position;
+        specPos = tgt.obj.pos;
         // bot mesh +Z = forward; camera -Z = forward → add π to convert
-        facingYaw = (tgt.obj.group.rotation.y || 0) + Math.PI;
+        facingYaw = (tgt.obj.yaw || 0) + Math.PI;
       } else {
         specPos = tgt.obj.mesh.position;
         const snaps = tgt.obj.snapshots;
@@ -716,7 +716,7 @@ function update() {
       }
 
       const nameEl = document.getElementById('spec-name');
-      if (nameEl) nameEl.textContent = tgt.type === 'bot' ? 'BOT' : ('Player ' + tgt.obj.mesh.userData.id);
+      if (nameEl) nameEl.textContent = tgt.type === 'bot' ? tgt.obj.name : ('Player ' + (tgt.obj.mesh && tgt.obj.mesh.userData.id || '?'));
     }
     updateBots(renderDt);
   }
@@ -949,19 +949,11 @@ function update() {
 
     for (const bot of bots) {
       if (!bot.alive) continue;
-      const botFeetY = bot.group.position.y;
-      if (state.waterLevel > botFeetY + 0.4) {
+      if (state.waterLevel > bot.pos.y + 0.4) {
         bot.hp -= renderDt * 5;
         if (bot.hp <= 0) {
           bot.alive = false;
-          bot.group.rotation.x = Math.PI / 2;
-          bot.group.position.y = state.waterLevel;
-          setTimeout(() => {
-            bot.group.children.forEach(c => {
-              const idx = targets.indexOf(c);
-              if (idx >= 0) targets.splice(idx, 1);
-            });
-          }, 200);
+          bot.deadY = state.waterLevel;
         }
       }
     }
@@ -1250,12 +1242,7 @@ window.startPvPMatch = function() {
 };
 update();
 
-document.getElementById('go-restart').addEventListener('click', () => location.reload());
 document.getElementById('win-restart').addEventListener('click', () => location.reload());
-
-document.addEventListener('click', () => {
-  if (state.playerDead && state.spectateMode) state.spectateIndex++;
-});
 
 // ── Kill-cam: build replay buffer from killer's snapshot history ──
 function startKillCam() {
@@ -1291,7 +1278,7 @@ function startKillCam() {
       state.killCamDuration = (rawSnaps[rawSnaps.length - 1].t - baseT) / 1000;
     } else {
       // No history — static frame from bot's current position
-      const bp = bot.group.position;
+      const bp = bot.pos;
       const byaw = Math.atan2(bp.x - vp.x, bp.z - vp.z);
       state.killCamBuffer = [
         { relT: 0, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
@@ -1327,11 +1314,42 @@ function showPostDeathMenu() {
   setTimeout(() => goScreen.classList.add('show'), 300);
 }
 
-window.startSpectate = function(mode) {
-  state.spectateMode = mode;
-  state.spectateIndex = 0;
+window.startSpectate = function() {
+  state.spectateMode = '3rd';
+  // Try to land on the killer first
+  const aliveBots = bots.filter(b => b.alive);
+  const aliveRemote = Object.values(state.remotePlayers).filter(rp => !rp.dead);
+  const allT = [
+    ...aliveBots.map(b => ({ type: 'bot', obj: b })),
+    ...aliveRemote.map(rp => ({ type: 'player', obj: rp })),
+  ];
+  let startIdx = 0;
+  if (state.killCamBotIndex >= 0) {
+    const bi = aliveBots.indexOf(bots[state.killCamBotIndex]);
+    if (bi >= 0) startIdx = bi;
+  } else if (state.killCamShooterId) {
+    const pi = aliveRemote.findIndex(rp => rp.id === state.killCamShooterId || Object.keys(state.remotePlayers).find(k => k === state.killCamShooterId && state.remotePlayers[k] === rp));
+    if (pi >= 0) startIdx = aliveBots.length + pi;
+  }
+  state.spectateIndex = startIdx;
   document.getElementById('game-over-screen').classList.remove('show');
-  document.getElementById('spectate-banner').classList.add('show');
+  document.getElementById('spectate-hud').classList.add('show');
+  const vBtn = document.getElementById('spec-view-btn');
+  if (vBtn) vBtn.textContent = '1ST PERSON';
+};
+
+window.specCycle = function(dir) {
+  const aliveBots = bots.filter(b => b.alive);
+  const aliveRemote = Object.values(state.remotePlayers).filter(rp => !rp.dead);
+  const total = aliveBots.length + aliveRemote.length;
+  if (total === 0) return;
+  state.spectateIndex = ((state.spectateIndex + dir) % total + total) % total;
+};
+
+window.specToggleView = function() {
+  state.spectateMode = state.spectateMode === '3rd' ? '1st' : '3rd';
+  const vBtn = document.getElementById('spec-view-btn');
+  if (vBtn) vBtn.textContent = state.spectateMode === '3rd' ? '1ST PERSON' : '3RD PERSON';
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1584,11 +1602,7 @@ function adjustBotsForPlayerCount(playerCount) {
     if (!bot.alive) continue;
     bot.alive = false;
     bot.hp = 0;
-    scene.remove(bot.group);
-    bot.group.children.forEach(c => {
-      const idx = targets.indexOf(c);
-      if (idx >= 0) targets.splice(idx, 1);
-    });
+    bot.deadY = -10000; // park underground — matrix update handles hiding
     removed++;
   }
   if (removed > 0) console.log('[room] Removed ' + removed + ' bots — ' + bots.filter(b=>b.alive).length + ' bots + ' + playerCount + ' players = 21 total');

@@ -138,7 +138,7 @@ function shoot() {
   raycaster.far = wep.range || 500;
 
   const remoteTargets = getRemotePlayerMeshes();
-  const intersects = raycaster.intersectObjects([...targets, ...remoteTargets], false);
+  const intersects = raycaster.intersectObjects([...targets, ...remoteTargets, ...botInstMeshes], false);
 
   // Volcano terrain LOS — sample along ray; if ray dips below volcano surface it's blocked
   function shotBlockedByVolcano(origin, direction, maxDist) {
@@ -178,12 +178,13 @@ function shoot() {
         new THREE.Vector3(0, 1, 0)
       );
     } else {
-      const isHead = hit.object.userData.isHead;
+      const isBotHit = hit.object.isInstancedMesh && botInstMeshes.includes(hit.object);
+      const isHead = isBotHit ? botHeadMeshes.includes(hit.object) : hit.object.userData.isHead;
       const dmg = isHead ? wep.headDmg : wep.bodyDmg;
 
       spawnImpact(hit.point, hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0));
 
-      const bot = findBotByPart(hit.object);
+      const bot = isBotHit ? findBotByInstance(hit.object, hit.instanceId) : null;
       if (bot) {
         hitmarker.classList.add('show');
         hitmarker.style.filter = isHead ? 'hue-rotate(200deg) brightness(2)' : 'none';
@@ -197,7 +198,7 @@ function shoot() {
         const wasAlive = bot.alive;
         damageBot(bot, dmg, isHead);
         if (wasAlive && !bot.alive) SFX.kill_chaching();
-      } else {
+      } else if (!isBotHit) {
         // Not a bot — check remote players
         const remoteHit = findRemotePlayerByPart(hit.object);
         if (remoteHit && !remoteHit.rp.dead) {
@@ -381,7 +382,7 @@ function drawMinimap() {
     if (!b.alive) return;
     mCtx.fillStyle = '#ff4444';
     mCtx.beginPath();
-    mCtx.arc(cx + b.group.position.x * scale, cy + b.group.position.z * scale, 2, 0, Math.PI * 2);
+    mCtx.arc(cx + b.pos.x * scale, cy + b.pos.z * scale, 2, 0, Math.PI * 2);
     mCtx.fill();
   });
 

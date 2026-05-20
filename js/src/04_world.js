@@ -63,7 +63,7 @@ function createPrisonWall(x, z, w, h, d) {
 
   // Wall cap
   const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, 0.22, d + 0.05), prisonCap);
-  cap.position.set(x, h + 0.11, z);
+  cap.position.set(x, h + 0.12, z);
   cap.castShadow = true;
   scene.add(cap);
 

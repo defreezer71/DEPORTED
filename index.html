@@ -332,17 +332,31 @@
   }
   #victory-screen .btn:hover { background: rgba(255,255,255,0.2); }
 
-  /* Spectate banner */
-  #spectate-banner {
-    position: fixed; bottom: 60px; left: 50%;
+  /* Spectate HUD */
+  #spectate-hud {
+    position: fixed; bottom: 40px; left: 50%;
     transform: translateX(-50%);
-    color: #ccc; font-size: 13px; z-index: 55;
-    pointer-events: none; letter-spacing: 1px;
-    text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    z-index: 55; pointer-events: none;
     opacity: 0; transition: opacity 0.3s;
-    background: rgba(0,0,0,0.35); padding: 4px 14px; border-radius: 20px;
   }
-  #spectate-banner.show { opacity: 1; }
+  #spectate-hud.show { opacity: 1; pointer-events: auto; }
+  #spec-label {
+    color: #aaa; font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.9);
+  }
+  #spec-target-name {
+    color: #fff; font-size: 15px; letter-spacing: 2px; font-weight: bold;
+    text-shadow: 1px 1px 4px rgba(0,0,0,0.9);
+  }
+  #spec-controls { display: flex; gap: 8px; }
+  .spec-btn {
+    background: rgba(0,0,0,0.5); color: #ddd; border: 1px solid rgba(255,255,255,0.25);
+    padding: 5px 14px; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase;
+    cursor: pointer; border-radius: 4px; font-family: inherit;
+    transition: background 0.15s;
+  }
+  .spec-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
   /* Damage vignette */
   #damage-vignette {
@@ -648,7 +662,15 @@
   <div id="killcam-label">&#9632; KILL CAM</div>
   <div class="killcam-bar"></div>
 </div>
-<div id="spectate-banner">SPECTATING &nbsp;<span id="spec-name"></span>&nbsp; — Click to cycle</div>
+<div id="spectate-hud">
+  <div id="spec-label">SPECTATE VIEW</div>
+  <div id="spec-target-name"><span id="spec-name"></span></div>
+  <div id="spec-controls">
+    <button class="spec-btn" onclick="specCycle(-1)">&#8592; PREV</button>
+    <button class="spec-btn" id="spec-view-btn" onclick="specToggleView()">1ST PERSON</button>
+    <button class="spec-btn" onclick="specCycle(1)">NEXT &#8594;</button>
+  </div>
+</div>
 <div id="perf-stats"></div>
 
 <div id="game-over-screen">
@@ -656,10 +678,9 @@
   <div class="stats">Kills: <span id="go-kills">0</span> &nbsp;|&nbsp; Survived: <span id="go-time">0:00</span></div>
   <div class="stats">Shots: <span id="go-shots">0</span> &nbsp;|&nbsp; Accuracy: <span id="go-accuracy">0%</span></div>
   <div id="go-spec-row">
-    <button class="btn" onclick="startSpectate('1st')">1ST PERSON</button>
-    <button class="btn" onclick="startSpectate('3rd')">3RD PERSON</button>
+    <button class="btn" onclick="startSpectate()">SPECTATE</button>
+    <button class="btn" id="go-restart" onclick="location.reload()">MAIN MENU</button>
   </div>
-  <button class="btn" id="go-restart">Play Again</button>
 </div>
 
 <div id="victory-screen">

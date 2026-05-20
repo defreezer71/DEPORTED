@@ -470,8 +470,8 @@ const avgH = CONFIG.cliffHeight + 4;
 [
   { px: 0, pz: -half - ct/2, w: wallLen, d: ct },
   { px: 0, pz:  half + ct/2, w: wallLen, d: ct },
-  { px:  half + ct/2, pz: 0, w: ct, d: wallLen },
-  { px: -half - ct/2, pz: 0, w: ct, d: wallLen },
+  { px:  half + ct/2, pz: 0, w: ct, d: CONFIG.islandSize },
+  { px: -half - ct/2, pz: 0, w: ct, d: CONFIG.islandSize },
 ].forEach(({ px, pz, w, d }) => {
   const geo = new THREE.BoxGeometry(w, avgH, d, Math.max(1,Math.round(w/8)), 4, Math.max(1,Math.round(d/8)));
   const pos2 = geo.attributes.position;
@@ -504,8 +504,8 @@ const foamY   = avgH - 3 + 0.38;
 [
   { px: 0,            pz: -half - ct/2, w: wallLen + ct, d: ct + 0.5 },
   { px: 0,            pz:  half + ct/2, w: wallLen + ct, d: ct + 0.5 },
-  { px:  half + ct/2, pz: 0,            w: ct + 0.5,     d: wallLen + ct },
-  { px: -half - ct/2, pz: 0,            w: ct + 0.5,     d: wallLen + ct },
+  { px:  half + ct/2, pz: 0,            w: ct + 0.5,     d: CONFIG.islandSize },
+  { px: -half - ct/2, pz: 0,            w: ct + 0.5,     d: CONFIG.islandSize },
 ].forEach(({ px, pz, w, d }, i) => {
   const foam = new THREE.Mesh(new THREE.BoxGeometry(w, 0.55, d), foamMat);
   foam.position.set(px, foamY, pz);

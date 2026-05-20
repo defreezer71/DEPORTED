@@ -1,63 +1,150 @@
 // BOTS — AI with shooting, prison spawn, ammo seeking
+// Rendering: 13 InstancedMesh objects (one per body part) = 13 draw calls for all 20 bots
 // ═══════════════════════════════════════════════════════════
 const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India','Juliet',
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
-function createBot(x, z, name) {
+const BOT_COUNT = 20;
+const BOT_BODY_COLORS = [0xCC6622, 0xBB5511, 0xDD7733, 0xC05A18];
+
+// ── InstancedMesh declarations ──
+let botBodyInst, botBeltInst, botNeckInst, botHeadInst, botHelmetInst;
+let botLegLInst, botLegRInst, botBootLInst, botBootRInst;
+let botArmLInst, botArmRInst, botGunInst, botStockInst;
+let botInstMeshes = [];  // all 13 — used in raycast
+let botHeadMeshes = [];  // head + helmet — headshot detection
+
+// Reusable matrices — avoids per-frame heap allocation
+const _bRootMat  = new THREE.Matrix4();
+const _bLocalMat = new THREE.Matrix4();
+const _bWorldMat = new THREE.Matrix4();
+
+function initBotInstances() {
+  const bodyGeo    = new THREE.BoxGeometry(0.7, 0.8, 0.4);
+  const beltGeo    = new THREE.BoxGeometry(0.62, 0.12, 0.38);
+  const neckGeo    = new THREE.BoxGeometry(0.16, 0.1, 0.16);
+  const headGeo    = new THREE.SphereGeometry(0.24, 8, 6);
+  const helmetGeo  = new THREE.CylinderGeometry(0.22, 0.25, 0.16, 8);
+  const legGeo     = new THREE.BoxGeometry(0.2, 0.55, 0.22);
+  const bootGeo    = new THREE.BoxGeometry(0.2, 0.18, 0.28);
+  const armGeo     = new THREE.BoxGeometry(0.18, 0.7, 0.2);
+  const gunGeo     = new THREE.BoxGeometry(0.06, 0.06, 0.5);
+  const stockGeo   = new THREE.BoxGeometry(0.05, 0.05, 0.14);
+
+  // Body/arm use white so setColorAt produces the exact per-bot color
+  const bodyMat   = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const beltMat   = new THREE.MeshLambertMaterial({ color: 0x3a3020 });
+  const skinMat   = new THREE.MeshLambertMaterial({ color: 0xD2B48C });
+  const helmetMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
+  const legMat    = new THREE.MeshLambertMaterial({ color: 0xBB6622 });
+  const bootMat   = new THREE.MeshLambertMaterial({ color: 0x2a2218 });
+  const gunMat    = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  const stockMat  = new THREE.MeshLambertMaterial({ color: 0x3d2812 });
+
+  botBodyInst   = new THREE.InstancedMesh(bodyGeo,   bodyMat,   BOT_COUNT);
+  botBeltInst   = new THREE.InstancedMesh(beltGeo,   beltMat,   BOT_COUNT);
+  botNeckInst   = new THREE.InstancedMesh(neckGeo,   skinMat,   BOT_COUNT);
+  botHeadInst   = new THREE.InstancedMesh(headGeo,   skinMat,   BOT_COUNT);
+  botHelmetInst = new THREE.InstancedMesh(helmetGeo, helmetMat, BOT_COUNT);
+  botLegLInst   = new THREE.InstancedMesh(legGeo,    legMat,    BOT_COUNT);
+  botLegRInst   = new THREE.InstancedMesh(legGeo,    legMat,    BOT_COUNT);
+  botBootLInst  = new THREE.InstancedMesh(bootGeo,   bootMat,   BOT_COUNT);
+  botBootRInst  = new THREE.InstancedMesh(bootGeo,   bootMat,   BOT_COUNT);
+  botArmLInst   = new THREE.InstancedMesh(armGeo,    bodyMat,   BOT_COUNT);
+  botArmRInst   = new THREE.InstancedMesh(armGeo,    bodyMat,   BOT_COUNT);
+  botGunInst    = new THREE.InstancedMesh(gunGeo,    gunMat,    BOT_COUNT);
+  botStockInst  = new THREE.InstancedMesh(stockGeo,  stockMat,  BOT_COUNT);
+
+  botInstMeshes = [
+    botBodyInst, botBeltInst, botNeckInst, botHeadInst, botHelmetInst,
+    botLegLInst, botLegRInst, botBootLInst, botBootRInst,
+    botArmLInst, botArmRInst, botGunInst, botStockInst,
+  ];
+  botHeadMeshes = [botHeadInst, botHelmetInst];
+
+  // Pre-initialize instanceColor on body/arm meshes so the shader compiles with
+  // USE_INSTANCING_COLOR from the start — without this, setColorAt() called later
+  // has no effect because the shader was already compiled without color instancing.
+  const _white = new THREE.Color(1, 1, 1);
+  for (let i = 0; i < BOT_COUNT; i++) {
+    botBodyInst.setColorAt(i, _white);
+    botArmLInst.setColorAt(i, _white);
+    botArmRInst.setColorAt(i, _white);
+  }
+  botBodyInst.instanceColor.needsUpdate = true;
+  botArmLInst.instanceColor.needsUpdate = true;
+  botArmRInst.instanceColor.needsUpdate = true;
+
+  // Park all instances underground until bots spawn
+  const hiddenMat = new THREE.Matrix4().makeTranslation(0, -10000, 0);
+  for (const inst of botInstMeshes) {
+    inst.frustumCulled = false; // bounding sphere not meaningful for scattered instances
+    for (let i = 0; i < BOT_COUNT; i++) inst.setMatrixAt(i, hiddenMat);
+    inst.instanceMatrix.needsUpdate = true;
+    scene.add(inst);
+  }
+}
+
+initBotInstances();
+
+// ── Write one part's world matrix into an InstancedMesh ──
+// rootMat encodes the bot's world position + orientation.
+// lRotX: local rotation around X (walk animation) — 0 means no rotation.
+function _setBotPart(inst, i, rootMat, lx, ly, lz, lRotX) {
+  if (lRotX) {
+    _bLocalMat.makeRotationX(lRotX);
+    _bLocalMat.setPosition(lx, ly, lz);
+  } else {
+    _bLocalMat.makeTranslation(lx, ly, lz);
+  }
+  _bWorldMat.multiplyMatrices(rootMat, _bLocalMat);
+  inst.setMatrixAt(i, _bWorldMat);
+}
+
+function updateBotMatrices() {
+  for (let i = 0; i < bots.length; i++) {
+    const bot = bots[i];
+    if (bot.alive) {
+      _bRootMat.makeRotationY(bot.yaw);
+      _bRootMat.setPosition(bot.pos.x, bot.pos.y, bot.pos.z);
+    } else {
+      _bRootMat.makeRotationX(Math.PI / 2);
+      _bRootMat.setPosition(bot.pos.x, bot.deadY, bot.pos.z);
+    }
+    const sw = bot.swing;
+    _setBotPart(botBodyInst,   i, _bRootMat,  0,      1.30,  0,     0        );
+    _setBotPart(botBeltInst,   i, _bRootMat,  0,      0.88,  0,     0        );
+    _setBotPart(botNeckInst,   i, _bRootMat,  0,      1.72,  0,     0        );
+    _setBotPart(botHeadInst,   i, _bRootMat,  0,      1.90,  0,     0        );
+    _setBotPart(botHelmetInst, i, _bRootMat,  0,      2.06,  0,     0        );
+    _setBotPart(botLegLInst,   i, _bRootMat, -0.15,   0.50,  0,     sw       );
+    _setBotPart(botLegRInst,   i, _bRootMat,  0.15,   0.50,  0,    -sw       );
+    _setBotPart(botBootLInst,  i, _bRootMat, -0.15,   0.09,  0.02,  0        );
+    _setBotPart(botBootRInst,  i, _bRootMat,  0.15,   0.09,  0.02,  0        );
+    _setBotPart(botArmLInst,   i, _bRootMat, -0.45,   1.15,  0,    -sw * 0.6 );
+    _setBotPart(botArmRInst,   i, _bRootMat,  0.45,   1.15,  0,     sw * 0.6 );
+    _setBotPart(botGunInst,    i, _bRootMat,  0.45,   1.10,  0.30,  0        );
+    _setBotPart(botStockInst,  i, _bRootMat,  0.45,   1.10,  0.02,  0        );
+  }
+  for (const inst of botInstMeshes) inst.instanceMatrix.needsUpdate = true;
+}
+
+function createBot(x, z, name, index) {
   const h = getGroundHeight(x, z);
-  const group = new THREE.Group();
-  group.position.set(x, h, z);
-
-  const bodyColor = [0xCC6622, 0xBB5511, 0xDD7733, 0xC05A18][Math.floor(Math.random() * 4)];
-  const bodyMat = new THREE.MeshLambertMaterial({ color: bodyColor });
-  const skinMat = new THREE.MeshLambertMaterial({ color: 0xD2B48C });
-
-  // Torso (slightly shorter to make room for belt)
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 0.4), bodyMat);
-  body.position.y = 1.3; body.castShadow = true; group.add(body);
-
-  // Belt
-  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.12, 0.38), new THREE.MeshLambertMaterial({ color: 0x3a3020 }));
-  belt.position.y = 0.88; group.add(belt);
-
-  // Neck
-  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.16), skinMat);
-  neck.position.y = 1.72; group.add(neck);
-
-  // Head
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), skinMat);
-  head.position.y = 1.9; head.castShadow = true;
-  head.userData.isHead = true; group.add(head);
-
-  // Helmet
-  const helmet = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.25, 0.16, 8), new THREE.MeshLambertMaterial({ color: 0x555555 }));
-  helmet.position.y = 2.06; helmet.userData.isHead = true; group.add(helmet);
-
-  // Legs with boots (combined into 2 pieces per leg)
-  for (const s of [-0.15, 0.15]) {
-    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.55, 0.22), new THREE.MeshLambertMaterial({ color: 0xBB6622 }));
-    leg.position.set(s, 0.5, 0); leg.castShadow = true; group.add(leg);
-    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.18, 0.28), new THREE.MeshLambertMaterial({ color: 0x2a2218 }));
-    boot.position.set(s, 0.09, 0.02); group.add(boot);
-  }
-
-  // Arms
-  for (const s of [-0.45, 0.45]) {
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.7, 0.2), bodyMat);
-    arm.position.set(s, 1.15, 0); arm.castShadow = true; group.add(arm);
-  }
-
-  // Weapon with stock
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.5), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
-  gun.position.set(0.45, 1.1, 0.3); group.add(gun);
-  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.14), new THREE.MeshLambertMaterial({ color: 0x3d2812 }));
-  stock.position.set(0.45, 1.1, 0.02); group.add(stock);
-
-  scene.add(group);
-  group.children.forEach(c => targets.push(c));
+  const col = new THREE.Color(BOT_BODY_COLORS[Math.floor(Math.random() * BOT_BODY_COLORS.length)]);
+  botBodyInst.setColorAt(index, col);
+  botArmLInst.setColorAt(index, col);
+  botArmRInst.setColorAt(index, col);
+  botBodyInst.instanceColor.needsUpdate = true;
+  botArmLInst.instanceColor.needsUpdate = true;
+  botArmRInst.instanceColor.needsUpdate = true;
 
   const bot = {
-    group, name,
+    pos: new THREE.Vector3(x, h, z),
+    yaw: 0,
+    swing: 0,
+    deadY: h + 0.3,
+    name,
     hp: 100,
     alive: true,
     hasAmmo: false,
@@ -68,15 +155,16 @@ function createBot(x, z, name) {
     shootCooldown: 0,
     shootAccuracy: 0.12 + Math.random() * 0.16,
     aggroRange: 30 + Math.random() * 20,
-    ammoTimer: 30,  // arm after 30s then begin shooting
+    ammoTimer: 30,
     exitDelay: 0,
     exitedPrison: false,
     velocityY: 0,
     isGrounded: true,
+    canalJumpCount: 0,
+    canalLandTimer: 0,
     waypoint: null,
     fleeTarget: null,
-    snapshots: [],  // position history for kill-cam
-    parts: { body, head, legs: group.children.filter((_, i) => i >= 3 && i <= 4), arms: group.children.filter((_, i) => i >= 5) },
+    snapshots: [],
   };
   bots.push(bot);
   return bot;
@@ -84,12 +172,12 @@ function createBot(x, z, name) {
 
 // Bots only spawn in Auto Join (bot match) mode — called from startBotMatch()
 function spawnBots() {
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < BOT_COUNT; i++) {
     const row = Math.floor(i / 5);
     const col = i % 5;
     const px = CONFIG.prisonPos.x - CONFIG.prisonSize / 2 + 5 + col * ((CONFIG.prisonSize - 10) / 4);
     const pz = CONFIG.prisonPos.z - CONFIG.prisonSize / 2 + 5 + row * ((CONFIG.prisonSize - 10) / 3);
-    const bot = createBot(px, pz, BOT_NAMES[i] || 'Bot');
+    const bot = createBot(px, pz, BOT_NAMES[i] || 'Bot', i);
     bot.exitDelay = i * 0.4;
   }
 }
@@ -101,7 +189,7 @@ function updateBots(dt) {
     // Phase check — don't move during lobby/countdown
     if (state.phase === 'lobby' || state.phase === 'countdown') continue;
 
-    const bx = bot.group.position.x, bz = bot.group.position.z;
+    const bx = bot.pos.x, bz = bot.pos.z;
 
     // Check if bot is still inside prison
     const inPrison = Math.abs(bx - prison.x) < pw / 2 && Math.abs(bz - prison.z) < pw / 2;
@@ -111,34 +199,28 @@ function updateBots(dt) {
       bot.exitDelay -= dt;
       if (bot.exitDelay > 0) {
         bot.walkPhase += dt * 1;
-        const swing = Math.sin(bot.walkPhase) * 0.1;
-        if (bot.parts.legs[0]) bot.parts.legs[0].rotation.x = swing;
-        if (bot.parts.legs[1]) bot.parts.legs[1].rotation.x = -swing;
+        bot.swing = Math.sin(bot.walkPhase) * 0.1;
         continue;
       }
-      // Target: gate center first (prison.z), then once past the wall, mark as exited
       const wallX = prison.x + pw / 2;
       if (bx < wallX + 3) {
-        // Still inside or at the gate — aim straight through center
         bot.moveDir.set(1, 0, (prison.z - bz) * 0.3).normalize();
       } else {
-        // Past the wall — scatter outward
         bot.exitedPrison = true;
+        const ang = Math.atan2(-prison.z, -prison.x) + (Math.random() - 0.5) * 0.8;
+        const rd = 50 + Math.random() * 40;
+        bot.waypoint = { x: Math.cos(ang) * rd, z: Math.sin(ang) * rd };
       }
       bot.speed = 4.5;
       const newX = bx + bot.moveDir.x * bot.speed * dt;
       const newZ = bz + bot.moveDir.z * bot.speed * dt;
-      bot.group.position.x = newX;
-      bot.group.position.z = newZ;
-      const th = getGroundHeight(bot.group.position.x, bot.group.position.z);
-      bot.group.position.y += (th - bot.group.position.y) * Math.min(1, dt * 18);
-      bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
+      bot.pos.x = newX;
+      bot.pos.z = newZ;
+      const th = getGroundHeight(bot.pos.x, bot.pos.z);
+      bot.pos.y += (th - bot.pos.y) * Math.min(1, dt * 18);
+      bot.yaw = Math.atan2(bot.moveDir.x, bot.moveDir.z);
       bot.walkPhase += dt * bot.speed * 3;
-      const swing = Math.sin(bot.walkPhase) * 0.4;
-      if (bot.parts.legs[0]) bot.parts.legs[0].rotation.x = swing;
-      if (bot.parts.legs[1]) bot.parts.legs[1].rotation.x = -swing;
-      if (bot.parts.arms[0]) bot.parts.arms[0].rotation.x = -swing * 0.6;
-      if (bot.parts.arms[1]) bot.parts.arms[1].rotation.x = swing * 0.6;
+      bot.swing = Math.sin(bot.walkPhase) * 0.4;
       continue;
     }
 
@@ -158,8 +240,8 @@ function updateBots(dt) {
     // ── TOP PRIORITY: engage player if in range ──
     const engaging = bot.hasAmmo && distToPlayer < bot.aggroRange && !state.playerDead;
     if (engaging) {
-      bot.group.rotation.y = Math.atan2(dx, dz);
-      const botEye = new THREE.Vector3(bx, bot.group.position.y + 1.7, bz);
+      bot.yaw = Math.atan2(dx, dz);
+      const botEye = new THREE.Vector3(bx, bot.pos.y + 1.7, bz);
       const toPlayer = new THREE.Vector3(dx, camera.position.y - botEye.y, dz).normalize();
       const losRay = new THREE.Raycaster(botEye, toPlayer, 0, distToPlayer);
       const losHits = losRay.intersectObjects(collidables, false);
@@ -195,16 +277,14 @@ function updateBots(dt) {
 
     // ── MOVEMENT: always pick a destination and walk to it ──
     if (state.waterRising) {
-      // Each bot gets a unique slice of the volcano slope (by index)
       if (!bot.fleeTarget) {
         const botIdx = bots.indexOf(bot);
         const angle = (botIdx / bots.length) * Math.PI * 2;
-        const r = 15 + (botIdx % 5) * 5; // 15-35, 5 distinct rings
+        const r = 15 + (botIdx % 5) * 5;
         bot.fleeTarget = { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
       }
       const arrived = Math.sqrt((bx - bot.fleeTarget.x) ** 2 + (bz - bot.fleeTarget.z) ** 2) < 4;
       if (arrived) {
-        // Orbit around volcano at current radius once arrived
         const curAngle = Math.atan2(bz, bx);
         const orbitR = Math.sqrt(bx * bx + bz * bz) || 20;
         const nextAngle = curAngle + 0.4;
@@ -212,9 +292,8 @@ function updateBots(dt) {
       }
       bot.moveDir.set(bot.fleeTarget.x - bx, 0, bot.fleeTarget.z - bz).normalize();
       bot.speed = 5;
-      bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
+      bot.yaw = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     } else {
-      // Normal wander — always have a waypoint, never stall
       if (!bot.waypoint || Math.sqrt((bx - bot.waypoint.x) ** 2 + (bz - bot.waypoint.z) ** 2) < 6) {
         const angle = Math.random() * Math.PI * 2;
         const r = 40 + Math.random() * 75;
@@ -222,61 +301,81 @@ function updateBots(dt) {
       }
       bot.moveDir.set(bot.waypoint.x - bx, 0, bot.waypoint.z - bz).normalize();
       bot.speed = engaging ? 2.0 : 3.0;
-      if (!engaging) bot.group.rotation.y = Math.atan2(bot.moveDir.x, bot.moveDir.z);
+      if (!engaging) bot.yaw = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     }
 
-    const newX = bx + bot.moveDir.x * bot.speed * dt;
-    const newZ = bz + bot.moveDir.z * bot.speed * dt;
+    let newX = bx + bot.moveDir.x * bot.speed * dt;
+    let newZ = bz + bot.moveDir.z * bot.speed * dt;
 
     const atBoundary = Math.abs(newX) >= half - 12 || Math.abs(newZ) >= half - 12;
     const atVolcano = getVolcanoHeight(newX, newZ) > (state.waterRising ? 40 : 18);
 
-    // Detect canal wall crossing geometrically (square canal at r≈85)
-    const CANAL_INNER = 83.5, CANAL_OUTER = 86.5;
+    // Canal crossing: two walls (inner r≈83.75, outer r≈86.25), padded to ~82.75–84.75 and ~85.25–87.25.
+    // Strategy: force radially inward movement while in the canal zone, then bounce-jump until clear.
+    const CANAL_MIN = 82.0, CANAL_MAX = 87.5;
     const maxNow = Math.max(Math.abs(bx), Math.abs(bz));
-    const maxNext = Math.max(Math.abs(newX), Math.abs(newZ));
-    if ((maxNow < CANAL_INNER && maxNext >= CANAL_INNER) ||
-        (maxNow > CANAL_OUTER && maxNext <= CANAL_OUTER)) {
-      if (bot.isGrounded) { bot.velocityY = 9; bot.isGrounded = false; }
+    const inCanalZone = maxNow >= CANAL_MIN && maxNow <= CANAL_MAX;
+    const approachingCanal = maxNow > CANAL_MAX && Math.max(Math.abs(newX), Math.abs(newZ)) <= CANAL_MAX;
+
+    if (!inCanalZone) { bot.canalJumpCount = 0; bot.canalLandTimer = 0; }
+
+    // Force directly inward when approaching or inside canal zone so bot crosses perpendicular
+    if (inCanalZone || approachingCanal) {
+      bot.moveDir.set(-bx, 0, -bz).normalize();
+      newX = bx + bot.moveDir.x * bot.speed * dt;
+      newZ = bz + bot.moveDir.z * bot.speed * dt;
     }
 
-    if (!atBoundary && !atVolcano) {
-      bot.group.position.x = newX;
-      bot.group.position.z = newZ;
-    } else {
-      // Blocked — immediately pick a new waypoint so bot never stalls
+    // Jump on canal entry from outside
+    if (approachingCanal && bot.isGrounded) {
+      bot.velocityY = 10; bot.isGrounded = false; bot.canalJumpCount = 1; bot.canalLandTimer = 0;
+    }
+    // Bounce-jump: wait 0.1s after landing before next jump so bot travels a bit further
+    if (bot.canalJumpCount >= 1 && bot.canalJumpCount < 8 && inCanalZone) {
+      if (!bot.isGrounded) {
+        bot.canalLandTimer = 0.1;
+      } else if (bot.canalLandTimer > 0) {
+        bot.canalLandTimer -= dt;
+      } else {
+        bot.velocityY = 10; bot.isGrounded = false; bot.canalJumpCount++;
+      }
+    }
+
+    const bypassCollision = inCanalZone || bot.canalJumpCount > 0;
+    if (!atBoundary && !atVolcano && (bypassCollision || !checkBotCollision(newX, newZ))) {
+      bot.pos.x = newX;
+      bot.pos.z = newZ;
+    } else if (!bypassCollision) {
       const angle = Math.random() * Math.PI * 2;
       const r = 30 + Math.random() * 50;
       bot.waypoint = { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
       bot.fleeTarget = null;
     }
 
-    // Jump physics — gravity each frame
+    // Jump physics
     bot.velocityY -= 22 * dt;
-    bot.group.position.y += bot.velocityY * dt;
-    const th = getGroundHeight(bot.group.position.x, bot.group.position.z);
-    if (bot.group.position.y <= th) {
-      bot.group.position.y = th;
+    bot.pos.y += bot.velocityY * dt;
+    const th = getGroundHeight(bot.pos.x, bot.pos.z);
+    if (bot.pos.y <= th) {
+      bot.pos.y = th;
       bot.velocityY = 0;
       bot.isGrounded = true;
     }
 
     bot.walkPhase += dt * bot.speed * 3;
-    const swing = Math.sin(bot.walkPhase) * 0.4;
-    if (bot.parts.legs[0]) bot.parts.legs[0].rotation.x = swing;
-    if (bot.parts.legs[1]) bot.parts.legs[1].rotation.x = -swing;
-    if (bot.parts.arms[0]) bot.parts.arms[0].rotation.x = -swing * 0.6;
-    if (bot.parts.arms[1]) bot.parts.arms[1].rotation.x = swing * 0.6;
+    bot.swing = Math.sin(bot.walkPhase) * 0.4;
 
     // Record position snapshot for kill-cam (20Hz, keep last 4s)
     const snapNow = Date.now();
     const lastSnap = bot.snapshots[bot.snapshots.length - 1];
     if (!lastSnap || snapNow - lastSnap.t >= 50) {
-      bot.snapshots.push({ t: snapNow, x: bot.group.position.x, y: bot.group.position.y, z: bot.group.position.z, yaw: bot.group.rotation.y });
+      bot.snapshots.push({ t: snapNow, x: bot.pos.x, y: bot.pos.y, z: bot.pos.z, yaw: bot.yaw });
       const snapCutoff = snapNow - 4000;
       while (bot.snapshots.length > 2 && bot.snapshots[0].t < snapCutoff) bot.snapshots.shift();
     }
   }
+
+  updateBotMatrices();
 }
 
 function damageBot(bot, dmg, isHead) {
@@ -288,29 +387,14 @@ function damageBot(bot, dmg, isHead) {
     SFX.kill_chaching();
     document.getElementById('kills-val').textContent = state.kills;
     addKillFeedEntry(bot.name, isHead);
-
-    // Death: tip over
-    bot.group.rotation.x = Math.PI / 2;
-    bot.group.position.y = getGroundHeight(bot.group.position.x, bot.group.position.z) + 0.3;
-
-    // Remove from targets after brief delay
-    setTimeout(() => {
-      bot.group.children.forEach(c => {
-        const idx = targets.indexOf(c);
-        if (idx >= 0) targets.splice(idx, 1);
-      });
-    }, 200);
-
-
+    bot.deadY = getGroundHeight(bot.pos.x, bot.pos.z) + 0.3;
   }
 }
 
-function findBotByPart(mesh) {
-  for (const bot of bots) {
-    if (!bot.alive) continue;
-    if (bot.group.children.includes(mesh)) return bot;
-  }
-  return null;
+function findBotByInstance(instMesh, instanceId) {
+  if (!botInstMeshes.includes(instMesh)) return null;
+  const bot = bots[instanceId];
+  return (bot && bot.alive) ? bot : null;
 }
 
 // Kill feed
@@ -318,12 +402,10 @@ const killFeedEntries = [];
 function addKillFeedEntry(botName, isHead) {
   const el = document.getElementById('kill-feed');
   killFeedEntries.push({ name: botName, head: isHead, time: Date.now() });
-  // Keep last 5
   if (killFeedEntries.length > 5) killFeedEntries.shift();
   el.innerHTML = killFeedEntries.map(e =>
     `<div class="entry">You ${e.head ? '⊕' : '→'} ${e.name}${e.head ? ' (headshot)' : ''}</div>`
   ).join('');
-  // Auto-clear old entries
   setTimeout(() => {
     const idx = killFeedEntries.length > 0 ? killFeedEntries.findIndex(e => e.time === killFeedEntries[0].time) : -1;
     if (idx >= 0) killFeedEntries.splice(idx, 1);
