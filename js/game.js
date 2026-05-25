@@ -413,34 +413,44 @@ for (let i = 0; i < gPosAttr.count; i++) {
   const onVolcano = vDist < CONFIG.volcanoRadius * 0.98 && getVolcanoHeight(x, y) > 0.2;
   if (onVolcano) {
     const t = Math.min(h / CONFIG.volcanoHeight, 1);
-    // Diagonal flow streaks — angled noise simulates lava channels running down the slope
-    const flow1 = Math.sin(x * 1.8 + y * 2.6 + h * 0.4) * 0.090 + Math.sin(x * 4.1 - y * 3.3) * 0.050;
-    const flow2 = Math.cos(x * 2.9 - y * 1.7 + h * 0.3) * 0.075 + Math.cos(y * 5.8 + x * 1.2) * 0.040;
-    // Mid-frequency surface roughness
-    const rough = Math.sin(x * 9.4 + y * 7.1) * 0.022 + Math.cos(x * 14.2 - y * 11.8) * 0.014;
+    // Polar coords — radial channels run down from summit like real lava flows
+    const angle  = Math.atan2(y, x);
+    const normR  = Math.sqrt(x*x + y*y) / CONFIG.volcanoRadius;
+    // Primary flow channels — 9 main ridges radiating from crater
+    const flowA  = Math.sin(angle * 9  + normR * 4.5) * 0.085;
+    // Secondary channels between primaries
+    const flowB  = Math.sin(angle * 17 + normR * 3.2 + 0.8) * 0.045;
+    // Slow large-scale undulation — breaks regularity without adding pattern
+    const flowC  = Math.sin(angle * 4  - normR * 2.1 + 1.3) * 0.035;
+    // Fine surface roughness — mixed irrational frequencies to avoid grid
+    const rough  = Math.sin(x * 8.3 + y * 11.7) * 0.016 + Math.cos(x * 19.1 - y * 13.4) * 0.010;
     // Subtle height strata (geological layering)
-    const strata = Math.sin(h * 2.2) * 0.045 + Math.sin(h * 5.5) * 0.018;
+    const strata = Math.sin(h * 2.2) * 0.028 + Math.sin(h * 5.5) * 0.013;
     // Combined surface noise
-    const surf = flow1 + flow2 + rough + strata;
+    const surf = flowA + flowB + flowC + rough + strata;
+    // Occasional brown scatter — clamped so it only shows in patches, not uniformly
+    const brownNoise = Math.sin(x * 3.7 + y * 5.1) * Math.cos(x * 7.3 - y * 2.9);
+    const brown = Math.max(0, brownNoise - 0.45) * 0.18;  // only fires where noise peaks, sparse
     // Zone blends — sharper transitions for visible banding
     const rustBlend = Math.max(0, Math.min(1, (t - 0.20) / 0.25));
     const ashBlend  = Math.max(0, Math.min(1, (t - 0.58) / 0.22));
     const rimBlend  = Math.max(0, (t - 0.84) / 0.16);
-    // Colors: very dark basalt base → rich rust/iron-oxide → cool gray ash → dark crater rim
-    const basaltR = 0.10 + surf * 0.5;
-    const basaltG = 0.07 + surf * 0.3;
-    const basaltB = 0.06 + surf * 0.2;
-    const rustR   = 0.15 + surf * 0.715;
-    const rustG   = 0.085 + surf * 0.36;
-    const rustB   = 0.026 + surf * 0.098;
-    // Upper zone: dark volcanic red — deep crimson rock near the summit (35% darker)
-    const ashR    = 0.34 + rough * 0.325 + strata * 0.52;
-    const ashG    = 0.065 + rough * 0.13 + strata * 0.195;
-    const ashB    = 0.039 + rough * 0.065 + strata * 0.13;
-    // Crater rim: very dark red-black (35% darker)
-    const rimR    = 0.18 + rough * 0.39;
-    const rimG    = 0.039 + rough * 0.13;
-    const rimB    = 0.026 + rough * 0.065;
+    // Colors: dark charcoal basalt → medium grey slope → lighter grey → dark red crater rim
+    const basaltR = 0.17 + surf * 0.55 + brown * 1.0;
+    const basaltG = 0.17 + surf * 0.54 + brown * 0.5;
+    const basaltB = 0.16 + surf * 0.52;
+    // Mid-slope: slightly lighter grey, flow channels still prominent
+    const rustR   = 0.25 + surf * 0.60 + brown * 1.0;
+    const rustG   = 0.24 + surf * 0.58 + brown * 0.5;
+    const rustB   = 0.23 + surf * 0.56;
+    // Upper slope: cool grey, subtle strata
+    const ashR    = 0.31 + rough * 0.18 + strata * 0.10 + brown * 0.7;
+    const ashG    = 0.30 + rough * 0.17 + strata * 0.09 + brown * 0.35;
+    const ashB    = 0.29 + rough * 0.16 + strata * 0.08;
+    // Crater rim: dark volcanic red — keep the red summit (15% darker)
+    const rimR    = 0.255 + rough * 0.238;
+    const rimG    = 0.043 + rough * 0.051;
+    const rimB    = 0.026 + rough * 0.034;
     r = basaltR + (rustR - basaltR) * rustBlend + (ashR - rustR) * ashBlend + (rimR - ashR) * rimBlend;
     g = basaltG + (rustG - basaltG) * rustBlend + (ashG - rustG) * ashBlend + (rimG - ashG) * rimBlend;
     b = basaltB + (rustB - basaltB) * rustBlend + (ashB - rustB) * ashBlend + (rimB - ashB) * rimBlend;
@@ -1379,6 +1389,8 @@ const _wallPositions = [
   [ -35,  108], [ -92,   67], [-114,    0],
   [ -92,  -67], [ -35, -108], [  35, -108],
   [  92,  -67],
+  // Extra 3 — mid-range fill
+  [  72,   42], [ -46,  -58], [  26,  -44],
 ];
 const _wallClearR2 = 3.5 * 3.5;
 function _nearWall(x, z) {
@@ -1714,9 +1726,41 @@ const _crateTex     = _makeCrateTex();
     g.setIndex(idx); g.computeVertexNormals(); return g;
   })();
 
+  // Midrib vein overlay — same paths as palmFrondGeo but very narrow (exoskeleton effect)
+  const palmVeinGeo = (() => {
+    const pos = [], col = [], idx = [];
+    const vw = 0.010;
+    const dark = [0.03, 0.18, 0.02];
+    const frondS = [[0,0,0.04],[0.35,0.45,0.20],[0.75,0.40,0.12],[1.00,-0.05,0.03]];
+    for (let i = 0; i < 7; i++) {
+      const ba=i/7*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
+      const base=pos.length/3;
+      frondS.forEach(([d,h]) => {
+        pos.push(sa*d-pa*vw,h,ca*d+pca*vw, sa*d+pa*vw,h,ca*d-pca*vw);
+        col.push(...dark,...dark);
+      });
+      for (let s=0;s<frondS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
+    }
+    const topS = [[0,0.025,0.038],[0.15,0.40,0.088],[0.275,0.725,0.050],[0.35,0.90,0.025]];
+    for (let i = 0; i < 3; i++) {
+      const ba=(i/3*Math.PI*2)+Math.PI/6, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
+      const base=pos.length/3;
+      topS.forEach(([d,h]) => {
+        pos.push(sa*d-pa*vw,h,ca*d+pca*vw, sa*d+pa*vw,h,ca*d-pca*vw);
+        col.push(...dark,...dark);
+      });
+      for (let s=0;s<topS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
+    g.setIndex(idx); g.computeVertexNormals(); return g;
+  })();
+
   const palmTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.13,0.30,1,8), new THREE.MeshLambertMaterial({map:_barkTex}), palmPlaces.length);
   const palmFrondInst = new THREE.InstancedMesh(palmFrondGeo, new THREE.MeshLambertMaterial({vertexColors:true, side:THREE.DoubleSide}), palmPlaces.length);
-  palmTrunkInst.castShadow = true; palmFrondInst.castShadow = true;
+  const palmVeinInst  = new THREE.InstancedMesh(palmVeinGeo,  new THREE.MeshLambertMaterial({vertexColors:true, side:THREE.DoubleSide, polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1}), palmPlaces.length);
+  palmTrunkInst.castShadow = true; palmFrondInst.castShadow = true; palmVeinInst.castShadow = false;
 
   palmPlaces.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
@@ -1731,10 +1775,11 @@ const _crateTex     = _makeCrateTex();
     _tDummy.position.set(x+Math.sin(lean)*trunkH*0.3, h+trunkH, z);
     _tDummy.scale.set(frondR, frondR*0.55, frondR);
     _tDummy.rotation.set(0, seededRand()*6.28, 0);
-    _tDummy.updateMatrix(); palmFrondInst.setMatrixAt(i, _tDummy.matrix);
+    _tDummy.updateMatrix(); palmFrondInst.setMatrixAt(i, _tDummy.matrix); palmVeinInst.setMatrixAt(i, _tDummy.matrix);
     const hv = Math.sin(x*89.1+z*203.4)*0.5+0.5;
     _tCol.setRGB(0.48+hv*0.26, 0.40+hv*0.20, 0.28+hv*0.16); palmTrunkInst.setColorAt(i, _tCol);
     _tCol.setRGB(0.68+hv*0.20, 0.80+hv*0.14, 0.50+hv*0.18); palmFrondInst.setColorAt(i, _tCol);
+    _tCol.setRGB(1, 1, 1); palmVeinInst.setColorAt(i, _tCol);
     const trunkCol = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.9,trunkH,trunkR*2.9), invisibleColliderMat);
     trunkCol.position.set(x, h+trunkH/2, z); trunkCol.updateMatrixWorld(true); collidables.push(trunkCol);
     const trunkHit = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.5,trunkH,trunkR*2.5), invisibleColliderMat);
@@ -1744,7 +1789,7 @@ const _crateTex     = _makeCrateTex();
     targets.push(frondHit); collidables.push(frondHit);
   });
 
-  [oakTrunkInst,oakCanopyInst,oakCanopy2Inst,oakCanopy3Inst,palmTrunkInst,palmFrondInst].forEach(m => {
+  [oakTrunkInst,oakCanopyInst,oakCanopy2Inst,oakCanopy3Inst,palmTrunkInst,palmFrondInst,palmVeinInst].forEach(m => {
     m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; scene.add(m);
   });
 }
@@ -1752,7 +1797,7 @@ const _crateTex     = _makeCrateTex();
 // ── Instanced Ferns (replaces bushes) — 1 draw call ──
 {
   const fernPlacements = [];
-  const fernGrid = 9.75;
+  const fernGrid = 9.5;
   for (let gx = -half+20; gx < half-20; gx += fernGrid) {
     for (let gz = -half+20; gz < half-20; gz += fernGrid) {
       const x = gx + (seededRand()-0.5)*fernGrid*0.8 + fernGrid/2;
@@ -1785,9 +1830,36 @@ const _crateTex     = _makeCrateTex();
     g.setIndex(idx); g.computeVertexNormals(); return g;
   })();
 
-  const fernMat  = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  const fernInst = new THREE.InstancedMesh(fernGeo, fernMat, fernPlacements.length);
-  fernInst.castShadow = false;
+  // Midrib vein overlay for ferns
+  const fernVeinGeo = (() => {
+    const pos = [], col = [], idx = [];
+    const vw = 0.010;
+    for (let i = 0; i < 7; i++) {
+      const ba = i / 7 * Math.PI * 2;
+      const sa = Math.sin(ba), ca = Math.cos(ba), pa = Math.cos(ba), pca = -Math.sin(ba);
+      const segs = [ [0.02,0.02], [0.35,0.30], [0.70,0.38], [1.00,0.14] ];
+      const base = pos.length / 3;
+      segs.forEach(([d, h], si) => {
+        const t = si / (segs.length - 1);
+        const r = 0.02+t*0.05, g = 0.10+t*0.12, b = 0.01+t*0.03;
+        pos.push(sa*d-pa*vw, h, ca*d+pca*vw,  sa*d+pa*vw, h, ca*d-pca*vw);
+        col.push(r,g,b, r,g,b);
+      });
+      for (let s = 0; s < segs.length-1; s++) {
+        const b = base + s*2; idx.push(b,b+1,b+2, b+1,b+3,b+2);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
+    g.setIndex(idx); g.computeVertexNormals(); return g;
+  })();
+
+  const fernMat     = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const fernVeinMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const fernInst     = new THREE.InstancedMesh(fernGeo,     fernMat,     fernPlacements.length);
+  const fernVeinInst = new THREE.InstancedMesh(fernVeinGeo, fernVeinMat, fernPlacements.length);
+  fernInst.castShadow = false; fernVeinInst.castShadow = false;
   const _fDummy = new THREE.Object3D(), _fCol = new THREE.Color();
   fernPlacements.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
@@ -1797,13 +1869,18 @@ const _crateTex     = _makeCrateTex();
     _fDummy.rotation.set(0, seededRand()*6.28, 0);
     _fDummy.updateMatrix();
     fernInst.setMatrixAt(i, _fDummy.matrix);
+    fernVeinInst.setMatrixAt(i, _fDummy.matrix);
     const hv = Math.sin(x*53.1+z*97.3)*0.5+0.5;
     _fCol.setRGB(0.36+hv*0.12, 0.50+hv*0.14, 0.24+hv*0.10);
     fernInst.setColorAt(i, _fCol);
+    _fCol.setRGB(1, 1, 1); fernVeinInst.setColorAt(i, _fCol);
   });
-  fernInst.instanceMatrix.needsUpdate = true;
-  fernInst.instanceColor.needsUpdate  = true;
+  fernInst.instanceMatrix.needsUpdate     = true;
+  fernInst.instanceColor.needsUpdate      = true;
+  fernVeinInst.instanceMatrix.needsUpdate = true;
+  fernVeinInst.instanceColor.needsUpdate  = true;
   scene.add(fernInst);
+  scene.add(fernVeinInst);
 }
 
 // ── Instanced Rocks ──
@@ -1899,14 +1976,20 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     }
   }
 
-  const stoneMat   = new THREE.MeshLambertMaterial({ color: 0xBCB8B0 }); // match ammo shed
-  const shaftGeo   = new THREE.CylinderGeometry(0.52, 0.63, 1, 8);
-  const baseGeo    = new THREE.BoxGeometry(1.61, 0.37, 1.61);
-  const capitalGeo = new THREE.BoxGeometry(1.78, 0.32, 1.78);
+  const stoneMat    = new THREE.MeshLambertMaterial({ color: 0xBCB8B0 }); // match ammo shed
+  const grooveMat   = new THREE.MeshLambertMaterial({ color: 0xA6A29C }); // slightly darker — groove shadow
+  const shaftGeo    = new THREE.CylinderGeometry(0.52, 0.63, 1, 8);
+  const baseGeo     = new THREE.BoxGeometry(1.61, 0.37, 1.61);
+  const capitalGeo  = new THREE.BoxGeometry(1.78, 0.32, 1.78);
+  const ringGeo     = new THREE.CylinderGeometry(0.68, 0.68, 0.10, 12); // horizontal band ring
+  const echinusGeo  = new THREE.CylinderGeometry(0.91, 0.56, 0.24, 12); // flared neck under capital
   const n = pillarPlacements.length;
-  const shaftInst   = new THREE.InstancedMesh(shaftGeo,   stoneMat, n);
-  const baseInst    = new THREE.InstancedMesh(baseGeo,    stoneMat, n);
-  const capitalInst = new THREE.InstancedMesh(capitalGeo, stoneMat, n);
+  const shaftInst   = new THREE.InstancedMesh(shaftGeo,   stoneMat,  n);
+  const baseInst    = new THREE.InstancedMesh(baseGeo,    stoneMat,  n);
+  const capitalInst = new THREE.InstancedMesh(capitalGeo, stoneMat,  n);
+  const ringAInst   = new THREE.InstancedMesh(ringGeo,    grooveMat, n);
+  const ringBInst   = new THREE.InstancedMesh(ringGeo,    grooveMat, n);
+  const echinusInst = new THREE.InstancedMesh(echinusGeo, stoneMat,  n);
 
   const _pDummy = new THREE.Object3D(), _pCol = new THREE.Color();
   pillarPlacements.forEach(({ x, z }, i) => {
@@ -1928,8 +2011,21 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     _pDummy.scale.set(1,1,1); _pDummy.rotation.set(0,yRot,0);
     _pDummy.updateMatrix(); capitalInst.setMatrixAt(i, _pDummy.matrix);
 
+    // Ring bands at 30% and 68% of shaft height
+    _pDummy.position.set(x, h+0.28+shaftH*0.30, z);
+    _pDummy.scale.set(1,1,1); _pDummy.rotation.set(0,0,0);
+    _pDummy.updateMatrix(); ringAInst.setMatrixAt(i, _pDummy.matrix);
+    _pDummy.position.set(x, h+0.28+shaftH*0.68, z);
+    _pDummy.updateMatrix(); ringBInst.setMatrixAt(i, _pDummy.matrix);
+    // Echinus — flared neck bridging shaft top to capital
+    _pDummy.position.set(x, h+0.28+shaftH+0.12, z);
+    _pDummy.updateMatrix(); echinusInst.setMatrixAt(i, _pDummy.matrix);
+
     _pCol.setRGB(0.84+hv*0.08, 0.80+hv*0.06, 0.70+hv*0.08);
     baseInst.setColorAt(i,_pCol); shaftInst.setColorAt(i,_pCol); capitalInst.setColorAt(i,_pCol);
+    echinusInst.setColorAt(i,_pCol);
+    _pCol.setRGB((0.84+hv*0.08)*0.88, (0.80+hv*0.06)*0.88, (0.70+hv*0.08)*0.88);
+    ringAInst.setColorAt(i,_pCol); ringBInst.setColorAt(i,_pCol);
 
     const col2 = new THREE.Mesh(new THREE.BoxGeometry(1.30,pillarH,1.30), invisibleColliderMat);
     col2.position.set(x, h+pillarH/2, z); col2.updateMatrixWorld(true); collidables.push(col2);
@@ -1937,7 +2033,7 @@ const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 
     hit.position.set(x, h+pillarH/2, z); hit.updateMatrixWorld(true); targets.push(hit);
   });
 
-  [shaftInst, baseInst, capitalInst].forEach(m => {
+  [shaftInst, baseInst, capitalInst, ringAInst, ringBInst, echinusInst].forEach(m => {
     m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true;
     m.castShadow = true; scene.add(m);
   });
@@ -2203,7 +2299,7 @@ const _dirtPatches = [];
   const pw = 0.46, ph = wh + 0.20;
 
   const walls = _wallPositions.map(([wx, wz], i) => {
-    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW'];
+    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW','EW','NS','EW'];
     return [wx, wz, facings[i]];
   });
 
@@ -2320,7 +2416,7 @@ if (false) {
 
   const bushPositions = [];
   let attempts = 0;
-  while (bushPositions.length < 21 && attempts++ < 2000) {
+  while (bushPositions.length < 35 && attempts++ < 2000) {
     const angle = rng() * Math.PI * 2;
     const r = 25 + rng() * 80; // spread across map, avoid center
     const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
@@ -2339,7 +2435,7 @@ if (false) {
 
     const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
     const darkColor = (baseColor & 0xFEFEFE) >> 1; // 50% darker
-    const scale = (0.9 + rng() * 0.7) * 0.569; // size variety
+    const scale = (0.9 + rng() * 0.7) * 0.655; // size variety
 
     // Layered blob structure: wide base, narrower mid, small top
     const blobs = [
@@ -2374,7 +2470,7 @@ if (false) {
   // ── 20 additional outer-ring bushes — beyond the canal (r = 88-115) ──
   const outerBushPositions = [];
   let outerAttempts = 0;
-  while (outerBushPositions.length < 21 && outerAttempts++ < 2000) {
+  while (outerBushPositions.length < 35 && outerAttempts++ < 2000) {
     const angle = rng() * Math.PI * 2;
     const r = 88 + rng() * 27; // outside the canal (canal at r=85), up to near cliff
     const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
@@ -2392,7 +2488,7 @@ if (false) {
     group.rotation.y = rng() * Math.PI * 2;
     const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
     const darkColor = (baseColor & 0xFEFEFE) >> 1;
-    const scale = (0.9 + rng() * 0.7) * 0.569;
+    const scale = (0.9 + rng() * 0.7) * 0.655;
     const blobs = [
       { r: 1.10 * scale, y: 0.55 * scale, x:  0,            z:  0 },
       { r: 0.85 * scale, y: 0.90 * scale, x:  0.5 * scale,  z:  0.2 * scale },
@@ -2591,7 +2687,7 @@ function createBot(x, z, name, index) {
     shootCooldown: 0,
     shootAccuracy: 0.12 + Math.random() * 0.16,
     aggroRange: 30 + Math.random() * 20,
-    ammoTimer: 0,
+    ammoTimer: 30,  // arm after 30s then begin shooting
     exitDelay: 0,
     exitedPrison: false,
     velocityY: 0,
@@ -3019,11 +3115,16 @@ depotCorners.forEach(({ x, z }) => {
     addM(new THREE.BoxGeometry(wt, wallH, bd), stone, wx, wallH / 2, 0);
   }
 
-  // ── Column helper: base + shaft + accent band + capital ──
+  // ── Column helper: base disk + shaft + 3 ring bands + echinus neck + capital ──
+  const groove = new THREE.MeshLambertMaterial({ color: 0x9E9A94 }); // darker — groove shadow
   const addCol = (lx, lz) => {
     addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stone, lx, 0.11, lz);
     addM(new THREE.CylinderGeometry(colR, colR * 1.06, colH, 12), stone, lx, colH / 2, lz);
-    addM(new THREE.CylinderGeometry(colR + 0.04, colR + 0.04, colH * 0.36, 12), stone, lx, colH * 0.24, lz);
+    // Three ring bands at 20%, 48%, 76% of shaft height
+    for (const frac of [0.20, 0.48, 0.76])
+      addM(new THREE.CylinderGeometry(colR + 0.055, colR + 0.055, 0.09, 12), groove, lx, colH * frac, lz);
+    // Echinus — flared neck from shaft top up to capital
+    addM(new THREE.CylinderGeometry(colR * 1.38, colR * 1.02, 0.26, 12), stone, lx, colH + 0.13, lz);
   };
 
   // Front face (+Z = bd/2) — 5 columns, player walks between them (gap ≈ 2.65 units)

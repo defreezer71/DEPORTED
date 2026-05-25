@@ -172,7 +172,7 @@ function createBot(x, z, name, index) {
     shootCooldown: 0,
     shootAccuracy: 0.12 + Math.random() * 0.16,
     aggroRange: 30 + Math.random() * 20,
-    ammoTimer: 0,
+    ammoTimer: 30,  // arm after 30s then begin shooting
     exitDelay: 0,
     exitedPrison: false,
     velocityY: 0,

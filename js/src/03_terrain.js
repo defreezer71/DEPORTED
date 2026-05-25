@@ -86,34 +86,44 @@ for (let i = 0; i < gPosAttr.count; i++) {
   const onVolcano = vDist < CONFIG.volcanoRadius * 0.98 && getVolcanoHeight(x, y) > 0.2;
   if (onVolcano) {
     const t = Math.min(h / CONFIG.volcanoHeight, 1);
-    // Diagonal flow streaks — angled noise simulates lava channels running down the slope
-    const flow1 = Math.sin(x * 1.8 + y * 2.6 + h * 0.4) * 0.090 + Math.sin(x * 4.1 - y * 3.3) * 0.050;
-    const flow2 = Math.cos(x * 2.9 - y * 1.7 + h * 0.3) * 0.075 + Math.cos(y * 5.8 + x * 1.2) * 0.040;
-    // Mid-frequency surface roughness
-    const rough = Math.sin(x * 9.4 + y * 7.1) * 0.022 + Math.cos(x * 14.2 - y * 11.8) * 0.014;
+    // Polar coords — radial channels run down from summit like real lava flows
+    const angle  = Math.atan2(y, x);
+    const normR  = Math.sqrt(x*x + y*y) / CONFIG.volcanoRadius;
+    // Primary flow channels — 9 main ridges radiating from crater
+    const flowA  = Math.sin(angle * 9  + normR * 4.5) * 0.085;
+    // Secondary channels between primaries
+    const flowB  = Math.sin(angle * 17 + normR * 3.2 + 0.8) * 0.045;
+    // Slow large-scale undulation — breaks regularity without adding pattern
+    const flowC  = Math.sin(angle * 4  - normR * 2.1 + 1.3) * 0.035;
+    // Fine surface roughness — mixed irrational frequencies to avoid grid
+    const rough  = Math.sin(x * 8.3 + y * 11.7) * 0.016 + Math.cos(x * 19.1 - y * 13.4) * 0.010;
     // Subtle height strata (geological layering)
-    const strata = Math.sin(h * 2.2) * 0.045 + Math.sin(h * 5.5) * 0.018;
+    const strata = Math.sin(h * 2.2) * 0.028 + Math.sin(h * 5.5) * 0.013;
     // Combined surface noise
-    const surf = flow1 + flow2 + rough + strata;
+    const surf = flowA + flowB + flowC + rough + strata;
+    // Occasional brown scatter — clamped so it only shows in patches, not uniformly
+    const brownNoise = Math.sin(x * 3.7 + y * 5.1) * Math.cos(x * 7.3 - y * 2.9);
+    const brown = Math.max(0, brownNoise - 0.45) * 0.18;  // only fires where noise peaks, sparse
     // Zone blends — sharper transitions for visible banding
     const rustBlend = Math.max(0, Math.min(1, (t - 0.20) / 0.25));
     const ashBlend  = Math.max(0, Math.min(1, (t - 0.58) / 0.22));
     const rimBlend  = Math.max(0, (t - 0.84) / 0.16);
-    // Colors: very dark basalt base → rich rust/iron-oxide → cool gray ash → dark crater rim
-    const basaltR = 0.10 + surf * 0.5;
-    const basaltG = 0.07 + surf * 0.3;
-    const basaltB = 0.06 + surf * 0.2;
-    const rustR   = 0.15 + surf * 0.715;
-    const rustG   = 0.085 + surf * 0.36;
-    const rustB   = 0.026 + surf * 0.098;
-    // Upper zone: dark volcanic red — deep crimson rock near the summit (35% darker)
-    const ashR    = 0.34 + rough * 0.325 + strata * 0.52;
-    const ashG    = 0.065 + rough * 0.13 + strata * 0.195;
-    const ashB    = 0.039 + rough * 0.065 + strata * 0.13;
-    // Crater rim: very dark red-black (35% darker)
-    const rimR    = 0.18 + rough * 0.39;
-    const rimG    = 0.039 + rough * 0.13;
-    const rimB    = 0.026 + rough * 0.065;
+    // Colors: dark charcoal basalt → medium grey slope → lighter grey → dark red crater rim
+    const basaltR = 0.17 + surf * 0.55 + brown * 1.0;
+    const basaltG = 0.17 + surf * 0.54 + brown * 0.5;
+    const basaltB = 0.16 + surf * 0.52;
+    // Mid-slope: slightly lighter grey, flow channels still prominent
+    const rustR   = 0.25 + surf * 0.60 + brown * 1.0;
+    const rustG   = 0.24 + surf * 0.58 + brown * 0.5;
+    const rustB   = 0.23 + surf * 0.56;
+    // Upper slope: cool grey, subtle strata
+    const ashR    = 0.31 + rough * 0.18 + strata * 0.10 + brown * 0.7;
+    const ashG    = 0.30 + rough * 0.17 + strata * 0.09 + brown * 0.35;
+    const ashB    = 0.29 + rough * 0.16 + strata * 0.08;
+    // Crater rim: dark volcanic red — keep the red summit (15% darker)
+    const rimR    = 0.255 + rough * 0.238;
+    const rimG    = 0.043 + rough * 0.051;
+    const rimB    = 0.026 + rough * 0.034;
     r = basaltR + (rustR - basaltR) * rustBlend + (ashR - rustR) * ashBlend + (rimR - ashR) * rimBlend;
     g = basaltG + (rustG - basaltG) * rustBlend + (ashG - rustG) * ashBlend + (rimG - ashG) * rimBlend;
     b = basaltB + (rustB - basaltB) * rustBlend + (ashB - rustB) * ashBlend + (rimB - ashB) * rimBlend;

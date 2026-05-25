@@ -141,11 +141,16 @@ depotCorners.forEach(({ x, z }) => {
     addM(new THREE.BoxGeometry(wt, wallH, bd), stone, wx, wallH / 2, 0);
   }
 
-  // ── Column helper: base + shaft + accent band + capital ──
+  // ── Column helper: base disk + shaft + 3 ring bands + echinus neck + capital ──
+  const groove = new THREE.MeshLambertMaterial({ color: 0x9E9A94 }); // darker — groove shadow
   const addCol = (lx, lz) => {
     addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stone, lx, 0.11, lz);
     addM(new THREE.CylinderGeometry(colR, colR * 1.06, colH, 12), stone, lx, colH / 2, lz);
-    addM(new THREE.CylinderGeometry(colR + 0.04, colR + 0.04, colH * 0.36, 12), stone, lx, colH * 0.24, lz);
+    // Three ring bands at 20%, 48%, 76% of shaft height
+    for (const frac of [0.20, 0.48, 0.76])
+      addM(new THREE.CylinderGeometry(colR + 0.055, colR + 0.055, 0.09, 12), groove, lx, colH * frac, lz);
+    // Echinus — flared neck from shaft top up to capital
+    addM(new THREE.CylinderGeometry(colR * 1.38, colR * 1.02, 0.26, 12), stone, lx, colH + 0.13, lz);
   };
 
   // Front face (+Z = bd/2) — 5 columns, player walks between them (gap ≈ 2.65 units)
