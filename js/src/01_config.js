@@ -106,6 +106,7 @@ const state = {
   killCamBotIndex: -1,
   killCamBuffer: [],          // killer's snapshot replay data
   killCamPlayerBuffer: [],    // player's snapshot replay data (aligned to killer buffer)
+  killCamShotTimes: [],       // relT values of killer's shots during the replay window
   killCamReplayDuration: 5.0,
   killCamPlayTime: 0,
   killCamDuration: 3.0,

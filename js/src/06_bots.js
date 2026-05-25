@@ -182,6 +182,7 @@ function createBot(x, z, name, index) {
     waypoint: null,
     fleeTarget: null,
     snapshots: [],
+    shotTimes: [],
   };
   bots.push(bot);
   return bot;
@@ -207,7 +208,15 @@ function updateBots(dt) {
     const snapNow = Date.now();
     const lastSnap = bot.snapshots[bot.snapshots.length - 1];
     if (!lastSnap || snapNow - lastSnap.t >= 50) {
-      bot.snapshots.push({ t: snapNow, x: bot.pos.x, y: bot.pos.y, z: bot.pos.z, yaw: bot.yaw });
+      // Pre-compute exact aim angles toward the player for kill-cam replay
+      const _sdx = camera.position.x - bot.pos.x;
+      const _sdz = camera.position.z - bot.pos.z;
+      const _sdist = Math.sqrt(_sdx * _sdx + _sdz * _sdz) || 0.001;
+      const _sdy = (camera.position.y - 0.5) - (bot.pos.y + 1.65); // player body-center vs bot eye
+      const _sAimYaw = Math.atan2(-_sdx, -_sdz);   // camera convention (same as follow-cam formula)
+      const _sAimPitch = -Math.atan2(_sdy, _sdist);
+      bot.snapshots.push({ t: snapNow, x: bot.pos.x, y: bot.pos.y, z: bot.pos.z, yaw: bot.yaw,
+        aimYaw: _sAimYaw, aimPitch: _sAimPitch });
       const snapCutoff = snapNow - 30000;
       while (bot.snapshots.length > 2 && bot.snapshots[0].t < snapCutoff) bot.snapshots.shift();
     }
@@ -281,6 +290,8 @@ function updateBots(dt) {
       bot.shootCooldown -= dt;
       if (bot.shootCooldown <= 0 && losHits.length === 0 && !volcanoBlocking) {
         bot.shootCooldown = 0.8 + Math.random() * 1.5;
+        bot.shotTimes.push(Date.now());
+        if (bot.shotTimes.length > 200) bot.shotTimes.shift();
         const hitChance = Math.max(0.08, 0.48 - distToPlayer * 0.005 - bot.shootAccuracy);
         if (Math.random() < hitChance) {
           const dmg = 8 + Math.floor(Math.random() * 7);
@@ -291,6 +302,18 @@ function updateBots(dt) {
             state.killCamBotIndex = bots.indexOf(bot);
             state.killCamShooterId = null;
             window._killCamBot = bot; // direct reference — avoids indexOf returning -1
+            // Push a precise snapshot at the exact kill frame so the replay ends aimed perfectly
+            const _ksNow = Date.now();
+            const _ksdx = camera.position.x - bot.pos.x;
+            const _ksdz = camera.position.z - bot.pos.z;
+            const _ksdist = Math.sqrt(_ksdx * _ksdx + _ksdz * _ksdz) || 0.001;
+            const _ksdy = (camera.position.y - 0.5) - (bot.pos.y + 1.65);
+            bot.snapshots.push({
+              t: _ksNow, x: bot.pos.x, y: bot.pos.y, z: bot.pos.z, yaw: bot.yaw,
+              aimYaw: Math.atan2(-_ksdx, -_ksdz),
+              aimPitch: -Math.atan2(_ksdy, _ksdist),
+            });
+            state.killShotAbsTime = _ksNow;
           }
           updateHUD();
           const dv = document.getElementById('damage-vignette');

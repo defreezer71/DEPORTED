@@ -681,19 +681,22 @@ function update() {
         const kx = s0.x + (s1.x - s0.x) * alpha;
         const ky = s0.y + (s1.y - s0.y) * alpha;
         const kz = s0.z + (s1.z - s0.z) * alpha;
-        camera.position.set(kx, ky + 1.6, kz);
-        // Interpolate player (victim) position
+        camera.position.set(kx, ky + 1.65, kz);
+
+        // Interpolate player (victim) position first — used for both mesh and geometric aim
         const pbuf = state.killCamPlayerBuffer;
         let px = vp.x, py = vp.y, pz = vp.z;
+        let hasPbuf = false;
         if (pbuf && pbuf.length >= 2) {
-          let p0 = pbuf[0], p1 = pbuf[pbuf.length - 1];
+          let p0b = pbuf[0], p1b = pbuf[pbuf.length - 1];
           for (let i = 0; i < pbuf.length - 1; i++) {
-            if (pbuf[i].relT <= t && pbuf[i + 1].relT > t) { p0 = pbuf[i]; p1 = pbuf[i + 1]; break; }
+            if (pbuf[i].relT <= t && pbuf[i + 1].relT > t) { p0b = pbuf[i]; p1b = pbuf[i + 1]; break; }
           }
-          const pa = p1.relT === p0.relT ? 1 : Math.max(0, Math.min(1, (t - p0.relT) / (p1.relT - p0.relT)));
-          px = p0.x + (p1.x - p0.x) * pa;
-          py = p0.y + (p1.y - p0.y) * pa;
-          pz = p0.z + (p1.z - p0.z) * pa;
+          const pa = p1b.relT === p0b.relT ? 1 : Math.max(0, Math.min(1, (t - p0b.relT) / (p1b.relT - p0b.relT)));
+          px = p0b.x + (p1b.x - p0b.x) * pa;
+          py = p0b.y + (p1b.y - p0b.y) * pa;
+          pz = p0b.z + (p1b.z - p0b.z) * pa;
+          hasPbuf = true;
         }
         // Show player mesh at interpolated position, facing the killer
         if (window._playerMesh) {
@@ -701,12 +704,51 @@ function update() {
           window._playerMesh.position.set(px, py - CONFIG.playerHeight, pz);
           window._playerMesh.rotation.y = Math.atan2(kx - px, kz - pz);
         }
-        // Aim camera at player's eye height
-        const eyeY = py - 0.3;
-        const dx = px - kx, dy = eyeY - (ky + 1.6), dz = pz - kz;
-        state.yaw   = Math.atan2(-dx, -dz);
-        state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01,
-          -Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))));
+        // Aim: geometric per-frame from interpolated positions (most accurate) with snapshot fallback
+        if (hasPbuf) {
+          const _gdx = px - kx, _gdz = pz - kz;
+          const _gdy = (py - 0.5) - (ky + 1.65);
+          const _ghoriz = Math.sqrt(_gdx * _gdx + _gdz * _gdz) || 0.001;
+          state.yaw   = Math.atan2(-_gdx, -_gdz);
+          state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01,
+            -Math.atan2(_gdy, _ghoriz)));
+        } else if (s0.aimYaw !== undefined && s1.aimYaw !== undefined) {
+          const yawDelta = ((s1.aimYaw - s0.aimYaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+          state.yaw   = s0.aimYaw + yawDelta * alpha;
+          state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01,
+            s0.aimPitch + (s1.aimPitch - s0.aimPitch) * alpha));
+        }
+
+        // Trigger muzzle flash + sound + recoil at recorded shot moments
+        const prevT = t - renderDt;
+        for (const st of state.killCamShotTimes) {
+          if (st > prevT && st <= t) {
+            showMuzzleFlash();
+            // CSS muzzle flash — project barrel tip from weapon-camera view space manually
+            // weaponGroup is a child of weaponCamera, so .matrix puts tip in view space directly
+            const _mfTip = new THREE.Vector3(0.03, -0.01, -0.925).applyMatrix4(weaponGroup.matrix);
+            const _mfF = 1 / Math.tan(camera.fov * Math.PI / 360);
+            const _mfZ = Math.max(0.001, -_mfTip.z);
+            const _mfSx = (_mfTip.x * _mfF / (camera.aspect || 1) / _mfZ * 0.5 + 0.5) * window.innerWidth;
+            const _mfSy = (-_mfTip.y * _mfF / _mfZ * 0.5 + 0.5) * window.innerHeight;
+            muzzleFlash.style.left = _mfSx + 'px';
+            muzzleFlash.style.top  = _mfSy + 'px';
+            muzzleFlash.style.transform = `translate(-50%,-50%) rotate(${Math.random()*360}deg)`;
+            muzzleFlash.classList.add('flash');
+            clearTimeout(muzzleTimeout);
+            muzzleTimeout = setTimeout(() => muzzleFlash.classList.remove('flash'), 55);
+            // Hitmarker — red tint on kill shot (last in the list), white otherwise
+            const _isKillShot = st === state.killCamShotTimes[state.killCamShotTimes.length - 1];
+            hitmarker.style.filter = _isKillShot ? 'hue-rotate(200deg) brightness(2)' : 'none';
+            hitmarker.classList.add('show');
+            clearTimeout(hitmarkerTimeout);
+            hitmarkerTimeout = setTimeout(() => hitmarker.classList.remove('show'), 120);
+            if (state.currentWeapon === 'm4') SFX.gunshot_m4(); else SFX.gunshot_pistol();
+            weaponGroup.position.z += 0.06;
+            weaponGroup.rotation.x -= 0.08;
+            break;
+          }
+        }
       } else {
         if (window._playerMesh) window._playerMesh.visible = false;
         // No buffer — orbit the death position
@@ -750,6 +792,8 @@ function update() {
     if (state.killCamPlayTime >= state.killCamDuration) {
       state.killCamActive = false;
       if (window._playerMesh) window._playerMesh.visible = false;
+      const _cEl2 = document.getElementById('crosshair');
+      if (_cEl2) _cEl2.style.display = 'none';
       document.getElementById('killcam-overlay').classList.remove('show');
       showPostDeathMenu();
     }
@@ -1263,7 +1307,7 @@ function update() {
   if (window.skyDome) window.skyDome.position.copy(camera.position);
   renderer.clear();
   renderer.render(scene, camera);
-  if (!state.killCamActive && !state.playerDead) {
+  if (!state.killCamActive && !state.playerDead || (state.killCamActive && state.killCamMode === 'pov')) {
     renderer.clearDepth();
     renderer.render(weaponScene, weaponCamera);
   }
@@ -1394,11 +1438,19 @@ function startKillCam() {
       const endT  = rawSnaps[rawSnaps.length - 1].t;
       state.killCamBuffer = rawSnaps.map(s => ({
         relT: (s.t - baseT) / 1000,
-        x: s.x, y: s.y, z: s.z,
+        x: s.x, y: s.y, z: s.z, yaw: s.yaw,
       }));
-      state.killCamReplayDuration = Math.min((endT - baseT) / 1000, 5.0);
+      // Ensure kill shot falls within the replay window — extend if needed
+      const killShotRelT = state.killShotAbsTime != null
+        ? (state.killShotAbsTime - baseT) / 1000
+        : null;
+      const naturalDur = Math.min((endT - baseT) / 1000, 5.0);
+      state.killCamReplayDuration = killShotRelT != null
+        ? Math.min(Math.max(naturalDur, killShotRelT + 0.4), 6.0)
+        : naturalDur;
       // Build aligned player buffer over the same time window
-      const playerRaw = state.playerSnapshots.filter(s => s.t >= baseT && s.t <= endT + 200);
+      const winEndT = baseT + state.killCamReplayDuration * 1000;
+      const playerRaw = state.playerSnapshots.filter(s => s.t >= baseT && s.t <= winEndT + 200);
       if (playerRaw.length > 1) {
         state.killCamPlayerBuffer = playerRaw.map(s => ({
           relT: (s.t - baseT) / 1000,
@@ -1407,6 +1459,10 @@ function startKillCam() {
       } else {
         state.killCamPlayerBuffer = [];
       }
+      // Convert killer's shot timestamps to relT offsets within this window
+      state.killCamShotTimes = (_kcBot.shotTimes || [])
+        .filter(t => t >= baseT && t <= winEndT + 100)
+        .map(t => (t - baseT) / 1000);
     }
   } else if (state.killCamShooterId && state.remotePlayers[state.killCamShooterId]) {
     const snaps = state.remotePlayers[state.killCamShooterId].snapshots.filter(s => s.t >= cutoff);
@@ -1421,6 +1477,7 @@ function startKillCam() {
   }
 
   document.getElementById('killcam-overlay').classList.add('show');
+  document.getElementById('killcam-disclaimer').style.display = 'none';
   const crosshairEl = document.getElementById('crosshair');
   if (crosshairEl) crosshairEl.style.display = 'none';
 }
@@ -1433,6 +1490,9 @@ window.watchKillCam = function() {
   state.killCamMode = 'pov';
   state.killCamDuration = state.killCamReplayDuration || 5.0;
   document.getElementById('killcam-overlay').classList.add('show');
+  document.getElementById('killcam-disclaimer').style.display = '';
+  const _cEl = document.getElementById('crosshair');
+  if (_cEl) _cEl.style.display = '';
 };
 
 // ── Show post-death stat card + spectate choice menu ──
