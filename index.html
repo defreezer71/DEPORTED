@@ -91,7 +91,7 @@
   .menu-btn-bot:hover { background: rgba(80,200,80,0.10) !important; border-color: rgba(80,200,80,0.7) !important; }
   .menu-btn-pvp { border-color: rgba(226,200,126,0.5); }
   .menu-btn-pvp:hover { background: rgba(226,200,126,0.09) !important; border-color: rgba(226,200,126,0.75) !important; }
-  .menu-btn-btc { border-color: rgba(247,147,26,0.28); color: rgba(255,255,255,0.35); }
+  .menu-btn-btc { cursor: default; pointer-events: none; }
   .menu-btn-sub { font-size: 11px; opacity: 0.6; font-weight: 400;
     text-transform: none; letter-spacing: 0; margin-left: 4px; }
 
@@ -594,7 +594,7 @@
         ⚔️ &nbsp; REAL PLAYERS
         <span class="menu-btn-sub">— Up to 21 · 3 Min Lobby</span>
       </button>
-      <button class="menu-btn menu-btn-btc" disabled>
+      <button class="menu-btn menu-btn-btc">
         ₿ &nbsp; MONEY MATCH
         <span class="menu-btn-sub">— Coming Soon</span>
       </button>
@@ -670,6 +670,7 @@
     <button class="spec-btn" id="spec-view-btn" onclick="specToggleView()">1ST PERSON</button>
     <button class="spec-btn" onclick="specCycle(1)">NEXT &#8594;</button>
   </div>
+  <button class="spec-btn" style="margin-top:6px" onclick="location.reload()">&#8617; MAIN MENU</button>
 </div>
 <div id="perf-stats"></div>
 
