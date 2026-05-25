@@ -5,7 +5,19 @@ const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Ho
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
 const BOT_COUNT = 20;
-const BOT_BODY_COLORS = [0xCC6622, 0xBB5511, 0xDD7733, 0xC05A18];
+// One unique shirt color per bot slot (20 total) — used for identification in kill cam
+const BOT_SHIRT_COLORS = [
+  0xCC2222, 0x2244CC, 0x22AA33, 0xCCCC22, 0xCC6622,
+  0x993399, 0x22BBBB, 0xCC2288, 0x88CC22, 0xCC4444,
+  0x2299CC, 0xCC8822, 0x4422CC, 0xCC5533, 0x22CC88,
+  0xCC2266, 0x55AACC, 0xAAAA22, 0xCC44AA, 0x44CCAA,
+];
+const BOT_HELMET_COLORS = [
+  0x333333, 0x553322, 0x223355, 0x225533, 0x443355,
+  0x554433, 0x334433, 0x553344, 0x224455, 0x445522,
+  0x332244, 0x553333, 0x225544, 0x444422, 0x553355,
+  0x334455, 0x442233, 0x224433, 0x553322, 0x335544,
+];
 
 // ── InstancedMesh declarations ──
 let botBodyInst, botBeltInst, botNeckInst, botHeadInst, botHelmetInst;
@@ -35,7 +47,7 @@ function initBotInstances() {
   const bodyMat   = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const beltMat   = new THREE.MeshLambertMaterial({ color: 0x3a3020 });
   const skinMat   = new THREE.MeshLambertMaterial({ color: 0xD2B48C });
-  const helmetMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
+  const helmetMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const legMat    = new THREE.MeshLambertMaterial({ color: 0xBB6622 });
   const bootMat   = new THREE.MeshLambertMaterial({ color: 0x2a2218 });
   const gunMat    = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
@@ -70,10 +82,12 @@ function initBotInstances() {
     botBodyInst.setColorAt(i, _white);
     botArmLInst.setColorAt(i, _white);
     botArmRInst.setColorAt(i, _white);
+    botHelmetInst.setColorAt(i, _white);
   }
   botBodyInst.instanceColor.needsUpdate = true;
   botArmLInst.instanceColor.needsUpdate = true;
   botArmRInst.instanceColor.needsUpdate = true;
+  botHelmetInst.instanceColor.needsUpdate = true;
 
   // Park all instances underground until bots spawn
   const hiddenMat = new THREE.Matrix4().makeTranslation(0, -10000, 0);
@@ -131,13 +145,16 @@ function updateBotMatrices() {
 
 function createBot(x, z, name, index) {
   const h = getGroundHeight(x, z);
-  const col = new THREE.Color(BOT_BODY_COLORS[Math.floor(Math.random() * BOT_BODY_COLORS.length)]);
-  botBodyInst.setColorAt(index, col);
-  botArmLInst.setColorAt(index, col);
-  botArmRInst.setColorAt(index, col);
+  const shirtCol = new THREE.Color(BOT_SHIRT_COLORS[index % BOT_SHIRT_COLORS.length]);
+  botBodyInst.setColorAt(index, shirtCol);
+  botArmLInst.setColorAt(index, shirtCol);
+  botArmRInst.setColorAt(index, shirtCol);
   botBodyInst.instanceColor.needsUpdate = true;
   botArmLInst.instanceColor.needsUpdate = true;
   botArmRInst.instanceColor.needsUpdate = true;
+  const helmetCol = new THREE.Color(BOT_HELMET_COLORS[index % BOT_HELMET_COLORS.length]);
+  botHelmetInst.setColorAt(index, helmetCol);
+  botHelmetInst.instanceColor.needsUpdate = true;
 
   const bot = {
     pos: new THREE.Vector3(x, h, z),
@@ -155,7 +172,7 @@ function createBot(x, z, name, index) {
     shootCooldown: 0,
     shootAccuracy: 0.12 + Math.random() * 0.16,
     aggroRange: 30 + Math.random() * 20,
-    ammoTimer: 30,
+    ammoTimer: 0,
     exitDelay: 0,
     exitedPrison: false,
     velocityY: 0,
@@ -185,6 +202,15 @@ function spawnBots() {
 function updateBots(dt) {
   for (const bot of bots) {
     if (!bot.alive) continue;
+
+    // Always record snapshots — even during countdown so kill-cam always has history
+    const snapNow = Date.now();
+    const lastSnap = bot.snapshots[bot.snapshots.length - 1];
+    if (!lastSnap || snapNow - lastSnap.t >= 50) {
+      bot.snapshots.push({ t: snapNow, x: bot.pos.x, y: bot.pos.y, z: bot.pos.z, yaw: bot.yaw });
+      const snapCutoff = snapNow - 30000;
+      while (bot.snapshots.length > 2 && bot.snapshots[0].t < snapCutoff) bot.snapshots.shift();
+    }
 
     // Phase check — don't move during lobby/countdown
     if (state.phase === 'lobby' || state.phase === 'countdown') continue;
@@ -264,6 +290,7 @@ function updateBots(dt) {
           if (prevHp > 0 && state.hp <= 0) {
             state.killCamBotIndex = bots.indexOf(bot);
             state.killCamShooterId = null;
+            window._killCamBot = bot; // direct reference — avoids indexOf returning -1
           }
           updateHUD();
           const dv = document.getElementById('damage-vignette');
@@ -364,15 +391,6 @@ function updateBots(dt) {
 
     bot.walkPhase += dt * bot.speed * 3;
     bot.swing = Math.sin(bot.walkPhase) * 0.4;
-
-    // Record position snapshot for kill-cam (20Hz, keep last 4s)
-    const snapNow = Date.now();
-    const lastSnap = bot.snapshots[bot.snapshots.length - 1];
-    if (!lastSnap || snapNow - lastSnap.t >= 50) {
-      bot.snapshots.push({ t: snapNow, x: bot.pos.x, y: bot.pos.y, z: bot.pos.z, yaw: bot.yaw });
-      const snapCutoff = snapNow - 4000;
-      while (bot.snapshots.length > 2 && bot.snapshots[0].t < snapCutoff) bot.snapshots.shift();
-    }
   }
 
   updateBotMatrices();

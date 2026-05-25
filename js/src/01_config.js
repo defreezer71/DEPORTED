@@ -101,12 +101,16 @@ const state = {
   erupted: false,
   // Kill-cam
   killCamActive: false,
+  killCamMode: 'follow',      // 'follow' = 3rd-person live behind killer | 'pov' = snapshot replay
   killCamShooterId: null,
   killCamBotIndex: -1,
-  killCamBuffer: [],
+  killCamBuffer: [],          // killer's snapshot replay data
+  killCamPlayerBuffer: [],    // player's snapshot replay data (aligned to killer buffer)
+  killCamReplayDuration: 5.0,
   killCamPlayTime: 0,
   killCamDuration: 3.0,
   killCamVictimPos: null,
+  playerSnapshots: [],        // rolling 30s of player position history
   // Stat tracking
   shotsFired: 0,
   shotsHit: 0,

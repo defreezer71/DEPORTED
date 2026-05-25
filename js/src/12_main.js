@@ -592,6 +592,7 @@ function update() {
     }
     if (state.countdownTime <= 0) {
       state.phase = 'playing';
+      window._killCamBot = null;
       cdEl.classList.remove('show');
       state.gateOpening = true;
       SFX.gate_creak();
@@ -599,6 +600,17 @@ function update() {
       if (idx1 >= 0) collidables.splice(idx1, 1);
       const idx2 = collidables.indexOf(gateDoorR);
       if (idx2 >= 0) collidables.splice(idx2, 1);
+    }
+  }
+
+  // Record player position for kill-cam replay
+  if (state.locked && !state.playerDead) {
+    const _pSnapNow = Date.now();
+    const _lastPS = state.playerSnapshots[state.playerSnapshots.length - 1];
+    if (!_lastPS || _pSnapNow - _lastPS.t >= 50) {
+      state.playerSnapshots.push({ t: _pSnapNow, x: camera.position.x, y: camera.position.y, z: camera.position.z });
+      const _pCutoff = _pSnapNow - 30000;
+      while (state.playerSnapshots.length > 2 && state.playerSnapshots[0].t < _pCutoff) state.playerSnapshots.shift();
     }
   }
 
@@ -629,35 +641,115 @@ function update() {
     }
   }
 
-  // Kill-cam playback
+  // Kill-cam playback — two modes:
+  //   'follow' (default): 3rd-person behind killer showing their body
+  //   'pov':              1st-person from killer's eyes aimed at victim death spot
   if (state.killCamActive) {
-    state.killCamPlayTime += renderDt * 0.8;
-    const t = Math.min(state.killCamPlayTime, state.killCamDuration);
-    const buf = state.killCamBuffer;
-    if (buf && buf.length >= 1) {
-      let s0 = buf[0], s1 = buf[buf.length - 1];
-      for (let i = 0; i < buf.length - 1; i++) {
-        if (buf[i].relT <= t && buf[i + 1].relT > t) { s0 = buf[i]; s1 = buf[i + 1]; break; }
+    state.killCamPlayTime += renderDt;
+
+    // Ensure we have a bot reference — fallback to nearest alive bot if unknown killer
+    if (!window._killCamBot) {
+      if (state.killCamBotIndex >= 0 && bots[state.killCamBotIndex]) {
+        window._killCamBot = bots[state.killCamBotIndex];
+      } else {
+        const vd = state.killCamVictimPos || camera.position;
+        let nearest = null, nearestDist = Infinity;
+        for (const b of bots) {
+          if (!b.alive) continue;
+          const d = (b.pos.x - vd.x) ** 2 + (b.pos.z - vd.z) ** 2;
+          if (d < nearestDist) { nearestDist = d; nearest = b; }
+        }
+        if (nearest) window._killCamBot = nearest;
       }
-      const alpha = (s1.relT === s0.relT) ? 1 : Math.max(0, Math.min(1, (t - s0.relT) / (s1.relT - s0.relT)));
-      const kx = s0.x + (s1.x - s0.x) * alpha;
-      const ky = s0.y + (s1.y - s0.y) * alpha;
-      const kz = s0.z + (s1.z - s0.z) * alpha;
-      let dyaw = s1.yaw - s0.yaw;
-      while (dyaw >  Math.PI) dyaw -= Math.PI * 2;
-      while (dyaw < -Math.PI) dyaw += Math.PI * 2;
-      state.yaw = s0.yaw + dyaw * alpha;
-      // Pitch: aim toward victim death position
-      const vp = state.killCamVictimPos;
-      if (vp) {
-        const dx = vp.x - kx, dy = (vp.y - 0.85) - (ky + 1.6), dz = vp.z - kz;
-        state.pitch = -Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
-        state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
-      }
-      camera.position.set(kx, ky + 1.6, kz);
     }
-    if (state.killCamPlayTime >= state.killCamDuration + 0.5) {
+
+    const kbot   = window._killCamBot;
+    const kplayer = !kbot && state.killCamShooterId ? state.remotePlayers[state.killCamShooterId] : null;
+    const vp = state.killCamVictimPos || camera.position;
+
+    if (state.killCamMode === 'pov') {
+      // Snapshot replay: killer POV interpolated, player mesh shown at recorded position
+      const buf = state.killCamBuffer;
+      if (buf && buf.length >= 2) {
+        const t = Math.min(state.killCamPlayTime, state.killCamDuration);
+        // Interpolate killer position
+        let s0 = buf[0], s1 = buf[buf.length - 1];
+        for (let i = 0; i < buf.length - 1; i++) {
+          if (buf[i].relT <= t && buf[i + 1].relT > t) { s0 = buf[i]; s1 = buf[i + 1]; break; }
+        }
+        const alpha = s1.relT === s0.relT ? 1 : Math.max(0, Math.min(1, (t - s0.relT) / (s1.relT - s0.relT)));
+        const kx = s0.x + (s1.x - s0.x) * alpha;
+        const ky = s0.y + (s1.y - s0.y) * alpha;
+        const kz = s0.z + (s1.z - s0.z) * alpha;
+        camera.position.set(kx, ky + 1.6, kz);
+        // Interpolate player (victim) position
+        const pbuf = state.killCamPlayerBuffer;
+        let px = vp.x, py = vp.y, pz = vp.z;
+        if (pbuf && pbuf.length >= 2) {
+          let p0 = pbuf[0], p1 = pbuf[pbuf.length - 1];
+          for (let i = 0; i < pbuf.length - 1; i++) {
+            if (pbuf[i].relT <= t && pbuf[i + 1].relT > t) { p0 = pbuf[i]; p1 = pbuf[i + 1]; break; }
+          }
+          const pa = p1.relT === p0.relT ? 1 : Math.max(0, Math.min(1, (t - p0.relT) / (p1.relT - p0.relT)));
+          px = p0.x + (p1.x - p0.x) * pa;
+          py = p0.y + (p1.y - p0.y) * pa;
+          pz = p0.z + (p1.z - p0.z) * pa;
+        }
+        // Show player mesh at interpolated position, facing the killer
+        if (window._playerMesh) {
+          window._playerMesh.visible = true;
+          window._playerMesh.position.set(px, py - CONFIG.playerHeight, pz);
+          window._playerMesh.rotation.y = Math.atan2(kx - px, kz - pz);
+        }
+        // Aim camera at player's eye height
+        const eyeY = py - 0.3;
+        const dx = px - kx, dy = eyeY - (ky + 1.6), dz = pz - kz;
+        state.yaw   = Math.atan2(-dx, -dz);
+        state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01,
+          -Math.atan2(dy, Math.sqrt(dx * dx + dz * dz))));
+      } else {
+        if (window._playerMesh) window._playerMesh.visible = false;
+        // No buffer — orbit the death position
+        const angle = state.killCamPlayTime * 0.6;
+        camera.position.set(vp.x + Math.cos(angle) * 8, vp.y + 4, vp.z + Math.sin(angle) * 8);
+        state.yaw = angle + Math.PI; state.pitch = -0.35;
+      }
+    } else if (kbot && kbot.pos) {
+      // 3rd-person follow: camera 5 units behind bot using bot's facing yaw
+      const facingX = Math.sin(kbot.yaw), facingZ = Math.cos(kbot.yaw);
+      const camX = kbot.pos.x - facingX * 7;
+      const camY = kbot.pos.y + 2.5;
+      const camZ = kbot.pos.z - facingZ * 7;
+      camera.position.set(camX, camY, camZ);
+      const tdx = kbot.pos.x - camX, tdy = (kbot.pos.y + 1) - camY, tdz = kbot.pos.z - camZ;
+      state.yaw   = Math.atan2(-tdx, -tdz);
+      state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01,
+        -Math.atan2(tdy, Math.sqrt(tdx * tdx + tdz * tdz))));
+    } else if (kplayer && kplayer.mesh) {
+      // Remote player 3rd-person follow using mesh rotation
+      const mp = kplayer.mesh;
+      const facingX = Math.sin(mp.rotation.y), facingZ = Math.cos(mp.rotation.y);
+      const camX = mp.position.x - facingX * 7;
+      const camY = mp.position.y + 2.5;
+      const camZ = mp.position.z - facingZ * 7;
+      camera.position.set(camX, camY, camZ);
+      const tdx = mp.position.x - camX, tdy = (mp.position.y + 1) - camY, tdz = mp.position.z - camZ;
+      state.yaw   = Math.atan2(-tdx, -tdz);
+      state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01,
+        -Math.atan2(tdy, Math.sqrt(tdx * tdx + tdz * tdz))));
+    } else {
+      // No killer found — orbit death position
+      const angle = state.killCamPlayTime * 0.6;
+      camera.position.set(vp.x + Math.cos(angle) * 8, vp.y + 4, vp.z + Math.sin(angle) * 8);
+      state.yaw = angle + Math.PI; state.pitch = -0.35;
+    }
+
+    // Hide player mesh in follow/orbit modes (only visible in pov)
+    if (state.killCamMode !== 'pov' && window._playerMesh) window._playerMesh.visible = false;
+
+    if (state.killCamPlayTime >= state.killCamDuration) {
       state.killCamActive = false;
+      if (window._playerMesh) window._playerMesh.visible = false;
       document.getElementById('killcam-overlay').classList.remove('show');
       showPostDeathMenu();
     }
@@ -1240,66 +1332,108 @@ window.startPvPMatch = function() {
   state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
   try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
 };
+// ── Player character mesh — visible only during kill-cam POV replay ──
+{
+  const _pmGroup = new THREE.Group();
+  const _bodyMat = new THREE.MeshLambertMaterial({ color: 0x4488cc });
+  const _skinMat = new THREE.MeshLambertMaterial({ color: 0xD2B48C });
+  const _legMat  = new THREE.MeshLambertMaterial({ color: 0x2255aa });
+  const _body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.35), _bodyMat);
+  _body.position.y = 1.2;
+  const _head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), _skinMat);
+  _head.position.y = 1.9;
+  const _legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.55, 0.22), _legMat);
+  _legL.position.set(-0.15, 0.52, 0);
+  const _legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.55, 0.22), _legMat);
+  _legR.position.set(0.15, 0.52, 0);
+  _pmGroup.add(_body, _head, _legL, _legR);
+  _pmGroup.visible = false;
+  scene.add(_pmGroup);
+  window._playerMesh = _pmGroup;
+}
+
 update();
 
 document.getElementById('win-restart').addEventListener('click', () => location.reload());
 
-// ── Kill-cam: build replay buffer from killer's snapshot history ──
+// ── Kill-cam: 3-second live follow, plus build snapshot buffer for the replay button ──
 function startKillCam() {
   state.killCamPlayTime = 0;
   state.killCamActive = true;
+  state.killCamMode = 'follow';
+  state.killCamDuration = 3.0;
   state.killCamBuffer = [];
+  state.killCamReplayDuration = 5.0;
+
+  // Build replay buffer from killer's last 5s of snapshots (used by watchKillCam)
   const now = Date.now();
-  const cutoff = now - 3000;
+  const cutoff = now - 5000;
+  const vp = state.killCamVictimPos || camera.position;
 
-  let snaps = null;
-  if (state.killCamShooterId && state.remotePlayers[state.killCamShooterId]) {
-    snaps = state.remotePlayers[state.killCamShooterId].snapshots.filter(s => s.t >= cutoff);
+  // Resolve killer bot — also check nearest alive bot as last resort
+  let _kcBot = window._killCamBot || (state.killCamBotIndex >= 0 ? bots[state.killCamBotIndex] : null);
+  if (!_kcBot && !state.killCamShooterId) {
+    let nearest = null, nearestDist = Infinity;
+    for (const b of bots) {
+      if (!b.alive) continue;
+      const d = (b.pos.x - vp.x) ** 2 + (b.pos.z - vp.z) ** 2;
+      if (d < nearestDist) { nearestDist = d; nearest = b; }
+    }
+    if (nearest) { _kcBot = nearest; window._killCamBot = nearest; }
   }
-
-  if (snaps && snaps.length > 0) {
-    const baseT = snaps[0].t;
-    state.killCamBuffer = snaps.map(s => ({
-      relT: (s.t - baseT) / 1000,
-      x: s.x, y: s.y, z: s.z, yaw: s.yaw,
-    }));
-    state.killCamDuration = (snaps[snaps.length - 1].t - baseT) / 1000;
-  } else if (state.killCamBotIndex >= 0 && bots[state.killCamBotIndex]) {
-    const bot = bots[state.killCamBotIndex];
-    const vp = state.killCamVictimPos || camera.position;
-    const rawSnaps = bot.snapshots.filter(s => s.t >= cutoff);
-    if (rawSnaps.length > 0) {
+  if (_kcBot) {
+    // Use last 5s of snapshots — fall back to all available if fewer than 5s recorded
+    const allSnaps = _kcBot.snapshots;
+    const rawSnaps = allSnaps.length > 0
+      ? allSnaps.filter(s => s.t >= cutoff).length > 1
+        ? allSnaps.filter(s => s.t >= cutoff)
+        : allSnaps
+      : [];
+    if (rawSnaps.length > 1) {
       const baseT = rawSnaps[0].t;
+      const endT  = rawSnaps[rawSnaps.length - 1].t;
       state.killCamBuffer = rawSnaps.map(s => ({
         relT: (s.t - baseT) / 1000,
         x: s.x, y: s.y, z: s.z,
-        yaw: Math.atan2(s.x - vp.x, s.z - vp.z), // camera looks toward victim (−Z default needs inversion)
       }));
-      state.killCamDuration = (rawSnaps[rawSnaps.length - 1].t - baseT) / 1000;
-    } else {
-      // No history — static frame from bot's current position
-      const bp = bot.pos;
-      const byaw = Math.atan2(bp.x - vp.x, bp.z - vp.z);
-      state.killCamBuffer = [
-        { relT: 0, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
-        { relT: 3, x: bp.x, y: bp.y, z: bp.z, yaw: byaw },
-      ];
-      state.killCamDuration = 3.0;
+      state.killCamReplayDuration = Math.min((endT - baseT) / 1000, 5.0);
+      // Build aligned player buffer over the same time window
+      const playerRaw = state.playerSnapshots.filter(s => s.t >= baseT && s.t <= endT + 200);
+      if (playerRaw.length > 1) {
+        state.killCamPlayerBuffer = playerRaw.map(s => ({
+          relT: (s.t - baseT) / 1000,
+          x: s.x, y: s.y, z: s.z,
+        }));
+      } else {
+        state.killCamPlayerBuffer = [];
+      }
     }
-  } else {
-    // Unknown killer — place cam near death position
-    const vp = state.killCamVictimPos || camera.position;
-    state.killCamBuffer = [
-      { relT: 0, x: vp.x - 4, y: vp.y - 1.0, z: vp.z, yaw: 0 },
-      { relT: 3, x: vp.x - 4, y: vp.y - 1.0, z: vp.z, yaw: 0 },
-    ];
-    state.killCamDuration = 3.0;
+  } else if (state.killCamShooterId && state.remotePlayers[state.killCamShooterId]) {
+    const snaps = state.remotePlayers[state.killCamShooterId].snapshots.filter(s => s.t >= cutoff);
+    if (snaps.length > 1) {
+      const baseT = snaps[0].t;
+      state.killCamBuffer = snaps.map(s => ({
+        relT: (s.t - baseT) / 1000,
+        x: s.x, y: s.y, z: s.z, yaw: s.yaw,
+      }));
+      state.killCamReplayDuration = (snaps[snaps.length - 1].t - baseT) / 1000;
+    }
   }
 
   document.getElementById('killcam-overlay').classList.add('show');
   const crosshairEl = document.getElementById('crosshair');
   if (crosshairEl) crosshairEl.style.display = 'none';
 }
+
+// ── Watch Kill Cam: replay the last 5s from the killer's 1st-person POV ──
+window.watchKillCam = function() {
+  document.getElementById('game-over-screen').classList.remove('show');
+  state.killCamPlayTime = 0;
+  state.killCamActive = true;
+  state.killCamMode = 'pov';
+  state.killCamDuration = state.killCamReplayDuration || 5.0;
+  document.getElementById('killcam-overlay').classList.add('show');
+};
 
 // ── Show post-death stat card + spectate choice menu ──
 function showPostDeathMenu() {
