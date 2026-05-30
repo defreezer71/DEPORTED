@@ -821,7 +821,12 @@ function update() {
       }
 
       if (state.spectateMode === '1st') {
-        camera.position.lerp(new THREE.Vector3(specPos.x, specPos.y + 1.6, specPos.z), renderDt * 12);
+        // Push eye forward past the bag face so we're not inside the model.
+        // Camera forward = (-sin(facingYaw), 0, -cos(facingYaw)); target is behind PI offset,
+        // so bot forward = -camera forward = (sin(facingYaw-PI), 0, cos(facingYaw-PI)).
+        const _sfx = -Math.sin(facingYaw) * 0.45;
+        const _sfz = -Math.cos(facingYaw) * 0.45;
+        camera.position.lerp(new THREE.Vector3(specPos.x + _sfx, specPos.y + 1.78, specPos.z + _sfz), renderDt * 12);
         let dy = facingYaw - state.spectateYaw;
         while (dy >  Math.PI) dy -= Math.PI * 2;
         while (dy < -Math.PI) dy += Math.PI * 2;
@@ -1379,18 +1384,63 @@ window.startPvPMatch = function() {
 // ── Player character mesh — visible only during kill-cam POV replay ──
 {
   const _pmGroup = new THREE.Group();
-  const _bodyMat = new THREE.MeshLambertMaterial({ color: 0x4488cc });
-  const _skinMat = new THREE.MeshLambertMaterial({ color: 0xD2B48C });
-  const _legMat  = new THREE.MeshLambertMaterial({ color: 0x2255aa });
-  const _body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.35), _bodyMat);
-  _body.position.y = 1.2;
-  const _head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), _skinMat);
-  _head.position.y = 1.9;
-  const _legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.55, 0.22), _legMat);
-  _legL.position.set(-0.15, 0.52, 0);
-  const _legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.55, 0.22), _legMat);
-  _legR.position.set(0.15, 0.52, 0);
-  _pmGroup.add(_body, _head, _legL, _legR);
+  const _shirtM  = new THREE.MeshPhongMaterial({ color: 0xE06820, shininess: 5 }); // orange jumpsuit
+  const _pantsM  = new THREE.MeshPhongMaterial({ color: 0xE06820, shininess: 5 }); // same orange
+  const _skinM   = new THREE.MeshPhongMaterial({ color: 0xD4A87A, shininess: 12 });
+  const _bootM   = new THREE.MeshPhongMaterial({ color: 0x18120a, shininess: 24 });
+  const _beltM   = new THREE.MeshPhongMaterial({ color: 0x28180a, shininess: 12 });
+  const _bagM    = new THREE.MeshPhongMaterial({ color: 0xC89040, map: _makeBagTex(), shininess: 4 });
+  const _bagEyeM = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 5 });
+  const _gunM    = new THREE.MeshPhongMaterial({ color: 0x2a2a2a, shininess: 60, specular: new THREE.Color(0x444444) });
+  const _stkM    = new THREE.MeshPhongMaterial({ color: 0x3d2812, shininess: 8 });
+  const _textM   = new THREE.MeshPhongMaterial({ map: _makeICETex(), shininess: 2 });
+
+  function _pmAdd(geo, mat, x, y, z, rx) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    if (rx) m.rotation.x = rx;
+    _pmGroup.add(m); return m;
+  }
+  const B  = (w,h,d)     => new THREE.BoxGeometry(w, h, d);
+  const S  = (r,sw,sh)   => new THREE.SphereGeometry(r, sw||16, sh||12);
+  const Cy = (rt,rb,h,s) => new THREE.CylinderGeometry(rt, rb, h, s||8);
+
+  // Torso — orange jumpsuit, no chest rig
+  _pmAdd(Cy(0.30,0.24,0.62),    _shirtM,  0,      1.27,  0);
+  _pmAdd(B(0.52,0.09,0.27),     _beltM,   0,      0.95,  0);
+  _pmAdd(B(0.29,0.11,0.002),    _textM,   0,      1.42,  0.29);  // I.C.E. front
+  _pmAdd(B(0.29,0.11,0.002),    _textM,   0,      1.42, -0.29);  // I.C.E. back
+  // Paper bag head
+  _pmAdd(B(0.42,0.48,0.37),     _bagM,    0,      1.76,  0);
+  _pmAdd(B(0.10,0.056,0.01),   _bagEyeM,-0.09,   1.82,  0.186);      // L eye hole
+  _pmAdd(B(0.10,0.056,0.01),   _bagEyeM, 0.09,   1.82,  0.186);      // R eye hole
+  // Shoulders
+  _pmAdd(Cy(0.10,0.13,0.12),    _shirtM, -0.30,   1.55,  0);
+  _pmAdd(Cy(0.10,0.13,0.12),    _shirtM,  0.30,   1.55,  0);
+  // Arms — two-handed rifle carry pose: right grips trigger, left reaches handguard
+  // lRotX > 0 tilts the hand forward; forearm x moves inward at elbow for visual bend
+  _pmAdd(B(0.17,0.34,0.17),     _shirtM,  0.41,   1.41,  0.04, 0.36);  // R upper arm
+  _pmAdd(B(0.14,0.28,0.14),     _shirtM,  0.38,   1.20,  0.13, 0.66);  // R forearm
+  _pmAdd(B(0.14,0.12,0.18),     _skinM,   0.24,   1.05,  0.18);        // R hand
+  _pmAdd(B(0.17,0.34,0.17),     _shirtM, -0.41,   1.41,  0.04, 0.60);  // L upper arm
+  _pmAdd(B(0.14,0.28,0.14),     _shirtM, -0.30,   1.23,  0.22, 0.98);  // L forearm
+  _pmAdd(B(0.14,0.12,0.18),     _skinM,   0.04,   1.07,  0.34);        // L hand
+  // Legs
+  _pmAdd(B(0.22,0.38,0.22),     _pantsM, -0.155,  0.73,  0);
+  _pmAdd(B(0.22,0.38,0.22),     _pantsM,  0.155,  0.73,  0);
+  _pmAdd(B(0.17,0.34,0.19),     _pantsM, -0.155,  0.37,  0);
+  _pmAdd(B(0.17,0.34,0.19),     _pantsM,  0.155,  0.37,  0);
+  _pmAdd(B(0.20,0.18,0.30),     _bootM,  -0.155,  0.09,  0.04);
+  _pmAdd(B(0.20,0.18,0.30),     _bootM,   0.155,  0.09,  0.04);
+  // Gun — barrel Rx(PI/2) maps +Y → +Z (points toward target)
+  const _woodM = new THREE.MeshPhongMaterial({ color: 0x7a4a1a, shininess: 15 });
+  _pmAdd(Cy(0.028,0.028,0.44,8),_gunM,    0.06,   1.10,  0.40, Math.PI/2);  // barrel
+  _pmAdd(B(0.08,0.10,0.22),     _gunM,    0.10,   1.11,  0.14);             // receiver
+  _pmAdd(B(0.065,0.038,0.18),   _woodM,   0.07,   1.09,  0.33);             // handguard
+  _pmAdd(B(0.055,0.14,0.062),   _gunM,    0.10,   0.98,  0.16);             // magazine (angled in 3d)
+  _pmAdd(B(0.042,0.088,0.046),  _woodM,   0.12,   1.01,  0.08);             // pistol grip
+  _pmAdd(B(0.06,0.08,0.16),     _stkM,    0.18,   1.12, -0.04);             // stock
+
   _pmGroup.visible = false;
   scene.add(_pmGroup);
   window._playerMesh = _pmGroup;

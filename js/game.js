@@ -2514,7 +2514,7 @@ if (false) {
   }
 }
 // BOTS — AI with shooting, prison spawn, ammo seeking
-// Rendering: 13 InstancedMesh objects (one per body part) = 13 draw calls for all 20 bots
+// Rendering: 24 InstancedMesh objects (one per body part) = 24 draw calls for all 20 bots
 // ═══════════════════════════════════════════════════════════
 const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India','Juliet',
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
@@ -2535,74 +2535,160 @@ const BOT_HELMET_COLORS = [
 ];
 
 // ── InstancedMesh declarations ──
-let botBodyInst, botBeltInst, botNeckInst, botHeadInst, botHelmetInst;
-let botLegLInst, botLegRInst, botBootLInst, botBootRInst;
-let botArmLInst, botArmRInst, botGunInst, botStockInst;
-let botInstMeshes = [];  // all 13 — used in raycast
-let botHeadMeshes = [];  // head + helmet — headshot detection
+let botTorsoInst, botBeltInst, botTextFrontInst, botTextBackInst;
+// Paper bag head
+let botBagBodyInst, botBagEyeLInst, botBagEyeRInst;
+let botShoulderLInst, botShoulderRInst;
+let botUpperArmLInst, botUpperArmRInst;
+let botForearmLInst, botForearmRInst;
+let botHandLInst, botHandRInst;
+let botThighLInst, botThighRInst;
+let botShinLInst, botShinRInst;
+let botBootLInst, botBootRInst;
+let botGunBarrelInst, botGunBodyInst, botStockInst, botGunMagInst, botHandguardInst, botGripInst;
+let botInstMeshes = [];  // all 31 — used in raycast
+let botHeadMeshes = [];  // head + helmet parts — headshot detection
 
 // Reusable matrices — avoids per-frame heap allocation
 const _bRootMat  = new THREE.Matrix4();
 const _bLocalMat = new THREE.Matrix4();
 const _bWorldMat = new THREE.Matrix4();
 
+// Canvas fabric texture — white base with subtle crosshatch weave; per-instance color multiplies through
+function _makeBotFabricTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, 64, 64);
+  x.strokeStyle = 'rgba(0,0,0,0.11)'; x.lineWidth = 0.8;
+  for (let i = 0; i < 64; i += 4) {
+    x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 64); x.stroke();
+    x.beginPath(); x.moveTo(0, i); x.lineTo(64, i); x.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 4); return t;
+}
+
+// Skin texture — carries the skin tone color directly (material color set to white)
+function _makeBotSkinTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const x = c.getContext('2d');
+  x.fillStyle = '#D4A87A'; x.fillRect(0, 0, 32, 32);
+  for (let i = 0; i < 80; i++) {
+    x.fillStyle = `rgba(0,0,0,${0.02 + Math.random() * 0.05})`;
+    x.beginPath(); x.arc(Math.random()*32, Math.random()*32, 0.4+Math.random()*0.8, 0, Math.PI*2); x.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+function _makeICETex() {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 80;
+  const x = c.getContext('2d');
+  x.fillStyle = '#E06820'; x.fillRect(0, 0, 256, 80);
+  x.font = 'bold 63px Arial Black, Impact, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = '#111111'; x.fillText('I.C.E.', 128, 40);
+  x.strokeStyle = '#111111'; x.lineWidth = 2; x.strokeText('I.C.E.', 128, 40);
+  return new THREE.CanvasTexture(c);
+}
+
+function _makeBagTex() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+  const x = c.getContext('2d');
+  x.fillStyle = '#C89040'; x.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 2400; i++) {
+    const px = Math.random() * 128, py = Math.random() * 128;
+    const v = (Math.random() - 0.5) * 28;
+    x.fillStyle = `rgba(${v>0?255:0},${v>0?200:100},0,${Math.abs(v)/120})`;
+    x.fillRect(px, py, 1.5, 1.5);
+  }
+  x.strokeStyle = 'rgba(80,50,10,0.12)'; x.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    const lx = 15 + Math.random() * 98;
+    x.beginPath(); x.moveTo(lx, 0); x.lineTo(lx + (Math.random()-0.5)*10, 128); x.stroke();
+  }
+  return new THREE.CanvasTexture(c);
+}
 function initBotInstances() {
-  const bodyGeo    = new THREE.BoxGeometry(0.7, 0.8, 0.4);
-  const beltGeo    = new THREE.BoxGeometry(0.62, 0.12, 0.38);
-  const neckGeo    = new THREE.BoxGeometry(0.16, 0.1, 0.16);
-  const headGeo    = new THREE.SphereGeometry(0.24, 8, 6);
-  const helmetGeo  = new THREE.CylinderGeometry(0.22, 0.25, 0.16, 8);
-  const legGeo     = new THREE.BoxGeometry(0.2, 0.55, 0.22);
-  const bootGeo    = new THREE.BoxGeometry(0.2, 0.18, 0.28);
-  const armGeo     = new THREE.BoxGeometry(0.18, 0.7, 0.2);
-  const gunGeo     = new THREE.BoxGeometry(0.06, 0.06, 0.5);
-  const stockGeo   = new THREE.BoxGeometry(0.05, 0.05, 0.14);
+  const fabricTex = _makeBotFabricTex();
+  const skinTex   = _makeBotSkinTex();
 
-  // Body/arm use white so setColorAt produces the exact per-bot color
-  const bodyMat   = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  const beltMat   = new THREE.MeshLambertMaterial({ color: 0x3a3020 });
-  const skinMat   = new THREE.MeshLambertMaterial({ color: 0xD2B48C });
-  const helmetMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  const legMat    = new THREE.MeshLambertMaterial({ color: 0xBB6622 });
-  const bootMat   = new THREE.MeshLambertMaterial({ color: 0x2a2218 });
-  const gunMat    = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-  const stockMat  = new THREE.MeshLambertMaterial({ color: 0x3d2812 });
+  // ── Geometries ──
+  const torsoGeo     = new THREE.CylinderGeometry(0.30, 0.24, 0.62, 8);
+  const beltGeo      = new THREE.BoxGeometry(0.52, 0.09, 0.27);
+  const textGeo      = new THREE.BoxGeometry(0.32, 0.13, 0.002);
+  // Paper bag head
+  const bagBodyGeo   = new THREE.BoxGeometry(0.42, 0.48, 0.37);
+  const bagEyeGeo    = new THREE.BoxGeometry(0.10, 0.056, 0.01);
+  const shoulderGeo  = new THREE.CylinderGeometry(0.10, 0.13, 0.14, 8);
+  const upperArmGeo  = new THREE.BoxGeometry(0.17, 0.34, 0.17);
+  const forearmGeo   = new THREE.BoxGeometry(0.14, 0.28, 0.14);
+  const handGeo      = new THREE.BoxGeometry(0.14, 0.12, 0.18);
+  const thighGeo     = new THREE.BoxGeometry(0.22, 0.38, 0.22);
+  const shinGeo      = new THREE.BoxGeometry(0.17, 0.34, 0.19);
+  const bootGeo      = new THREE.BoxGeometry(0.20, 0.18, 0.30);
+  const gunBarrelGeo   = new THREE.CylinderGeometry(0.028, 0.028, 0.44, 8);
+  const gunBodyGeo     = new THREE.BoxGeometry(0.08, 0.10, 0.22);  // upper+lower receiver
+  const stockGeo       = new THREE.BoxGeometry(0.06, 0.08, 0.16);
+  const gunMagGeo      = new THREE.BoxGeometry(0.055, 0.14, 0.062);
+  const handguardGeo   = new THREE.BoxGeometry(0.065, 0.038, 0.18);
+  const gripGeo        = new THREE.BoxGeometry(0.042, 0.088, 0.046);
 
-  botBodyInst   = new THREE.InstancedMesh(bodyGeo,   bodyMat,   BOT_COUNT);
-  botBeltInst   = new THREE.InstancedMesh(beltGeo,   beltMat,   BOT_COUNT);
-  botNeckInst   = new THREE.InstancedMesh(neckGeo,   skinMat,   BOT_COUNT);
-  botHeadInst   = new THREE.InstancedMesh(headGeo,   skinMat,   BOT_COUNT);
-  botHelmetInst = new THREE.InstancedMesh(helmetGeo, helmetMat, BOT_COUNT);
-  botLegLInst   = new THREE.InstancedMesh(legGeo,    legMat,    BOT_COUNT);
-  botLegRInst   = new THREE.InstancedMesh(legGeo,    legMat,    BOT_COUNT);
-  botBootLInst  = new THREE.InstancedMesh(bootGeo,   bootMat,   BOT_COUNT);
-  botBootRInst  = new THREE.InstancedMesh(bootGeo,   bootMat,   BOT_COUNT);
-  botArmLInst   = new THREE.InstancedMesh(armGeo,    bodyMat,   BOT_COUNT);
-  botArmRInst   = new THREE.InstancedMesh(armGeo,    bodyMat,   BOT_COUNT);
-  botGunInst    = new THREE.InstancedMesh(gunGeo,    gunMat,    BOT_COUNT);
-  botStockInst  = new THREE.InstancedMesh(stockGeo,  stockMat,  BOT_COUNT);
+  // ── Materials ──
+  // Jumpsuit: prison orange covering all body parts except hands and boots
+  const jumpsuitMat  = new THREE.MeshPhongMaterial({ color: 0xE06820, map: fabricTex, shininess: 5 });
+  const beltMat      = new THREE.MeshPhongMaterial({ color: 0x28180a, shininess: 12 });
+  const skinMat      = new THREE.MeshPhongMaterial({ color: 0xffffff, map: skinTex, shininess: 12 });
+  const bagMat       = new THREE.MeshPhongMaterial({ color: 0xC89040, map: _makeBagTex(), shininess: 4 });
+  const bagEyeMat    = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 5 });
+  const bootMat      = new THREE.MeshPhongMaterial({ color: 0x18120a, shininess: 24 });
+  const gunMat       = new THREE.MeshPhongMaterial({ color: 0x1e1e1e, shininess: 60, specular: new THREE.Color(0x444444) });
+  const stockMat     = new THREE.MeshPhongMaterial({ color: 0x3d2812, shininess: 8 });
+  const woodMat      = new THREE.MeshPhongMaterial({ color: 0x7a4a1a, shininess: 15 });
+  const textMat      = new THREE.MeshPhongMaterial({ map: _makeICETex(), shininess: 2 });
+
+  // ── InstancedMesh creation ──
+  botTorsoInst      = new THREE.InstancedMesh(torsoGeo,     jumpsuitMat,  BOT_COUNT);
+  botBeltInst       = new THREE.InstancedMesh(beltGeo,      beltMat,      BOT_COUNT);
+  botTextFrontInst  = new THREE.InstancedMesh(textGeo,      textMat,      BOT_COUNT);
+  botTextBackInst   = new THREE.InstancedMesh(textGeo,      textMat,      BOT_COUNT);
+  botBagBodyInst     = new THREE.InstancedMesh(bagBodyGeo,    bagMat,        BOT_COUNT);
+  botBagEyeLInst     = new THREE.InstancedMesh(bagEyeGeo,     bagEyeMat,     BOT_COUNT);
+  botBagEyeRInst     = new THREE.InstancedMesh(bagEyeGeo,     bagEyeMat,     BOT_COUNT);
+  botShoulderLInst  = new THREE.InstancedMesh(shoulderGeo,  jumpsuitMat,  BOT_COUNT);
+  botShoulderRInst  = new THREE.InstancedMesh(shoulderGeo,  jumpsuitMat,  BOT_COUNT);
+  botUpperArmLInst  = new THREE.InstancedMesh(upperArmGeo,  jumpsuitMat,  BOT_COUNT);
+  botUpperArmRInst  = new THREE.InstancedMesh(upperArmGeo,  jumpsuitMat,  BOT_COUNT);
+  botForearmLInst   = new THREE.InstancedMesh(forearmGeo,   jumpsuitMat,  BOT_COUNT);
+  botForearmRInst   = new THREE.InstancedMesh(forearmGeo,   jumpsuitMat,  BOT_COUNT);
+  botHandLInst      = new THREE.InstancedMesh(handGeo,      skinMat,      BOT_COUNT);
+  botHandRInst      = new THREE.InstancedMesh(handGeo,      skinMat,      BOT_COUNT);
+  botThighLInst     = new THREE.InstancedMesh(thighGeo,     jumpsuitMat,     BOT_COUNT);
+  botThighRInst     = new THREE.InstancedMesh(thighGeo,     jumpsuitMat,     BOT_COUNT);
+  botShinLInst      = new THREE.InstancedMesh(shinGeo,      jumpsuitMat,     BOT_COUNT);
+  botShinRInst      = new THREE.InstancedMesh(shinGeo,      jumpsuitMat,     BOT_COUNT);
+  botBootLInst      = new THREE.InstancedMesh(bootGeo,      bootMat,      BOT_COUNT);
+  botBootRInst      = new THREE.InstancedMesh(bootGeo,      bootMat,      BOT_COUNT);
+  botGunBarrelInst  = new THREE.InstancedMesh(gunBarrelGeo,  gunMat,   BOT_COUNT);
+  botGunBodyInst    = new THREE.InstancedMesh(gunBodyGeo,    gunMat,   BOT_COUNT);
+  botStockInst      = new THREE.InstancedMesh(stockGeo,      stockMat, BOT_COUNT);
+  botGunMagInst     = new THREE.InstancedMesh(gunMagGeo,     gunMat,   BOT_COUNT);
+  botHandguardInst  = new THREE.InstancedMesh(handguardGeo,  woodMat,  BOT_COUNT);
+  botGripInst       = new THREE.InstancedMesh(gripGeo,       woodMat,  BOT_COUNT);
 
   botInstMeshes = [
-    botBodyInst, botBeltInst, botNeckInst, botHeadInst, botHelmetInst,
-    botLegLInst, botLegRInst, botBootLInst, botBootRInst,
-    botArmLInst, botArmRInst, botGunInst, botStockInst,
+    botTorsoInst, botBeltInst, botTextFrontInst, botTextBackInst,
+    botBagBodyInst, botBagEyeLInst, botBagEyeRInst,
+    botShoulderLInst, botShoulderRInst,
+    botUpperArmLInst, botUpperArmRInst,
+    botForearmLInst, botForearmRInst,
+    botHandLInst, botHandRInst,
+    botThighLInst, botThighRInst,
+    botShinLInst, botShinRInst,
+    botBootLInst, botBootRInst,
+    botGunBarrelInst, botGunBodyInst, botStockInst, botGunMagInst, botHandguardInst, botGripInst,
   ];
-  botHeadMeshes = [botHeadInst, botHelmetInst];
+  botHeadMeshes = [botBagBodyInst, botBagEyeLInst, botBagEyeRInst];
 
-  // Pre-initialize instanceColor on body/arm meshes so the shader compiles with
-  // USE_INSTANCING_COLOR from the start — without this, setColorAt() called later
-  // has no effect because the shader was already compiled without color instancing.
-  const _white = new THREE.Color(1, 1, 1);
-  for (let i = 0; i < BOT_COUNT; i++) {
-    botBodyInst.setColorAt(i, _white);
-    botArmLInst.setColorAt(i, _white);
-    botArmRInst.setColorAt(i, _white);
-    botHelmetInst.setColorAt(i, _white);
-  }
-  botBodyInst.instanceColor.needsUpdate = true;
-  botArmLInst.instanceColor.needsUpdate = true;
-  botArmRInst.instanceColor.needsUpdate = true;
-  botHelmetInst.instanceColor.needsUpdate = true;
+  // All colors are fixed — no per-instance color variation.
 
   // Park all instances underground until bots spawn
   const hiddenMat = new THREE.Matrix4().makeTranslation(0, -10000, 0);
@@ -2619,9 +2705,13 @@ initBotInstances();
 // ── Write one part's world matrix into an InstancedMesh ──
 // rootMat encodes the bot's world position + orientation.
 // lRotX: local rotation around X (walk animation) — 0 means no rotation.
-function _setBotPart(inst, i, rootMat, lx, ly, lz, lRotX) {
-  if (lRotX) {
-    _bLocalMat.makeRotationX(lRotX);
+const _bEuler = new THREE.Euler();
+const _bQ     = new THREE.Quaternion();
+function _setBotPart(inst, i, rootMat, lx, ly, lz, lRotX, lRotZ) {
+  if (lRotX || lRotZ) {
+    _bEuler.set(lRotX || 0, 0, lRotZ || 0, 'XYZ');
+    _bQ.setFromEuler(_bEuler);
+    _bLocalMat.makeRotationFromQuaternion(_bQ);
     _bLocalMat.setPosition(lx, ly, lz);
   } else {
     _bLocalMat.makeTranslation(lx, ly, lz);
@@ -2631,6 +2721,7 @@ function _setBotPart(inst, i, rootMat, lx, ly, lz, lRotX) {
 }
 
 function updateBotMatrices() {
+  const PI2 = Math.PI / 2;
   for (let i = 0; i < bots.length; i++) {
     const bot = bots[i];
     if (bot.alive) {
@@ -2641,36 +2732,58 @@ function updateBotMatrices() {
       _bRootMat.setPosition(bot.pos.x, bot.deadY, bot.pos.z);
     }
     const sw = bot.swing;
-    _setBotPart(botBodyInst,   i, _bRootMat,  0,      1.30,  0,     0        );
-    _setBotPart(botBeltInst,   i, _bRootMat,  0,      0.88,  0,     0        );
-    _setBotPart(botNeckInst,   i, _bRootMat,  0,      1.72,  0,     0        );
-    _setBotPart(botHeadInst,   i, _bRootMat,  0,      1.90,  0,     0        );
-    _setBotPart(botHelmetInst, i, _bRootMat,  0,      2.06,  0,     0        );
-    _setBotPart(botLegLInst,   i, _bRootMat, -0.15,   0.50,  0,     sw       );
-    _setBotPart(botLegRInst,   i, _bRootMat,  0.15,   0.50,  0,    -sw       );
-    _setBotPart(botBootLInst,  i, _bRootMat, -0.15,   0.09,  0.02,  0        );
-    _setBotPart(botBootRInst,  i, _bRootMat,  0.15,   0.09,  0.02,  0        );
-    _setBotPart(botArmLInst,   i, _bRootMat, -0.45,   1.15,  0,    -sw * 0.6 );
-    _setBotPart(botArmRInst,   i, _bRootMat,  0.45,   1.15,  0,     sw * 0.6 );
-    _setBotPart(botGunInst,    i, _bRootMat,  0.45,   1.10,  0.30,  0        );
-    _setBotPart(botStockInst,  i, _bRootMat,  0.45,   1.10,  0.02,  0        );
+    // Shin z-offset approximates tracking the thigh bottom for natural stride
+    const shinZ = -sw * 0.18;
+
+    // ── Core body ──
+    _setBotPart(botTorsoInst,      i, _bRootMat,  0,       1.27,   0,       0);
+    _setBotPart(botBeltInst,       i, _bRootMat,  0,       0.95,   0,       0);
+    _setBotPart(botTextFrontInst,  i, _bRootMat,  0,       1.42,   0.29,    0);
+    _setBotPart(botTextBackInst,   i, _bRootMat,  0,       1.42,  -0.29,    0);
+
+    // ── Roman Galea helmet (IS the head — no skin sphere or neck beneath it) ──
+    // Dome r=0.31 sits at y=1.76; bottom at y=1.45 overlaps torso shoulders naturally
+    // ── Paper bag head ──
+    _setBotPart(botBagBodyInst,  i, _bRootMat,  0,       1.76,   0,      0);
+    _setBotPart(botBagEyeLInst,  i, _bRootMat, -0.09,    1.82,   0.186,  0);
+    _setBotPart(botBagEyeRInst,  i, _bRootMat,  0.09,    1.82,   0.186,  0);
+
+    // ── Shoulders ──
+    _setBotPart(botShoulderLInst,  i, _bRootMat, -0.30,    1.55,   0,       0);
+    _setBotPart(botShoulderRInst,  i, _bRootMat,  0.30,    1.55,   0,       0);
+
+    // ── Arms — two-handed rifle carry pose; right grips trigger, left reaches handguard
+    // lRotX > 0 swings the hand forward (+Z). Small sw oscillation keeps walk natural.
+    // Right arm — trigger grip side; hangs from shoulder, forearm swings forward
+    _setBotPart(botUpperArmRInst,  i, _bRootMat,  0.41,    1.41,   0.04,    0.36 + sw * 0.06);
+    _setBotPart(botForearmRInst,   i, _bRootMat,  0.38,    1.20,   0.13,    0.66 + sw * 0.04);
+    _setBotPart(botHandRInst,      i, _bRootMat,  0.24,    1.05,   0.18 + sw * 0.04, 0);
+    // Left arm — foregrip side; leans further forward to reach the handguard
+    _setBotPart(botUpperArmLInst,  i, _bRootMat, -0.41,    1.41,   0.04,    0.60 - sw * 0.06);
+    _setBotPart(botForearmLInst,   i, _bRootMat, -0.30,    1.23,   0.22,    0.98 - sw * 0.04);
+    _setBotPart(botHandLInst,      i, _bRootMat,  0.04,    1.07,   0.34 - sw * 0.04, 0);
+
+    // ── Legs ──
+    _setBotPart(botThighLInst,     i, _bRootMat, -0.155,   0.73,   0,       sw);
+    _setBotPart(botThighRInst,     i, _bRootMat,  0.155,   0.73,   0,      -sw);
+    _setBotPart(botShinLInst,      i, _bRootMat, -0.155,   0.37,   shinZ,   sw * 0.35);
+    _setBotPart(botShinRInst,      i, _bRootMat,  0.155,   0.37,  -shinZ,  -sw * 0.35);
+    _setBotPart(botBootLInst,      i, _bRootMat, -0.155,   0.09,   0.04,    0);
+    _setBotPart(botBootRInst,      i, _bRootMat,  0.155,   0.09,   0.04,    0);
+
+    // ── Gun — AK-style; barrel forward, wood handguard + grip, angled mag ──
+    _setBotPart(botGunBarrelInst,  i, _bRootMat,  0.06,    1.10,   0.40,    PI2);
+    _setBotPart(botGunBodyInst,    i, _bRootMat,  0.10,    1.11,   0.14,    0);
+    _setBotPart(botHandguardInst,  i, _bRootMat,  0.07,    1.09,   0.33,    0);
+    _setBotPart(botGunMagInst,     i, _bRootMat,  0.10,    0.98,   0.16,    0.18);
+    _setBotPart(botGripInst,       i, _bRootMat,  0.12,    1.01,   0.08,   -0.30);
+    _setBotPart(botStockInst,      i, _bRootMat,  0.18,    1.12,  -0.04,    0);
   }
   for (const inst of botInstMeshes) inst.instanceMatrix.needsUpdate = true;
 }
 
 function createBot(x, z, name, index) {
   const h = getGroundHeight(x, z);
-  const shirtCol = new THREE.Color(BOT_SHIRT_COLORS[index % BOT_SHIRT_COLORS.length]);
-  botBodyInst.setColorAt(index, shirtCol);
-  botArmLInst.setColorAt(index, shirtCol);
-  botArmRInst.setColorAt(index, shirtCol);
-  botBodyInst.instanceColor.needsUpdate = true;
-  botArmLInst.instanceColor.needsUpdate = true;
-  botArmRInst.instanceColor.needsUpdate = true;
-  const helmetCol = new THREE.Color(BOT_HELMET_COLORS[index % BOT_HELMET_COLORS.length]);
-  botHelmetInst.setColorAt(index, helmetCol);
-  botHelmetInst.instanceColor.needsUpdate = true;
-
   const bot = {
     pos: new THREE.Vector3(x, h, z),
     yaw: 0,
@@ -5824,7 +5937,12 @@ function update() {
       }
 
       if (state.spectateMode === '1st') {
-        camera.position.lerp(new THREE.Vector3(specPos.x, specPos.y + 1.6, specPos.z), renderDt * 12);
+        // Push eye forward past the bag face so we're not inside the model.
+        // Camera forward = (-sin(facingYaw), 0, -cos(facingYaw)); target is behind PI offset,
+        // so bot forward = -camera forward = (sin(facingYaw-PI), 0, cos(facingYaw-PI)).
+        const _sfx = -Math.sin(facingYaw) * 0.45;
+        const _sfz = -Math.cos(facingYaw) * 0.45;
+        camera.position.lerp(new THREE.Vector3(specPos.x + _sfx, specPos.y + 1.78, specPos.z + _sfz), renderDt * 12);
         let dy = facingYaw - state.spectateYaw;
         while (dy >  Math.PI) dy -= Math.PI * 2;
         while (dy < -Math.PI) dy += Math.PI * 2;
@@ -6382,18 +6500,63 @@ window.startPvPMatch = function() {
 // ── Player character mesh — visible only during kill-cam POV replay ──
 {
   const _pmGroup = new THREE.Group();
-  const _bodyMat = new THREE.MeshLambertMaterial({ color: 0x4488cc });
-  const _skinMat = new THREE.MeshLambertMaterial({ color: 0xD2B48C });
-  const _legMat  = new THREE.MeshLambertMaterial({ color: 0x2255aa });
-  const _body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.35), _bodyMat);
-  _body.position.y = 1.2;
-  const _head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), _skinMat);
-  _head.position.y = 1.9;
-  const _legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.55, 0.22), _legMat);
-  _legL.position.set(-0.15, 0.52, 0);
-  const _legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.55, 0.22), _legMat);
-  _legR.position.set(0.15, 0.52, 0);
-  _pmGroup.add(_body, _head, _legL, _legR);
+  const _shirtM  = new THREE.MeshPhongMaterial({ color: 0xE06820, shininess: 5 }); // orange jumpsuit
+  const _pantsM  = new THREE.MeshPhongMaterial({ color: 0xE06820, shininess: 5 }); // same orange
+  const _skinM   = new THREE.MeshPhongMaterial({ color: 0xD4A87A, shininess: 12 });
+  const _bootM   = new THREE.MeshPhongMaterial({ color: 0x18120a, shininess: 24 });
+  const _beltM   = new THREE.MeshPhongMaterial({ color: 0x28180a, shininess: 12 });
+  const _bagM    = new THREE.MeshPhongMaterial({ color: 0xC89040, map: _makeBagTex(), shininess: 4 });
+  const _bagEyeM = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 5 });
+  const _gunM    = new THREE.MeshPhongMaterial({ color: 0x2a2a2a, shininess: 60, specular: new THREE.Color(0x444444) });
+  const _stkM    = new THREE.MeshPhongMaterial({ color: 0x3d2812, shininess: 8 });
+  const _textM   = new THREE.MeshPhongMaterial({ map: _makeICETex(), shininess: 2 });
+
+  function _pmAdd(geo, mat, x, y, z, rx) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    if (rx) m.rotation.x = rx;
+    _pmGroup.add(m); return m;
+  }
+  const B  = (w,h,d)     => new THREE.BoxGeometry(w, h, d);
+  const S  = (r,sw,sh)   => new THREE.SphereGeometry(r, sw||16, sh||12);
+  const Cy = (rt,rb,h,s) => new THREE.CylinderGeometry(rt, rb, h, s||8);
+
+  // Torso — orange jumpsuit, no chest rig
+  _pmAdd(Cy(0.30,0.24,0.62),    _shirtM,  0,      1.27,  0);
+  _pmAdd(B(0.52,0.09,0.27),     _beltM,   0,      0.95,  0);
+  _pmAdd(B(0.29,0.11,0.002),    _textM,   0,      1.42,  0.29);  // I.C.E. front
+  _pmAdd(B(0.29,0.11,0.002),    _textM,   0,      1.42, -0.29);  // I.C.E. back
+  // Paper bag head
+  _pmAdd(B(0.42,0.48,0.37),     _bagM,    0,      1.76,  0);
+  _pmAdd(B(0.10,0.056,0.01),   _bagEyeM,-0.09,   1.82,  0.186);      // L eye hole
+  _pmAdd(B(0.10,0.056,0.01),   _bagEyeM, 0.09,   1.82,  0.186);      // R eye hole
+  // Shoulders
+  _pmAdd(Cy(0.10,0.13,0.12),    _shirtM, -0.30,   1.55,  0);
+  _pmAdd(Cy(0.10,0.13,0.12),    _shirtM,  0.30,   1.55,  0);
+  // Arms — two-handed rifle carry pose: right grips trigger, left reaches handguard
+  // lRotX > 0 tilts the hand forward; forearm x moves inward at elbow for visual bend
+  _pmAdd(B(0.17,0.34,0.17),     _shirtM,  0.41,   1.41,  0.04, 0.36);  // R upper arm
+  _pmAdd(B(0.14,0.28,0.14),     _shirtM,  0.38,   1.20,  0.13, 0.66);  // R forearm
+  _pmAdd(B(0.14,0.12,0.18),     _skinM,   0.24,   1.05,  0.18);        // R hand
+  _pmAdd(B(0.17,0.34,0.17),     _shirtM, -0.41,   1.41,  0.04, 0.60);  // L upper arm
+  _pmAdd(B(0.14,0.28,0.14),     _shirtM, -0.30,   1.23,  0.22, 0.98);  // L forearm
+  _pmAdd(B(0.14,0.12,0.18),     _skinM,   0.04,   1.07,  0.34);        // L hand
+  // Legs
+  _pmAdd(B(0.22,0.38,0.22),     _pantsM, -0.155,  0.73,  0);
+  _pmAdd(B(0.22,0.38,0.22),     _pantsM,  0.155,  0.73,  0);
+  _pmAdd(B(0.17,0.34,0.19),     _pantsM, -0.155,  0.37,  0);
+  _pmAdd(B(0.17,0.34,0.19),     _pantsM,  0.155,  0.37,  0);
+  _pmAdd(B(0.20,0.18,0.30),     _bootM,  -0.155,  0.09,  0.04);
+  _pmAdd(B(0.20,0.18,0.30),     _bootM,   0.155,  0.09,  0.04);
+  // Gun — barrel Rx(PI/2) maps +Y → +Z (points toward target)
+  const _woodM = new THREE.MeshPhongMaterial({ color: 0x7a4a1a, shininess: 15 });
+  _pmAdd(Cy(0.028,0.028,0.44,8),_gunM,    0.06,   1.10,  0.40, Math.PI/2);  // barrel
+  _pmAdd(B(0.08,0.10,0.22),     _gunM,    0.10,   1.11,  0.14);             // receiver
+  _pmAdd(B(0.065,0.038,0.18),   _woodM,   0.07,   1.09,  0.33);             // handguard
+  _pmAdd(B(0.055,0.14,0.062),   _gunM,    0.10,   0.98,  0.16);             // magazine (angled in 3d)
+  _pmAdd(B(0.042,0.088,0.046),  _woodM,   0.12,   1.01,  0.08);             // pistol grip
+  _pmAdd(B(0.06,0.08,0.16),     _stkM,    0.18,   1.12, -0.04);             // stock
+
   _pmGroup.visible = false;
   scene.add(_pmGroup);
   window._playerMesh = _pmGroup;
