@@ -178,13 +178,13 @@ function shoot() {
         new THREE.Vector3(0, 1, 0)
       );
     } else {
-      const isBotHit = hit.object.isInstancedMesh && botInstMeshes.includes(hit.object);
-      const isHead = isBotHit ? botHeadMeshes.includes(hit.object) : hit.object.userData.isHead;
+      const isBotHit = hit.object.userData.botIndex !== undefined;
+      const isHead = hit.object.userData.isHead === true;
       const dmg = isHead ? wep.headDmg : wep.bodyDmg;
 
       spawnImpact(hit.point, hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0));
 
-      const bot = isBotHit ? findBotByInstance(hit.object, hit.instanceId) : null;
+      const bot = isBotHit ? findBotByMesh(hit.object) : null;
       if (bot) {
         hitmarker.classList.add('show');
         hitmarker.style.filter = isHead ? 'hue-rotate(200deg) brightness(2)' : 'none';

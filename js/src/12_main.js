@@ -1351,7 +1351,7 @@ window.startBotMatch = function() {
   if (ov) ov.classList.add("hidden");
   if (typeof spawnBots === 'function') spawnBots();
   state.phase = "countdown";
-  state.matchStartAt = Date.now();
+  state.matchStartAt = Date.now() + 10000;
   renderer.domElement.requestPointerLock();
 };
 window.showPvPOptions = function() {
@@ -1961,7 +1961,7 @@ function connectToServer() {
       case 'startMatch':
         state.matchStartAt = msg.startAt || (Date.now() + 2500);
         state.phase = 'countdown';
-        state.countdownTime = 10;
+        state.countdownTime = 4;
         (function() {
           var flash = document.createElement('div');
           flash.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;z-index:9999;pointer-events:none;';

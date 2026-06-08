@@ -127,35 +127,58 @@ function _makeBarkTex() {
 function _makeLeafTex() {
   const c = document.createElement('canvas'); c.width = 256; c.height = 256;
   const ctx = c.getContext('2d');
-  // Vibrant mid-green base — bright enough to survive instance color multiplication
-  ctx.fillStyle = '#4a9a20'; ctx.fillRect(0, 0, 256, 256);
-  // Soft shadow blobs — subtle depth, not heavy spots
-  for (let i = 0; i < 38; i++) {
+
+  // Helper — traces a bumpy closed ellipse path (cartoon hand-drawn edge)
+  function _bumpyEllipsePath(cx, cy, rx, ry, rot) {
+    const steps = 72;
+    const f1 = 4 + Math.floor(Math.random() * 5);   // low-freq bumps
+    const f2 = 9 + Math.floor(Math.random() * 6);   // high-freq bumps
+    const amt = 0.06 + Math.random() * 0.07;
+    const phase = Math.random() * 6.28;
+    ctx.beginPath();
+    for (let s = 0; s <= steps; s++) {
+      const t = (s / steps) * 6.28;
+      const bump = 1 + Math.sin(t * f1 + phase) * amt + Math.sin(t * f2 + phase * 1.7) * amt * 0.45;
+      const bx = Math.cos(t) * rx * bump, by = Math.sin(t) * ry * bump;
+      const px = cx + bx * Math.cos(rot) - by * Math.sin(rot);
+      const py = cy + bx * Math.sin(rot) + by * Math.cos(rot);
+      s === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  // Bright base green
+  ctx.fillStyle = '#52a822'; ctx.fillRect(0, 0, 256, 256);
+
+  // Medium shadow patches — flat dark green fill + bumpy cartoon outline
+  for (let i = 0; i < 16; i++) {
     const lx = Math.random() * 256, ly = Math.random() * 256;
-    const lr = 8 + Math.random() * 24;
-    const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
-    g.addColorStop(0, `rgba(4,18,1,${0.28 + Math.random() * 0.18})`);
-    g.addColorStop(0.5, `rgba(4,18,1,${0.10 + Math.random() * 0.10})`);
-    g.addColorStop(1, 'rgba(4,18,1,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(lx, ly, lr, 0, 6.28); ctx.fill();
+    const lr = 10 + Math.random() * 20;
+    const rx = lr * (0.8 + Math.random() * 0.5), ry = lr * (0.8 + Math.random() * 0.5);
+    const rot = Math.random() * 3.14;
+    _bumpyEllipsePath(lx, ly, rx, ry, rot);
+    ctx.fillStyle = `rgba(22,72,8,${0.18 + Math.random() * 0.14})`; ctx.fill();
+    ctx.strokeStyle = 'rgba(18,58,5,0.75)'; ctx.lineWidth = 1.1; ctx.stroke();
   }
-  // Gentle sun-dapple highlights
-  for (let i = 0; i < 20; i++) {
+
+  // Smaller accent shadow blobs — with outlines
+  for (let i = 0; i < 22; i++) {
     const lx = Math.random() * 256, ly = Math.random() * 256;
-    const lr = 5 + Math.random() * 16;
-    const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr);
-    g.addColorStop(0, `rgba(110,230,40,${0.18 + Math.random() * 0.14})`);
-    g.addColorStop(1, 'rgba(110,230,40,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(lx, ly, lr, 0, 6.28); ctx.fill();
+    const lr = 5 + Math.random() * 11;
+    const rot = Math.random() * 3.14;
+    _bumpyEllipsePath(lx, ly, lr, lr * (0.75 + Math.random() * 0.5), rot);
+    ctx.fillStyle = `rgba(18,58,6,${0.13 + Math.random() * 0.12})`; ctx.fill();
+    ctx.strokeStyle = 'rgba(18,55,5,0.65)'; ctx.lineWidth = 0.85; ctx.stroke();
   }
-  // Fine noise — individual leaf edges
-  for (let i = 0; i < 140; i++) {
-    const nx = Math.random() * 256, ny = Math.random() * 256;
-    ctx.fillStyle = Math.random() < 0.55
-      ? `rgba(5,20,2,${0.12 + Math.random()*0.16})`
-      : `rgba(85,200,28,${0.08 + Math.random()*0.12})`;
-    ctx.fillRect(nx, ny, 1 + Math.random() * 2.5, 1 + Math.random() * 2.5);
+
+  // Bright highlight patches — no outline, just flat colour
+  for (let i = 0; i < 8; i++) {
+    const lx = Math.random() * 256, ly = Math.random() * 256;
+    const lr = 12 + Math.random() * 22;
+    ctx.fillStyle = `rgba(100,210,38,${0.14 + Math.random() * 0.12})`;
+    ctx.beginPath(); ctx.ellipse(lx, ly, lr, lr * (0.7 + Math.random() * 0.5), Math.random() * 3.14, 0, 6.28); ctx.fill();
   }
+
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(2, 2);
@@ -254,74 +277,83 @@ const _crateTex     = _makeCrateTex();
   const _tDummy = new THREE.Object3D();
   const _tCol   = new THREE.Color();
 
-  // ── 3 overlapping textured spheres per tree — organic silhouette from all angles ──
-  // Green palette — darker, more varied
+  // ── 4 overlapping spheres per tree — Family Guy-style bumpy round canopy ──
+  // Bright cartoon greens
   const _oakGreenPalette = [
-    [0.55, 0.65, 0.40],  // natural muted
-    [0.48, 0.62, 0.32],  // fresh mid
-    [0.38, 0.54, 0.24],  // forest dark
-    [0.60, 0.58, 0.36],  // warm yellow-green
-    [0.32, 0.50, 0.20],  // deep dark
-    [0.50, 0.60, 0.34],  // cool mid
-    [0.42, 0.58, 0.28],  // muted forest
-    [0.58, 0.66, 0.38],  // olive green
+    [0.38, 0.68, 0.22],  // bright medium green
+    [0.42, 0.72, 0.26],  // vivid green
+    [0.36, 0.64, 0.20],  // slightly darker
+    [0.44, 0.70, 0.28],  // yellow-green
+    [0.34, 0.62, 0.19],  // forest green
+    [0.40, 0.66, 0.23],  // neutral bright
   ];
 
   // Clone leaf texture for each sphere layer with different UV repeat — breaks up visible tiling
   const _leafTexB = _leafTex.clone(); _leafTexB.repeat.set(1.4, 1.8); _leafTexB.needsUpdate = true;
   const _leafTexC = _leafTex.clone(); _leafTexC.repeat.set(2.8, 2.3); _leafTexC.needsUpdate = true;
+  const _leafTexD = _leafTex.clone(); _leafTexD.repeat.set(2.0, 1.6); _leafTexD.needsUpdate = true;
 
   const canopyMatA = new THREE.MeshLambertMaterial({ map: _leafTex });
   const canopyMatB = new THREE.MeshLambertMaterial({ map: _leafTexB });
   const canopyMatC = new THREE.MeshLambertMaterial({ map: _leafTexC });
+  const canopyMatD = new THREE.MeshLambertMaterial({ map: _leafTexD });
 
-  const oakTrunkInst   = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.50, 1, 9), new THREE.MeshLambertMaterial({map:_barkTex}), oakPlaces.length);
+  const oakTrunkInst   = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.20, 0.62, 1, 10), new THREE.MeshLambertMaterial({map:_barkTex}), oakPlaces.length);
   const oakCanopyInst  = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), canopyMatA, oakPlaces.length);
-  const oakCanopy2Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  9, 7), canopyMatB, oakPlaces.length);
-  const oakCanopy3Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  8, 6), canopyMatC, oakPlaces.length);
+  const oakCanopy2Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), canopyMatB, oakPlaces.length);
+  const oakCanopy3Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  9, 7), canopyMatC, oakPlaces.length);
+  const oakCanopy4Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  9, 7), canopyMatD, oakPlaces.length);
   oakTrunkInst.castShadow = true;
-  oakCanopyInst.castShadow = true; oakCanopy2Inst.castShadow = false; oakCanopy3Inst.castShadow = false;
+  oakCanopyInst.castShadow = true; oakCanopy2Inst.castShadow = false; oakCanopy3Inst.castShadow = false; oakCanopy4Inst.castShadow = false;
 
   oakPlaces.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const canopyR = 3.0 + seededRand() * 6.5;
-    // Ensure trunk is tall enough that the sphere bottom stays above player eye height (1.7)
-    const trunkH = Math.max(2.0 + seededRand() * 8.0, canopyR + 1.0);
-    const trunkR = 0.28 + seededRand() * 0.36;
-    // Per-tree offset directions for secondary spheres — smaller offset so spheres overlap more
+    const canopyR = 3.5 + seededRand() * 5.5;
+    const trunkH = Math.max(2.5 + seededRand() * 7.0, canopyR + 1.0);
+    const trunkR = 0.36 + seededRand() * 0.32;
+    // Per-tree base angle for lobe arrangement
     const offAngle = seededRand() * 6.28;
-    const offDist  = canopyR * 0.22;
-    const ox = Math.sin(offAngle) * offDist, oz = Math.cos(offAngle) * offDist;
-    const baseY = h + trunkH + canopyR * 0.55;
+    // Lobes spread outward significantly so bumps protrude above main sphere
+    const offDist  = canopyR * 0.52;
+    const baseY = h + trunkH + canopyR * 0.50;
 
     _tDummy.position.set(x, h + trunkH / 2, z);
     _tDummy.scale.set(trunkR / 0.33, trunkH, trunkR / 0.33);
     _tDummy.rotation.set(0, seededRand() * 6.28, 0);
     _tDummy.updateMatrix(); oakTrunkInst.setMatrixAt(i, _tDummy.matrix);
 
-    // Main sphere — centred on canopy
+    // Main center sphere — slightly squashed for wide full shape
     _tDummy.position.set(x, baseY, z);
-    _tDummy.scale.set(canopyR, canopyR * 0.88, canopyR);
+    _tDummy.scale.set(canopyR, canopyR * 0.85, canopyR);
     _tDummy.rotation.set(0, seededRand() * 6.28, 0);
     _tDummy.updateMatrix(); oakCanopyInst.setMatrixAt(i, _tDummy.matrix);
 
-    // Secondary — slightly offset, sunk deep into main so seam disappears
-    _tDummy.position.set(x + ox, baseY + canopyR * 0.30, z + oz);
-    _tDummy.scale.set(canopyR * 0.76, canopyR * 0.72, canopyR * 0.76);
+    // Lobe 1 — left-forward, raised so top protrudes above main
+    const ox1 = Math.sin(offAngle) * offDist, oz1 = Math.cos(offAngle) * offDist;
+    _tDummy.position.set(x + ox1, baseY + canopyR * 0.28, z + oz1);
+    _tDummy.scale.set(canopyR * 0.78, canopyR * 0.78, canopyR * 0.78);
     _tDummy.rotation.set(0, seededRand() * 6.28, 0);
     _tDummy.updateMatrix(); oakCanopy2Inst.setMatrixAt(i, _tDummy.matrix);
 
-    // Tertiary — opposite side, sunk into main body, lower bulge
-    _tDummy.position.set(x - ox * 0.9, baseY - canopyR * 0.18, z - oz * 0.9);
-    _tDummy.scale.set(canopyR * 0.70, canopyR * 0.62, canopyR * 0.70);
+    // Lobe 2 — right-back, raised
+    const ox2 = Math.sin(offAngle + 2.20) * offDist, oz2 = Math.cos(offAngle + 2.20) * offDist;
+    _tDummy.position.set(x + ox2, baseY + canopyR * 0.22, z + oz2);
+    _tDummy.scale.set(canopyR * 0.75, canopyR * 0.75, canopyR * 0.75);
     _tDummy.rotation.set(0, seededRand() * 6.28, 0);
     _tDummy.updateMatrix(); oakCanopy3Inst.setMatrixAt(i, _tDummy.matrix);
 
+    // Lobe 3 — right-forward, raised slightly less
+    const ox3 = Math.sin(offAngle + 4.10) * offDist, oz3 = Math.cos(offAngle + 4.10) * offDist;
+    _tDummy.position.set(x + ox3, baseY + canopyR * 0.18, z + oz3);
+    _tDummy.scale.set(canopyR * 0.72, canopyR * 0.72, canopyR * 0.72);
+    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
+    _tDummy.updateMatrix(); oakCanopy4Inst.setMatrixAt(i, _tDummy.matrix);
+
     const hv = Math.sin(x*127.3+z*311.7)*0.5+0.5;
-    _tCol.setRGB(0.50+hv*0.24, 0.38+hv*0.20, 0.24+hv*0.14); oakTrunkInst.setColorAt(i, _tCol);
+    _tCol.setRGB(0.45+hv*0.18, 0.30+hv*0.14, 0.16+hv*0.10); oakTrunkInst.setColorAt(i, _tCol);
     const gp = _oakGreenPalette[Math.floor((Math.sin(x*53.7+z*89.3)*0.5+0.5) * _oakGreenPalette.length) % _oakGreenPalette.length];
     _tCol.setRGB(gp[0], gp[1], gp[2]);
-    oakCanopyInst.setColorAt(i, _tCol); oakCanopy2Inst.setColorAt(i, _tCol); oakCanopy3Inst.setColorAt(i, _tCol);
+    oakCanopyInst.setColorAt(i, _tCol); oakCanopy2Inst.setColorAt(i, _tCol); oakCanopy3Inst.setColorAt(i, _tCol); oakCanopy4Inst.setColorAt(i, _tCol);
 
     const trunkCol = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.2, trunkH, trunkR*2.2), invisibleColliderMat);
     trunkCol.position.set(x, h+trunkH/2, z); trunkCol.updateMatrixWorld(true); collidables.push(trunkCol);
@@ -430,7 +462,7 @@ const _crateTex     = _makeCrateTex();
     targets.push(frondHit); collidables.push(frondHit);
   });
 
-  [oakTrunkInst,oakCanopyInst,oakCanopy2Inst,oakCanopy3Inst,palmTrunkInst,palmFrondInst,palmVeinInst].forEach(m => {
+  [oakTrunkInst,oakCanopyInst,oakCanopy2Inst,oakCanopy3Inst,oakCanopy4Inst,palmTrunkInst,palmFrondInst,palmVeinInst].forEach(m => {
     m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; scene.add(m);
   });
 }

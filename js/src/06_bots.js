@@ -1,69 +1,258 @@
 // BOTS — AI with shooting, prison spawn, ammo seeking
-// Rendering: 24 InstancedMesh objects (one per body part) = 24 draw calls for all 20 bots
+// Rendering: GLTF SkinnedMesh clones with AnimationMixer
 // ═══════════════════════════════════════════════════════════
 const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India','Juliet',
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
 const BOT_COUNT = 20;
-// One unique shirt color per bot slot (20 total) — used for identification in kill cam
-const BOT_SHIRT_COLORS = [
-  0xCC2222, 0x2244CC, 0x22AA33, 0xCCCC22, 0xCC6622,
-  0x993399, 0x22BBBB, 0xCC2288, 0x88CC22, 0xCC4444,
-  0x2299CC, 0xCC8822, 0x4422CC, 0xCC5533, 0x22CC88,
-  0xCC2266, 0x55AACC, 0xAAAA22, 0xCC44AA, 0x44CCAA,
-];
-const BOT_HELMET_COLORS = [
-  0x333333, 0x553322, 0x223355, 0x225533, 0x443355,
-  0x554433, 0x334433, 0x553344, 0x224455, 0x445522,
-  0x332244, 0x553333, 0x225544, 0x444422, 0x553355,
-  0x334455, 0x442233, 0x224433, 0x553322, 0x335544,
-];
 
-// ── InstancedMesh declarations ──
-let botTorsoInst, botBeltInst, botTextFrontInst, botTextBackInst;
-// Paper bag head
-let botBagBodyInst, botBagEyeLInst, botBagEyeRInst;
-let botShoulderLInst, botShoulderRInst;
-let botUpperArmLInst, botUpperArmRInst;
-let botForearmLInst, botForearmRInst;
-let botHandLInst, botHandRInst;
-let botThighLInst, botThighRInst;
-let botShinLInst, botShinRInst;
-let botBootLInst, botBootRInst;
-let botGunBarrelInst, botGunBodyInst, botStockInst, botGunMagInst, botHandguardInst, botGripInst;
-let botInstMeshes = [];  // all 31 — used in raycast
-let botHeadMeshes = [];  // head + helmet parts — headshot detection
+// ── GLTF character system ──
+// Each animation is a separate GLB (mesh + animation from same export = matching bind pose).
+// Each bot gets one clone per animation; only the active one is visible.
+const _animGltfs = {};   // animName → gltf
+let characterReady = false;
+let botInstMeshes = [];  // world-space hitbox meshes for raycasting
 
-// Reusable matrices — avoids per-frame heap allocation
-const _bRootMat  = new THREE.Matrix4();
-const _bLocalMat = new THREE.Matrix4();
-const _bWorldMat = new THREE.Matrix4();
+const _gltfLoader = new GLTFLoader();
 
-// Canvas fabric texture — white base with subtle crosshatch weave; per-instance color multiplies through
-function _makeBotFabricTex() {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const x = c.getContext('2d');
-  x.fillStyle = '#ffffff'; x.fillRect(0, 0, 64, 64);
-  x.strokeStyle = 'rgba(0,0,0,0.11)'; x.lineWidth = 0.8;
-  for (let i = 0; i < 64; i += 4) {
-    x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 64); x.stroke();
-    x.beginPath(); x.moveTo(0, i); x.lineTo(64, i); x.stroke();
+async function loadCharacterAssets() {
+  const loadGlb = path => new Promise((res, rej) =>
+    _gltfLoader.load(path, res, null, rej));
+
+  const animFiles = {
+    aimIdle:        'models/StandingRifleV2.glb?v=3',
+    rifleIdle:      'models/RifleIdle.glb',
+    walk:           'models/RunningRifle.glb',
+    walkBack:       'models/WalkingBackwards.glb',
+    death:          'models/StandingDeathV2.glb?v=3',
+    fire:           'models/RifleFiringV2.glb?v=3',
+    reload:         'models/Reloading.glb',
+    jump:           'models/RifleJump.glb',
+    crouchIdle:     'models/IdleCrouch.glb',
+    crouchWalk:     'models/CrouchWalking.glb',
+    crouchWalkBack: 'models/CrouchWalkingBackwards.glb',
+  };
+
+  for (const [name, path] of Object.entries(animFiles)) {
+    try {
+      const gltf = await loadGlb(path);
+      _animGltfs[name] = gltf;
+      const clip = gltf.animations?.[0];
+      console.log(`[Char] ${name}: ${clip ? clip.duration.toFixed(2)+'s' : 'NO CLIP'}`);
+    } catch(e) { console.warn('Failed to load', name, path, e); }
   }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(3, 4); return t;
+
+  characterReady = true;
+  console.log('Character assets ready:', Object.keys(_animGltfs).join(', '));
+  for (let i = 0; i < bots.length; i++) _attachBotMesh(bots[i], i);
+
+  // Replace old box kill-cam player mesh with a real Dummy character clone
+  if (_animGltfs['aimIdle']) {
+    const pg = _animGltfs['aimIdle'];
+    const { scale: pscale, footOffset: pfoot } = _measureScale(pg);
+    const pclone = SkeletonUtils.clone(pg.scene);
+    pclone.scale.setScalar(pscale);
+    window._playerMeshFootOffset = pfoot;
+    pclone.traverse(c => { if (c.isMesh) { c.castShadow = true; c.frustumCulled = false; } });
+    const pmixer = new THREE.AnimationMixer(pclone);
+    const pclip = pg.animations?.[0];
+    if (pclip) { pmixer.clipAction(pclip).setLoop(THREE.LoopRepeat).play(); }
+    let phips = null;
+    pclone.traverse(o => { if (!phips && o.isBone && o.name.toLowerCase().includes('hips')) phips = o; });
+    pclone.visible = false;
+    scene.add(pclone);
+    if (window._playerMesh) window._playerMesh.visible = false;
+    window._playerMesh = pclone;
+    window._playerMeshMixer = pmixer;
+    window._playerMeshHips = phips ? { bone: phips, rx: phips.position.x, ry: phips.position.y } : null;
+  }
 }
 
-// Skin texture — carries the skin tone color directly (material color set to white)
-function _makeBotSkinTex() {
-  const c = document.createElement('canvas'); c.width = c.height = 32;
-  const x = c.getContext('2d');
-  x.fillStyle = '#D4A87A'; x.fillRect(0, 0, 32, 32);
-  for (let i = 0; i < 80; i++) {
-    x.fillStyle = `rgba(0,0,0,${0.02 + Math.random() * 0.05})`;
-    x.beginPath(); x.arc(Math.random()*32, Math.random()*32, 0.4+Math.random()*0.8, 0, Math.PI*2); x.fill();
-  }
-  return new THREE.CanvasTexture(c);
+function _findBone(root, namePart) {
+  let found = null;
+  root.traverse(o => { if (!found && o.isBone && o.name.includes(namePart)) found = o; });
+  return found;
 }
+
+// Shared bot gun materials — created once
+const _bgMats = (() => {
+  const L = c => new THREE.MeshLambertMaterial({ color: c });
+  return { blk: L(0x0d0d0d), drk: L(0x161616), mtl: L(0x303030), wood: L(0x7a4a1a), wdDk: L(0x5a3010) };
+})();
+
+function _makeBotGun() {
+  const g = new THREE.Group();
+  const { blk, drk, mtl, wood, wdDk } = _bgMats;
+  const B  = (w,h,d) => new THREE.BoxGeometry(w,h,d);
+  const Cy = (rt,rb,h,s=8) => new THREE.CylinderGeometry(rt,rb,h,s);
+  const PI2 = Math.PI/2;
+  const add = (geo, mat, px, py, pz, rx=0, ry=0, rz=0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(px,py,pz); if(rx||ry||rz) m.rotation.set(rx,ry,rz);
+    m.castShadow = true; g.add(m);
+  };
+  // Barrel
+  add(Cy(0.015,0.017,0.330,8), drk,   0, 0.000,-0.465, PI2,0,0);
+  add(Cy(0.024,0.024,0.030,8), mtl,   0, 0.000,-0.520, PI2,0,0);
+  add(Cy(0.026,0.026,0.040,8), mtl,   0, 0.000,-0.650, PI2,0,0);
+  // Handguard
+  add(B(0.052,0.022,0.215), wood,   0, 0.014,-0.425);
+  add(B(0.056,0.024,0.215), wdDk,   0,-0.016,-0.425);
+  // Upper receiver
+  add(B(0.058,0.026,0.205), drk,    0, 0.013,-0.215);
+  add(B(0.060,0.008,0.205), mtl,    0, 0.026,-0.215);
+  // Lower receiver
+  add(B(0.056,0.050,0.205), drk,    0,-0.027,-0.215);
+  // Curved magazine
+  add(B(0.042,0.060,0.072), blk,    0,-0.106,-0.260, 0.09,0,0);
+  add(B(0.040,0.062,0.070), blk,    0,-0.168,-0.268, 0.19,0,0);
+  add(B(0.040,0.060,0.070), drk,    0,-0.226,-0.258, 0.27,0,0);
+  // Pistol grip
+  add(B(0.038,0.094,0.046), wood,   0,-0.126,-0.130,-0.30,0,0);
+  // Stock arms
+  add(B(0.008,0.008,0.145), drk,   -0.028, 0.002, 0.062);
+  add(B(0.008,0.008,0.145), drk,   -0.028,-0.032, 0.062);
+  add(B(0.012,0.064,0.020), mtl,   -0.028,-0.015, 0.144);
+  // Front sight
+  add(B(0.034,0.006,0.014), mtl,    0, 0.031,-0.570);
+  return g;
+}
+
+function _measureScale(gltf) {
+  const probe = SkeletonUtils.clone(gltf.scene);
+  probe.updateMatrixWorld(true);
+  let boneMinY = Infinity, boneMaxY = -Infinity;
+  probe.traverse(o => {
+    if (o.isBone) {
+      const wp = new THREE.Vector3();
+      o.getWorldPosition(wp);
+      boneMinY = Math.min(boneMinY, wp.y);
+      boneMaxY = Math.max(boneMaxY, wp.y);
+    }
+  });
+  const charH = (boneMaxY > boneMinY) ? (boneMaxY - boneMinY) : 0;
+  const scale = charH > 0.001 ? (CONFIG.playerHeight * 1.2) / charH : 0.0105;
+  // footOffset lifts the mesh so feet land exactly on bot.pos.y
+  const footOffset = charH > 0.001 ? -boneMinY * scale : 0;
+  return { scale, footOffset };
+}
+
+function _cloneForAnim(animName, gltf, botIndex, scale) {
+  const clone = SkeletonUtils.clone(gltf.scene);
+  clone.scale.setScalar(scale);
+
+  clone.traverse(child => {
+    if (child.isMesh) { child.castShadow = true; child.frustumCulled = false; }
+  });
+
+  // Mixer — same GLB as clone, bind poses guaranteed to match
+  const mixer = new THREE.AnimationMixer(clone);
+  let clip = gltf.animations?.[0];
+
+  let action = null;
+  let actionB = null;
+  if (clip) {
+    action = mixer.clipAction(clip);
+    if (animName === 'death' || animName === 'fire' || animName === 'jump' || animName === 'reload') {
+      // Single-play, hold last frame — triggered on demand
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+    } else {
+      // Two LoopOnce actions — manually crossfaded so we never hard-wrap back to frame 0.
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+      action.play();
+      action.time = Math.random() * clip.duration;
+
+      actionB = mixer.clipAction(clip.clone());
+      actionB.setLoop(THREE.LoopOnce, 1);
+      actionB.clampWhenFinished = true;
+    }
+  }
+
+  // Cache hips bone + its bind-pose XY so we can zero root-motion drift each frame.
+  // In this FBX-sourced GLB, bone.x = world-X, bone.y = world-Z (forward), bone.z = world-Y (height).
+  let hipsBone = null;
+  clone.traverse(o => { if (!hipsBone && o.isBone && o.name.toLowerCase().includes('hips')) hipsBone = o; });
+  const hipsRestX = hipsBone ? hipsBone.position.x : 0;
+  const hipsRestY = hipsBone ? hipsBone.position.y : 0;
+
+  // Cache right hand bone for gun attachment
+  let rightHandBone = null;
+  clone.traverse(o => {
+    if (!rightHandBone && o.isBone && o.name.toLowerCase().replace(/[^a-z]/g,'').includes('righthand')) rightHandBone = o;
+  });
+
+  clone.visible = false;
+  return { scene: clone, mixer, action, actionB, clipDur: clip?.duration ?? 0, xfActive: false, xfProg: 0, hipsBone, hipsRestX, hipsRestY, rightHandBone };
+}
+
+function _addWorldHitboxes(bot, index) {
+  const mat = new THREE.MeshBasicMaterial();
+  // Body cylinder — covers torso + legs
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.4, 8), mat.clone());
+  body.userData.botIndex = index;
+  body.userData.isHead = false;
+  body.visible = false; // invisible but raycaster still detects it
+  scene.add(body);
+  botInstMeshes.push(body);
+  // Head sphere
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 8), mat.clone());
+  head.userData.botIndex = index;
+  head.userData.isHead = true;
+  head.visible = false;
+  scene.add(head);
+  botInstMeshes.push(head);
+  bot.hitbox = body;
+  bot.hitboxHead = head;
+}
+
+function _setBotAnim(bot, animName) {
+  if (!bot.animScenes) return;
+  // Always allow re-triggering fire (rapid shots restart the clip)
+  if (bot.activeAnim === animName && animName !== 'fire') return;
+  for (const data of Object.values(bot.animScenes)) data.scene.visible = false;
+  const target = bot.animScenes[animName];
+  if (target) {
+    target.scene.visible = true;
+    if ((animName === 'death' || animName === 'fire' || animName === 'jump' || animName === 'reload') && target.action) target.action.reset().play();
+    bot.mesh = target.scene;
+  }
+  bot.activeAnim = animName;
+}
+
+function _attachBotMesh(bot, index) {
+  if (!characterReady) return;
+  bot.animScenes = {};
+  bot.activeAnim = null;
+  bot.mesh = null;
+
+  const { scale, footOffset } = _animGltfs['aimIdle'] ? _measureScale(_animGltfs['aimIdle']) : { scale: 0.0105, footOffset: 0 };
+  bot.footOffset = footOffset;
+
+  for (const [animName, gltf] of Object.entries(_animGltfs)) {
+    const data = _cloneForAnim(animName, gltf, index, scale);
+    scene.add(data.scene);
+    bot.animScenes[animName] = data;
+  }
+
+  bot.gunMesh = _makeBotGun();
+  bot.gunMesh.visible = false;
+  scene.add(bot.gunMesh);
+
+  _addWorldHitboxes(bot, index);
+  _setBotAnim(bot, 'walk');
+}
+
+function findBotByMesh(mesh) {
+  const idx = mesh?.userData?.botIndex;
+  if (idx === undefined || idx === null) return null;
+  const bot = bots[idx];
+  return (bot && bot.alive) ? bot : null;
+}
+function findBotByInstance(mesh) { return findBotByMesh(mesh); }
+
+// Kept for player kill-cam mesh in 12_main.js
 function _makeICETex() {
   const c = document.createElement('canvas'); c.width = 256; c.height = 80;
   const x = c.getContext('2d');
@@ -74,7 +263,6 @@ function _makeICETex() {
   x.strokeStyle = '#111111'; x.lineWidth = 2; x.strokeText('I.C.E.', 128, 40);
   return new THREE.CanvasTexture(c);
 }
-
 function _makeBagTex() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 128;
   const x = c.getContext('2d');
@@ -92,192 +280,21 @@ function _makeBagTex() {
   }
   return new THREE.CanvasTexture(c);
 }
-function initBotInstances() {
-  const fabricTex = _makeBotFabricTex();
-  const skinTex   = _makeBotSkinTex();
 
-  // ── Geometries ──
-  const torsoGeo     = new THREE.CylinderGeometry(0.30, 0.24, 0.62, 8);
-  const beltGeo      = new THREE.BoxGeometry(0.52, 0.09, 0.27);
-  const textGeo      = new THREE.BoxGeometry(0.32, 0.13, 0.002);
-  // Paper bag head
-  const bagBodyGeo   = new THREE.BoxGeometry(0.42, 0.48, 0.37);
-  const bagEyeGeo    = new THREE.BoxGeometry(0.10, 0.056, 0.01);
-  const shoulderGeo  = new THREE.CylinderGeometry(0.10, 0.13, 0.14, 8);
-  const upperArmGeo  = new THREE.BoxGeometry(0.17, 0.34, 0.17);
-  const forearmGeo   = new THREE.BoxGeometry(0.14, 0.28, 0.14);
-  const handGeo      = new THREE.BoxGeometry(0.14, 0.12, 0.18);
-  const thighGeo     = new THREE.BoxGeometry(0.22, 0.38, 0.22);
-  const shinGeo      = new THREE.BoxGeometry(0.17, 0.34, 0.19);
-  const bootGeo      = new THREE.BoxGeometry(0.20, 0.18, 0.30);
-  const gunBarrelGeo   = new THREE.CylinderGeometry(0.028, 0.028, 0.44, 8);
-  const gunBodyGeo     = new THREE.BoxGeometry(0.08, 0.10, 0.22);  // upper+lower receiver
-  const stockGeo       = new THREE.BoxGeometry(0.06, 0.08, 0.16);
-  const gunMagGeo      = new THREE.BoxGeometry(0.055, 0.14, 0.062);
-  const handguardGeo   = new THREE.BoxGeometry(0.065, 0.038, 0.18);
-  const gripGeo        = new THREE.BoxGeometry(0.042, 0.088, 0.046);
-
-  // ── Materials ──
-  // Jumpsuit: prison orange covering all body parts except hands and boots
-  const jumpsuitMat  = new THREE.MeshPhongMaterial({ color: 0xE06820, map: fabricTex, shininess: 5 });
-  const beltMat      = new THREE.MeshPhongMaterial({ color: 0x28180a, shininess: 12 });
-  const skinMat      = new THREE.MeshPhongMaterial({ color: 0xffffff, map: skinTex, shininess: 12 });
-  const bagMat       = new THREE.MeshPhongMaterial({ color: 0xC89040, map: _makeBagTex(), shininess: 4 });
-  const bagEyeMat    = new THREE.MeshPhongMaterial({ color: 0x111111, shininess: 5 });
-  const bootMat      = new THREE.MeshPhongMaterial({ color: 0x18120a, shininess: 24 });
-  const gunMat       = new THREE.MeshPhongMaterial({ color: 0x1e1e1e, shininess: 60, specular: new THREE.Color(0x444444) });
-  const stockMat     = new THREE.MeshPhongMaterial({ color: 0x3d2812, shininess: 8 });
-  const woodMat      = new THREE.MeshPhongMaterial({ color: 0x7a4a1a, shininess: 15 });
-  const textMat      = new THREE.MeshPhongMaterial({ map: _makeICETex(), shininess: 2 });
-
-  // ── InstancedMesh creation ──
-  botTorsoInst      = new THREE.InstancedMesh(torsoGeo,     jumpsuitMat,  BOT_COUNT);
-  botBeltInst       = new THREE.InstancedMesh(beltGeo,      beltMat,      BOT_COUNT);
-  botTextFrontInst  = new THREE.InstancedMesh(textGeo,      textMat,      BOT_COUNT);
-  botTextBackInst   = new THREE.InstancedMesh(textGeo,      textMat,      BOT_COUNT);
-  botBagBodyInst     = new THREE.InstancedMesh(bagBodyGeo,    bagMat,        BOT_COUNT);
-  botBagEyeLInst     = new THREE.InstancedMesh(bagEyeGeo,     bagEyeMat,     BOT_COUNT);
-  botBagEyeRInst     = new THREE.InstancedMesh(bagEyeGeo,     bagEyeMat,     BOT_COUNT);
-  botShoulderLInst  = new THREE.InstancedMesh(shoulderGeo,  jumpsuitMat,  BOT_COUNT);
-  botShoulderRInst  = new THREE.InstancedMesh(shoulderGeo,  jumpsuitMat,  BOT_COUNT);
-  botUpperArmLInst  = new THREE.InstancedMesh(upperArmGeo,  jumpsuitMat,  BOT_COUNT);
-  botUpperArmRInst  = new THREE.InstancedMesh(upperArmGeo,  jumpsuitMat,  BOT_COUNT);
-  botForearmLInst   = new THREE.InstancedMesh(forearmGeo,   jumpsuitMat,  BOT_COUNT);
-  botForearmRInst   = new THREE.InstancedMesh(forearmGeo,   jumpsuitMat,  BOT_COUNT);
-  botHandLInst      = new THREE.InstancedMesh(handGeo,      skinMat,      BOT_COUNT);
-  botHandRInst      = new THREE.InstancedMesh(handGeo,      skinMat,      BOT_COUNT);
-  botThighLInst     = new THREE.InstancedMesh(thighGeo,     jumpsuitMat,     BOT_COUNT);
-  botThighRInst     = new THREE.InstancedMesh(thighGeo,     jumpsuitMat,     BOT_COUNT);
-  botShinLInst      = new THREE.InstancedMesh(shinGeo,      jumpsuitMat,     BOT_COUNT);
-  botShinRInst      = new THREE.InstancedMesh(shinGeo,      jumpsuitMat,     BOT_COUNT);
-  botBootLInst      = new THREE.InstancedMesh(bootGeo,      bootMat,      BOT_COUNT);
-  botBootRInst      = new THREE.InstancedMesh(bootGeo,      bootMat,      BOT_COUNT);
-  botGunBarrelInst  = new THREE.InstancedMesh(gunBarrelGeo,  gunMat,   BOT_COUNT);
-  botGunBodyInst    = new THREE.InstancedMesh(gunBodyGeo,    gunMat,   BOT_COUNT);
-  botStockInst      = new THREE.InstancedMesh(stockGeo,      stockMat, BOT_COUNT);
-  botGunMagInst     = new THREE.InstancedMesh(gunMagGeo,     gunMat,   BOT_COUNT);
-  botHandguardInst  = new THREE.InstancedMesh(handguardGeo,  woodMat,  BOT_COUNT);
-  botGripInst       = new THREE.InstancedMesh(gripGeo,       woodMat,  BOT_COUNT);
-
-  botInstMeshes = [
-    botTorsoInst, botBeltInst, botTextFrontInst, botTextBackInst,
-    botBagBodyInst, botBagEyeLInst, botBagEyeRInst,
-    botShoulderLInst, botShoulderRInst,
-    botUpperArmLInst, botUpperArmRInst,
-    botForearmLInst, botForearmRInst,
-    botHandLInst, botHandRInst,
-    botThighLInst, botThighRInst,
-    botShinLInst, botShinRInst,
-    botBootLInst, botBootRInst,
-    botGunBarrelInst, botGunBodyInst, botStockInst, botGunMagInst, botHandguardInst, botGripInst,
-  ];
-  botHeadMeshes = [botBagBodyInst, botBagEyeLInst, botBagEyeRInst];
-
-  // All colors are fixed — no per-instance color variation.
-
-  // Park all instances underground until bots spawn
-  const hiddenMat = new THREE.Matrix4().makeTranslation(0, -10000, 0);
-  for (const inst of botInstMeshes) {
-    inst.frustumCulled = false; // bounding sphere not meaningful for scattered instances
-    for (let i = 0; i < BOT_COUNT; i++) inst.setMatrixAt(i, hiddenMat);
-    inst.instanceMatrix.needsUpdate = true;
-    scene.add(inst);
-  }
-}
-
-initBotInstances();
-
-// ── Write one part's world matrix into an InstancedMesh ──
-// rootMat encodes the bot's world position + orientation.
-// lRotX: local rotation around X (walk animation) — 0 means no rotation.
-const _bEuler = new THREE.Euler();
-const _bQ     = new THREE.Quaternion();
-function _setBotPart(inst, i, rootMat, lx, ly, lz, lRotX, lRotZ) {
-  if (lRotX || lRotZ) {
-    _bEuler.set(lRotX || 0, 0, lRotZ || 0, 'XYZ');
-    _bQ.setFromEuler(_bEuler);
-    _bLocalMat.makeRotationFromQuaternion(_bQ);
-    _bLocalMat.setPosition(lx, ly, lz);
-  } else {
-    _bLocalMat.makeTranslation(lx, ly, lz);
-  }
-  _bWorldMat.multiplyMatrices(rootMat, _bLocalMat);
-  inst.setMatrixAt(i, _bWorldMat);
-}
-
-function updateBotMatrices() {
-  const PI2 = Math.PI / 2;
-  for (let i = 0; i < bots.length; i++) {
-    const bot = bots[i];
-    if (bot.alive) {
-      _bRootMat.makeRotationY(bot.yaw);
-      _bRootMat.setPosition(bot.pos.x, bot.pos.y, bot.pos.z);
-    } else {
-      _bRootMat.makeRotationX(Math.PI / 2);
-      _bRootMat.setPosition(bot.pos.x, bot.deadY, bot.pos.z);
-    }
-    const sw = bot.swing;
-    // Shin z-offset approximates tracking the thigh bottom for natural stride
-    const shinZ = -sw * 0.18;
-
-    // ── Core body ──
-    _setBotPart(botTorsoInst,      i, _bRootMat,  0,       1.27,   0,       0);
-    _setBotPart(botBeltInst,       i, _bRootMat,  0,       0.95,   0,       0);
-    _setBotPart(botTextFrontInst,  i, _bRootMat,  0,       1.42,   0.29,    0);
-    _setBotPart(botTextBackInst,   i, _bRootMat,  0,       1.42,  -0.29,    0);
-
-    // ── Roman Galea helmet (IS the head — no skin sphere or neck beneath it) ──
-    // Dome r=0.31 sits at y=1.76; bottom at y=1.45 overlaps torso shoulders naturally
-    // ── Paper bag head ──
-    _setBotPart(botBagBodyInst,  i, _bRootMat,  0,       1.76,   0,      0);
-    _setBotPart(botBagEyeLInst,  i, _bRootMat, -0.09,    1.82,   0.186,  0);
-    _setBotPart(botBagEyeRInst,  i, _bRootMat,  0.09,    1.82,   0.186,  0);
-
-    // ── Shoulders ──
-    _setBotPart(botShoulderLInst,  i, _bRootMat, -0.30,    1.55,   0,       0);
-    _setBotPart(botShoulderRInst,  i, _bRootMat,  0.30,    1.55,   0,       0);
-
-    // ── Arms — two-handed rifle carry pose; right grips trigger, left reaches handguard
-    // lRotX > 0 swings the hand forward (+Z). Small sw oscillation keeps walk natural.
-    // Right arm — trigger grip side; hangs from shoulder, forearm swings forward
-    _setBotPart(botUpperArmRInst,  i, _bRootMat,  0.41,    1.41,   0.04,    0.36 + sw * 0.06);
-    _setBotPart(botForearmRInst,   i, _bRootMat,  0.38,    1.20,   0.13,    0.66 + sw * 0.04);
-    _setBotPart(botHandRInst,      i, _bRootMat,  0.24,    1.05,   0.18 + sw * 0.04, 0);
-    // Left arm — foregrip side; leans further forward to reach the handguard
-    _setBotPart(botUpperArmLInst,  i, _bRootMat, -0.41,    1.41,   0.04,    0.60 - sw * 0.06);
-    _setBotPart(botForearmLInst,   i, _bRootMat, -0.30,    1.23,   0.22,    0.98 - sw * 0.04);
-    _setBotPart(botHandLInst,      i, _bRootMat,  0.04,    1.07,   0.34 - sw * 0.04, 0);
-
-    // ── Legs ──
-    _setBotPart(botThighLInst,     i, _bRootMat, -0.155,   0.73,   0,       sw);
-    _setBotPart(botThighRInst,     i, _bRootMat,  0.155,   0.73,   0,      -sw);
-    _setBotPart(botShinLInst,      i, _bRootMat, -0.155,   0.37,   shinZ,   sw * 0.35);
-    _setBotPart(botShinRInst,      i, _bRootMat,  0.155,   0.37,  -shinZ,  -sw * 0.35);
-    _setBotPart(botBootLInst,      i, _bRootMat, -0.155,   0.09,   0.04,    0);
-    _setBotPart(botBootRInst,      i, _bRootMat,  0.155,   0.09,   0.04,    0);
-
-    // ── Gun — AK-style; barrel forward, wood handguard + grip, angled mag ──
-    _setBotPart(botGunBarrelInst,  i, _bRootMat,  0.06,    1.10,   0.40,    PI2);
-    _setBotPart(botGunBodyInst,    i, _bRootMat,  0.10,    1.11,   0.14,    0);
-    _setBotPart(botHandguardInst,  i, _bRootMat,  0.07,    1.09,   0.33,    0);
-    _setBotPart(botGunMagInst,     i, _bRootMat,  0.10,    0.98,   0.16,    0.18);
-    _setBotPart(botGripInst,       i, _bRootMat,  0.12,    1.01,   0.08,   -0.30);
-    _setBotPart(botStockInst,      i, _bRootMat,  0.18,    1.12,  -0.04,    0);
-  }
-  for (const inst of botInstMeshes) inst.instanceMatrix.needsUpdate = true;
-}
+loadCharacterAssets();
 
 function createBot(x, z, name, index) {
   const h = getGroundHeight(x, z);
   const bot = {
+    index,
     pos: new THREE.Vector3(x, h, z),
     yaw: 0,
     swing: 0,
-    deadY: h + 0.3,
+    deadY: h,
     name,
     hp: 100,
     alive: true,
-    hasAmmo: false,
+    hasAmmo: true,
     moveDir: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(),
     moveTimer: 2 + Math.random() * 4,
     speed: 1.5 + Math.random() * 1.5,
@@ -285,7 +302,8 @@ function createBot(x, z, name, index) {
     shootCooldown: 0,
     shootAccuracy: 0.12 + Math.random() * 0.16,
     aggroRange: 30 + Math.random() * 20,
-    ammoTimer: 30,  // arm after 30s then begin shooting
+    ammoTimer: 0,
+    reloadTimer: 55 + Math.random() * 20,
     exitDelay: 0,
     exitedPrison: false,
     velocityY: 0,
@@ -294,22 +312,43 @@ function createBot(x, z, name, index) {
     canalLandTimer: 0,
     waypoint: null,
     fleeTarget: null,
+    prefersCrouch: Math.random() < 0.4,
+    crouching: false,
+    crouchTimer: 0,
     snapshots: [],
     shotTimes: [],
+    mesh: null,
+    mixer: null,
+    currentAnimName: null,
+    currentAction: null,
   };
   bots.push(bot);
+  if (characterReady) _attachBotMesh(bot, index);
   return bot;
 }
 
+let _botShootUnlockedAt = Infinity; // set when match goes live
+
+// Gun sync helpers — reused each frame to avoid GC
+const _gunPos = new THREE.Vector3();
+const _gunQuat = new THREE.Quaternion();
+// Rotation offset: aligns the gun barrel with the Mixamo right-hand bone's finger axis
+const _gunRotOffset = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+
 // Bots only spawn in Auto Join (bot match) mode — called from startBotMatch()
 function spawnBots() {
+  _botShootUnlockedAt = Date.now() + 60000;
   for (let i = 0; i < BOT_COUNT; i++) {
     const row = Math.floor(i / 5);
     const col = i % 5;
     const px = CONFIG.prisonPos.x - CONFIG.prisonSize / 2 + 5 + col * ((CONFIG.prisonSize - 10) / 4);
     const pz = CONFIG.prisonPos.z - CONFIG.prisonSize / 2 + 5 + row * ((CONFIG.prisonSize - 10) / 3);
     const bot = createBot(px, pz, BOT_NAMES[i] || 'Bot', i);
-    bot.exitDelay = i * 0.4;
+    bot.exitDelay = 0;
+    // Assign a spread-out first waypoint so bots fan across the map immediately
+    const sectorAngle = (i / BOT_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
+    const sectorR = 55 + Math.random() * 55;
+    bot.waypoint = { x: Math.cos(sectorAngle) * sectorR, z: Math.sin(sectorAngle) * sectorR };
   }
 }
 
@@ -359,7 +398,7 @@ function updateBots(dt) {
         const rd = 50 + Math.random() * 40;
         bot.waypoint = { x: Math.cos(ang) * rd, z: Math.sin(ang) * rd };
       }
-      bot.speed = 4.5;
+      bot.speed = 8.4;
       const newX = bx + bot.moveDir.x * bot.speed * dt;
       const newZ = bz + bot.moveDir.z * bot.speed * dt;
       bot.pos.x = newX;
@@ -376,17 +415,24 @@ function updateBots(dt) {
     const dz = camera.position.z - bz;
     const distToPlayer = Math.sqrt(dx * dx + dz * dz);
 
-    // Arm timer
-    if (!bot.hasAmmo) {
-      bot.ammoTimer -= dt;
-      for (const d of depotCorners) {
-        if (Math.sqrt((bx - d.x) ** 2 + (bz - d.z) ** 2) < 14) { bot.ammoTimer = 0; break; }
+    // Reload cycle — trigger once per minute, play clip once then rearm
+    if (bot.hasAmmo && bot.exitedPrison) {
+      bot.reloadTimer -= dt;
+      if (bot.reloadTimer <= 0) {
+        bot.hasAmmo = false;
+        bot.ammoTimer = bot.animScenes?.reload?.clipDur ?? 3.3;
       }
-      if (bot.ammoTimer <= 0) bot.hasAmmo = true;
+    }
+    if (!bot.hasAmmo && bot.exitedPrison) {
+      bot.ammoTimer -= dt;
+      if (bot.ammoTimer <= 0) {
+        bot.hasAmmo = true;
+        bot.reloadTimer = 55 + Math.random() * 20;
+      }
     }
 
     // ── TOP PRIORITY: engage player if in range ──
-    const engaging = bot.hasAmmo && distToPlayer < bot.aggroRange && !state.playerDead;
+    const engaging = bot.hasAmmo && distToPlayer < bot.aggroRange && !state.playerDead && Date.now() >= _botShootUnlockedAt;
     if (engaging) {
       bot.yaw = Math.atan2(dx, dz);
       const botEye = new THREE.Vector3(bx, bot.pos.y + 1.7, bz);
@@ -403,6 +449,8 @@ function updateBots(dt) {
       bot.shootCooldown -= dt;
       if (bot.shootCooldown <= 0 && losHits.length === 0 && !volcanoBlocking) {
         bot.shootCooldown = 0.8 + Math.random() * 1.5;
+        const fireDur = bot.animScenes?.fire?.clipDur ?? 0.8;
+        bot.fireAnimUntil = Date.now() + fireDur * 1000;
         bot.shotTimes.push(Date.now());
         if (bot.shotTimes.length > 200) bot.shotTimes.shift();
         const hitChance = Math.max(0.08, 0.48 - distToPlayer * 0.005 - bot.shootAccuracy);
@@ -454,16 +502,16 @@ function updateBots(dt) {
         bot.fleeTarget = { x: Math.cos(nextAngle) * orbitR, z: Math.sin(nextAngle) * orbitR };
       }
       bot.moveDir.set(bot.fleeTarget.x - bx, 0, bot.fleeTarget.z - bz).normalize();
-      bot.speed = 5;
+      bot.speed = 8.4;
       bot.yaw = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     } else {
       if (!bot.waypoint || Math.sqrt((bx - bot.waypoint.x) ** 2 + (bz - bot.waypoint.z) ** 2) < 6) {
         const angle = Math.random() * Math.PI * 2;
-        const r = 40 + Math.random() * 75;
+        const r = 80 + Math.random() * 90;
         bot.waypoint = { x: Math.cos(angle) * r, z: Math.sin(angle) * r };
       }
       bot.moveDir.set(bot.waypoint.x - bx, 0, bot.waypoint.z - bz).normalize();
-      bot.speed = engaging ? 2.0 : 3.0;
+      bot.speed = engaging ? 3.35 : 5.05;
       if (!engaging) bot.yaw = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     }
 
@@ -482,25 +530,29 @@ function updateBots(dt) {
 
     if (!inCanalZone) { bot.canalJumpCount = 0; bot.canalLandTimer = 0; }
 
-    // Force directly inward when approaching or inside canal zone so bot crosses perpendicular
+    // Steer toward waypoint while crossing canal — keeps bots spread at different crossing angles
     if (inCanalZone || approachingCanal) {
-      bot.moveDir.set(-bx, 0, -bz).normalize();
+      const wpx = bot.waypoint ? bot.waypoint.x : 0, wpz = bot.waypoint ? bot.waypoint.z : 0;
+      const wd = Math.sqrt((wpx - bx) ** 2 + (wpz - bz) ** 2) || 1;
+      bot.moveDir.set((wpx - bx) / wd, 0, (wpz - bz) / wd);
       newX = bx + bot.moveDir.x * bot.speed * dt;
       newZ = bz + bot.moveDir.z * bot.speed * dt;
+      // Lock yaw so character keeps facing its travel direction, not snapping mid-jump
+      bot.yaw = Math.atan2(bot.moveDir.x, bot.moveDir.z);
     }
 
     // Jump on canal entry from outside
     if (approachingCanal && bot.isGrounded) {
-      bot.velocityY = 10; bot.isGrounded = false; bot.canalJumpCount = 1; bot.canalLandTimer = 0;
+      bot.velocityY = 7.2; bot.isGrounded = false; bot.canalJumpCount = 1; bot.canalLandTimer = 0;
     }
     // Bounce-jump: wait 0.1s after landing before next jump so bot travels a bit further
-    if (bot.canalJumpCount >= 1 && bot.canalJumpCount < 8 && inCanalZone) {
+    if (bot.canalJumpCount >= 1 && bot.canalJumpCount < 2 && inCanalZone) {
       if (!bot.isGrounded) {
         bot.canalLandTimer = 0.1;
       } else if (bot.canalLandTimer > 0) {
         bot.canalLandTimer -= dt;
       } else {
-        bot.velocityY = 10; bot.isGrounded = false; bot.canalJumpCount++;
+        bot.velocityY = 7.2; bot.isGrounded = false; bot.canalJumpCount++;
       }
     }
 
@@ -529,7 +581,138 @@ function updateBots(dt) {
     bot.swing = Math.sin(bot.walkPhase) * 0.4;
   }
 
-  updateBotMatrices();
+  // Update bot mesh positions and advance animation mixers
+  for (let i = 0; i < bots.length; i++) {
+    const bot = bots[i];
+    if (!bot.animScenes) continue;
+
+    // Determine target animation
+    const isEngaging = bot.alive && bot.hasAmmo && !state.playerDead && Date.now() >= _botShootUnlockedAt &&
+      (Math.sqrt((bot.pos.x - camera.position.x) ** 2 + (bot.pos.z - camera.position.z) ** 2) < bot.aggroRange);
+    const isFiring = bot.alive && bot.fireAnimUntil && Date.now() < bot.fireAnimUntil;
+
+    // Crouch toggle — some bots randomly crouch when engaging
+    if (isEngaging) {
+      bot.crouchTimer -= dt;
+      if (bot.crouchTimer <= 0) {
+        bot.crouching = bot.prefersCrouch && Math.random() < 0.65;
+        bot.crouchTimer = 4 + Math.random() * 6;
+      }
+    } else {
+      bot.crouching = false;
+      bot.crouchTimer = 0;
+    }
+
+    // Is bot moving backward relative to the direction it's facing?
+    const _fx = Math.sin(bot.yaw), _fz = Math.cos(bot.yaw);
+    const _moveDot = bot.moveDir.x * _fx + bot.moveDir.z * _fz;
+    const isMoving = bot.speed > 0.5;
+    const movingBack = isEngaging && isMoving && _moveDot < -0.3;
+
+    const inLobby = state.phase === 'lobby' || state.phase === 'countdown';
+    let targetAnim;
+    if (!bot.alive)                    targetAnim = 'death';
+    else if (inLobby)                  targetAnim = 'rifleIdle';
+    else if (!bot.isGrounded)          targetAnim = 'jump';
+    else if (!bot.hasAmmo && bot.exitedPrison) targetAnim = 'reload';
+    else if (isFiring)                 targetAnim = 'fire';
+    else if (bot.crouching)            targetAnim = isMoving ? (movingBack ? 'crouchWalkBack' : 'crouchWalk') : 'crouchIdle';
+    else if (movingBack)               targetAnim = 'walkBack';
+    else if (isEngaging && !isMoving)  targetAnim = 'aimIdle';
+    else if (!isEngaging && !isMoving) targetAnim = 'rifleIdle';
+    else                               targetAnim = 'walk';
+
+    _setBotAnim(bot, targetAnim);
+
+    // Smooth yaw rotation
+    const targetYaw = bot.yaw;
+    if (bot._smoothYaw === undefined) bot._smoothYaw = targetYaw;
+    const yawDiff = Math.atan2(Math.sin(targetYaw - bot._smoothYaw), Math.cos(targetYaw - bot._smoothYaw));
+    bot._smoothYaw += yawDiff * Math.min(1, dt * 8);
+
+    for (const [animName, data] of Object.entries(bot.animScenes)) {
+      const fo = bot.footOffset ?? 0;
+      if (!bot.alive) {
+        data.scene.position.set(bot.pos.x, bot.deadY + fo, bot.pos.z);
+      } else {
+        data.scene.position.set(bot.pos.x, bot.pos.y + fo, bot.pos.z);
+        data.scene.rotation.y = bot._smoothYaw;
+      }
+      if (data.scene.visible) {
+        data.mixer.update(dt);
+
+        // Kill root-motion XY drift (forward/lateral). bone.z = world-Y (height), leave it alone.
+        if (data.hipsBone && animName !== 'death') {
+          data.hipsBone.position.x = data.hipsRestX;
+          data.hipsBone.position.y = data.hipsRestY;
+        }
+
+        // Manual crossfade loop — blend action→actionB near the clip end to avoid snap.
+        // Uses direct weight control (no crossFadeTo) to prevent binding destruction.
+        if (data.actionB && animName !== 'death') {
+          const BLEND = 0.20;
+          const remaining = data.clipDur - data.action.time;
+
+          if (!data.xfActive && remaining < BLEND) {
+            data.xfActive = true;
+            data.xfProg = 0;
+            data.actionB.reset();
+            data.actionB.setEffectiveWeight(0);
+            data.actionB.play();
+          }
+
+          if (data.xfActive) {
+            data.xfProg = Math.min(1, data.xfProg + dt / BLEND);
+            data.action.setEffectiveWeight(1 - data.xfProg);
+            data.actionB.setEffectiveWeight(data.xfProg);
+            if (data.xfProg >= 1) {
+              data.action.setEffectiveWeight(0);
+              const tmp = data.action; data.action = data.actionB; data.actionB = tmp;
+              data.xfActive = false;
+            }
+          }
+        }
+      }
+    }
+
+    // Sync gun mesh to right hand bone world transform
+    if (bot.gunMesh) {
+      const activeData = bot.animScenes[bot.activeAnim];
+      const rhBone = activeData?.rightHandBone;
+      if (rhBone && bot.alive) {
+        activeData.scene.updateMatrixWorld(true);
+        rhBone.getWorldPosition(_gunPos);
+        rhBone.getWorldQuaternion(_gunQuat);
+        bot.gunMesh.position.copy(_gunPos);
+        bot.gunMesh.quaternion.copy(_gunQuat);
+        bot.gunMesh.quaternion.multiply(_gunRotOffset);
+        bot.gunMesh.visible = true;
+      } else {
+        bot.gunMesh.visible = false;
+      }
+    }
+
+    // Update world-space hitbox positions
+    if (bot.hitbox) {
+      if (bot.alive) {
+        bot.hitbox.position.set(bot.pos.x, bot.pos.y + 0.7, bot.pos.z);
+        bot.hitboxHead.position.set(bot.pos.x, bot.pos.y + 1.6, bot.pos.z);
+      } else {
+        // Move dead hitboxes out of the way so they can't be shot
+        bot.hitbox.position.set(0, -999, 0);
+        bot.hitboxHead.position.set(0, -999, 0);
+      }
+    }
+  }
+
+  // Update kill-cam player dummy mesh
+  if (window._playerMeshMixer && window._playerMesh && window._playerMesh.visible) {
+    window._playerMeshMixer.update(dt);
+    if (window._playerMeshHips) {
+      window._playerMeshHips.bone.position.x = window._playerMeshHips.rx;
+      window._playerMeshHips.bone.position.y = window._playerMeshHips.ry;
+    }
+  }
 }
 
 function damageBot(bot, dmg, isHead) {
@@ -541,15 +724,10 @@ function damageBot(bot, dmg, isHead) {
     SFX.kill_chaching();
     document.getElementById('kills-val').textContent = state.kills;
     addKillFeedEntry(bot.name, isHead);
-    bot.deadY = getGroundHeight(bot.pos.x, bot.pos.z) + 0.3;
+    bot.deadY = getGroundHeight(bot.pos.x, bot.pos.z);
   }
 }
 
-function findBotByInstance(instMesh, instanceId) {
-  if (!botInstMeshes.includes(instMesh)) return null;
-  const bot = bots[instanceId];
-  return (bot && bot.alive) ? bot : null;
-}
 
 // Kill feed
 const killFeedEntries = [];
