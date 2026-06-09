@@ -177,14 +177,18 @@ function _cloneForAnim(animName, gltf, botIndex, scale) {
   const hipsRestX = hipsBone ? hipsBone.position.x : 0;
   const hipsRestY = hipsBone ? hipsBone.position.y : 0;
 
-  // Cache right hand bone for gun attachment
-  let rightHandBone = null;
+  // Cache hand bones for gun attachment. Match the wrist bone (e.g. "mixamorigRightHand"),
+  // not the finger bones (RightHandIndex1, …), so prefer the shortest matching name.
+  let rightHandBone = null, leftHandBone = null;
   clone.traverse(o => {
-    if (!rightHandBone && o.isBone && o.name.toLowerCase().replace(/[^a-z]/g,'').includes('righthand')) rightHandBone = o;
+    if (!o.isBone) return;
+    const n = o.name.toLowerCase().replace(/[^a-z]/g, '');
+    if (n.includes('righthand') && (!rightHandBone || o.name.length < rightHandBone.name.length)) rightHandBone = o;
+    if (n.includes('lefthand')  && (!leftHandBone  || o.name.length < leftHandBone.name.length))  leftHandBone = o;
   });
 
   clone.visible = false;
-  return { scene: clone, mixer, action, actionB, clipDur: clip?.duration ?? 0, xfActive: false, xfProg: 0, hipsBone, hipsRestX, hipsRestY, rightHandBone };
+  return { scene: clone, mixer, action, actionB, clipDur: clip?.duration ?? 0, xfActive: false, xfProg: 0, hipsBone, hipsRestX, hipsRestY, rightHandBone, leftHandBone };
 }
 
 function _addWorldHitboxes(bot, index) {
@@ -332,8 +336,38 @@ let _botShootUnlockedAt = Infinity; // set when match goes live
 // Gun sync helpers — reused each frame to avoid GC
 const _gunPos = new THREE.Vector3();
 const _gunQuat = new THREE.Quaternion();
-// Rotation offset: aligns the gun barrel with the Mixamo right-hand bone's finger axis
-const _gunRotOffset = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+const _gunOffVec = new THREE.Vector3();
+const _gunRotQ = new THREE.Quaternion();
+const _gunRotE = new THREE.Euler();
+
+// --- Two-hand fit ---------------------------------------------------------
+// Contact points on the gun mesh (local space), matched to _makeBotGun() geometry:
+//   grip  = pistol grip → right hand;  fore = handguard → left hand.
+const _GUN_GRIP_LOCAL = new THREE.Vector3(0, -0.126, -0.130);
+const _GUN_FORE_LOCAL = new THREE.Vector3(0,  0.000, -0.425);
+// gun-local axis from right-hand contact toward left-hand contact (barrel-ish direction)
+const _GUN_AXIS_LOCAL = _GUN_FORE_LOCAL.clone().sub(_GUN_GRIP_LOCAL).normalize();
+const _GUN_SPAN_LOCAL = _GUN_FORE_LOCAL.distanceTo(_GUN_GRIP_LOCAL);
+const _GUN_UP_LOCAL   = new THREE.Vector3(0, 1, 0); // gun's up: sights up, magazine down
+
+// Scratch vectors/matrices for the per-frame basis solve
+const _hR = new THREE.Vector3(), _hL = new THREE.Vector3();
+const _wFwd = new THREE.Vector3(), _wUp = new THREE.Vector3(0, 1, 0);
+const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3();
+const _mLocal = new THREE.Matrix4(), _mWorld = new THREE.Matrix4(), _mRot = new THREE.Matrix4();
+const _qFit = new THREE.Quaternion();
+// Precompute the gun-local frame matrix (constant): columns = right, up, axis(fwd)
+const _gunLocalFrameInv = (() => {
+  const z = _GUN_AXIS_LOCAL.clone();
+  const x = new THREE.Vector3().crossVectors(_GUN_UP_LOCAL, z).normalize();
+  const y = new THREE.Vector3().crossVectors(z, x).normalize();
+  return new THREE.Matrix4().makeBasis(x, y, z).transpose(); // inverse of orthonormal = transpose
+})();
+
+// Fallback single-hand offset (used if a hand bone is missing). Live-tunable via console.
+window.GUN_OFF = window.GUN_OFF || { px: 0.0, py: 0.0, pz: 0.0, rx: Math.PI / 2, ry: 0, rz: 0 };
+// Toggle the two-hand fit (default on). Set window.GUN_AUTOFIT = false to use GUN_OFF instead.
+if (window.GUN_AUTOFIT === undefined) window.GUN_AUTOFIT = true;
 
 // Bots only spawn in Auto Join (bot match) mode — called from startBotMatch()
 function spawnBots() {
@@ -675,17 +709,59 @@ function updateBots(dt) {
       }
     }
 
-    // Sync gun mesh to right hand bone world transform
+    // Sync gun mesh into the hands. Two-hand fit: pistol grip → right hand,
+    // handguard → left hand, barrel aligned to the line between the two hands.
     if (bot.gunMesh) {
       const activeData = bot.animScenes[bot.activeAnim];
       const rhBone = activeData?.rightHandBone;
+      const lhBone = activeData?.leftHandBone;
       if (rhBone && bot.alive) {
         activeData.scene.updateMatrixWorld(true);
-        rhBone.getWorldPosition(_gunPos);
+        rhBone.getWorldPosition(_hR);
         rhBone.getWorldQuaternion(_gunQuat);
-        bot.gunMesh.position.copy(_gunPos);
-        bot.gunMesh.quaternion.copy(_gunQuat);
-        bot.gunMesh.quaternion.multiply(_gunRotOffset);
+        if (!bot._gunGripRel) bot._gunGripRel = new THREE.Quaternion();
+
+        // Reload/death let the left hand leave the gun — keep it glued to the right hand only.
+        const anim = bot.activeAnim;
+        const gripped = window.GUN_AUTOFIT && lhBone && anim !== 'reload' && anim !== 'death';
+
+        if (gripped) {
+          lhBone.getWorldPosition(_hL);
+          // Lock the gun's size once from the first solid grip pose, so reload can't stretch it.
+          // Clamp near authored size so a wide-handed pose can't inflate it into an MG.
+          if (!bot._gunFitScale) {
+            const span = _hR.distanceTo(_hL);
+            const raw = span > 0.01 ? span / _GUN_SPAN_LOCAL : 1;
+            bot._gunFitScale = Math.min(1.1, Math.max(0.85, raw));
+          }
+          // Build the world frame: forward = right→left hand, up = world up (gun stays upright).
+          _wFwd.copy(_hL).sub(_hR);
+          if (_wFwd.lengthSq() < 1e-8) _wFwd.set(Math.sin(bot._smoothYaw), 0, Math.cos(bot._smoothYaw));
+          _wFwd.normalize();
+          _bx.crossVectors(_wUp, _wFwd);
+          if (_bx.lengthSq() < 1e-8) _bx.set(1, 0, 0); else _bx.normalize();
+          _by.crossVectors(_wFwd, _bx).normalize();
+          _mWorld.makeBasis(_bx, _by, _wFwd);
+          _mRot.multiplyMatrices(_mWorld, _gunLocalFrameInv);
+          _qFit.setFromRotationMatrix(_mRot);
+          // Remember the gun's orientation relative to the right wrist, for reload/death reuse.
+          bot._gunGripRel.copy(_gunQuat).invert().multiply(_qFit);
+        } else {
+          // Reuse the last known grip orientation relative to the wrist (or a sane default).
+          if (bot._gunFitScale) {
+            _qFit.copy(_gunQuat).multiply(bot._gunGripRel);
+          } else {
+            const o = window.GUN_OFF;
+            _qFit.copy(_gunQuat).multiply(_gunRotQ.setFromEuler(_gunRotE.set(o.rx, o.ry, o.rz)));
+          }
+        }
+
+        const scale = bot._gunFitScale || 1;
+        bot.gunMesh.scale.setScalar(scale);
+        bot.gunMesh.quaternion.copy(_qFit);
+        // Place so the pistol-grip contact point sits exactly in the right palm.
+        _gunOffVec.copy(_GUN_GRIP_LOCAL).applyQuaternion(_qFit).multiplyScalar(scale);
+        bot.gunMesh.position.copy(_hR).sub(_gunOffVec);
         bot.gunMesh.visible = true;
       } else {
         bot.gunMesh.visible = false;
