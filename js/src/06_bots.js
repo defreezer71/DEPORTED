@@ -9,7 +9,8 @@ const BOT_COUNT = 20;
 // ── GLTF character system ──
 // Each animation is a separate GLB (mesh + animation from same export = matching bind pose).
 // Each bot gets one clone per animation; only the active one is visible.
-const _animGltfs = {};   // animName → gltf
+const _animGltfs = {};        // animName → gltf (rifle set)
+const _animGltfsPistol = {};  // animName → gltf (pistol set, falls back to rifle clips)
 let characterReady = false;
 let botInstMeshes = [];  // world-space hitbox meshes for raycasting
 
@@ -33,6 +34,18 @@ async function loadCharacterAssets() {
     crouchWalkBack: 'models/CrouchWalkingBackwards.glb',
   };
 
+  // Pistol-specific overrides — states not listed here share the rifle clips
+  // (death, reload, crouchWalk, crouchWalkBack).
+  const pistolFiles = {
+    aimIdle:    'models/PistolAim.glb',
+    rifleIdle:  'models/PistolIdle.glb',
+    walk:       'models/PistolRun.glb',
+    walkBack:   'models/PistolWalkBack.glb',
+    fire:       'models/PistolFire.glb',
+    jump:       'models/PistolJump.glb',
+    crouchIdle: 'models/PistolKneelIdle.glb',
+  };
+
   for (const [name, path] of Object.entries(animFiles)) {
     try {
       const gltf = await loadGlb(path);
@@ -40,6 +53,20 @@ async function loadCharacterAssets() {
       const clip = gltf.animations?.[0];
       console.log(`[Char] ${name}: ${clip ? clip.duration.toFixed(2)+'s' : 'NO CLIP'}`);
     } catch(e) { console.warn('Failed to load', name, path, e); }
+  }
+
+  // Pistol set: load overrides (deduped — PistolIdle is used twice), fall back to rifle
+  const _pistolLoaded = {};
+  for (const [name, path] of Object.entries(pistolFiles)) {
+    try {
+      if (!_pistolLoaded[path]) _pistolLoaded[path] = await loadGlb(path);
+      _animGltfsPistol[name] = _pistolLoaded[path];
+      const clip = _animGltfsPistol[name].animations?.[0];
+      console.log(`[Char/pistol] ${name}: ${clip ? clip.duration.toFixed(2)+'s' : 'NO CLIP'}`);
+    } catch(e) { console.warn('Failed to load pistol anim', name, path, '— falling back to rifle clip'); }
+  }
+  for (const name of Object.keys(animFiles)) {
+    if (!_animGltfsPistol[name]) _animGltfsPistol[name] = _animGltfs[name];
   }
 
   characterReady = true;
@@ -103,10 +130,11 @@ function _makeBotGun() {
   add(B(0.060,0.008,0.205), mtl,    0, 0.026,-0.215);
   // Lower receiver
   add(B(0.056,0.050,0.205), drk,    0,-0.027,-0.215);
-  // Curved magazine
-  add(B(0.042,0.060,0.072), blk,    0,-0.106,-0.260, 0.09,0,0);
-  add(B(0.040,0.062,0.070), blk,    0,-0.168,-0.268, 0.19,0,0);
-  add(B(0.040,0.060,0.070), drk,    0,-0.226,-0.258, 0.27,0,0);
+  // Curved magazine — segments overlap (height > spacing) so the tilt steps can't
+  // open visible gaps; uniform color so the bottom doesn't read as a separate block
+  add(B(0.042,0.078,0.072), blk,    0,-0.106,-0.260, 0.09,0,0);
+  add(B(0.040,0.078,0.070), drk,    0,-0.168,-0.268, 0.19,0,0);
+  add(B(0.040,0.078,0.070), blk,    0,-0.226,-0.258, 0.27,0,0);
   // Pistol grip
   add(B(0.038,0.094,0.046), wood,   0,-0.126,-0.130,-0.30,0,0);
   // Stock arms — run flush from the receiver back (rear edge z=-0.112) to the
@@ -215,16 +243,17 @@ function _cloneForAnim(animName, gltf, botIndex, scale) {
 
   // Cache hand bones for gun attachment. Match the wrist bone (e.g. "mixamorigRightHand"),
   // not the finger bones (RightHandIndex1, …), so prefer the shortest matching name.
-  let rightHandBone = null, leftHandBone = null;
+  let rightHandBone = null, leftHandBone = null, rightForeArmBone = null;
   clone.traverse(o => {
     if (!o.isBone) return;
     const n = o.name.toLowerCase().replace(/[^a-z]/g, '');
     if (n.includes('righthand') && (!rightHandBone || o.name.length < rightHandBone.name.length)) rightHandBone = o;
     if (n.includes('lefthand')  && (!leftHandBone  || o.name.length < leftHandBone.name.length))  leftHandBone = o;
+    if (n.includes('rightforearm') && (!rightForeArmBone || o.name.length < rightForeArmBone.name.length)) rightForeArmBone = o;
   });
 
   clone.visible = false;
-  return { scene: clone, mixer, action, actionB, clipDur: clip?.duration ?? 0, xfActive: false, xfProg: 0, hipsBone, hipsRestX, hipsRestY, rightHandBone, leftHandBone };
+  return { scene: clone, mixer, action, actionB, clipDur: clip?.duration ?? 0, xfActive: false, xfProg: 0, hipsBone, hipsRestX, hipsRestY, rightHandBone, leftHandBone, rightForeArmBone };
 }
 
 function _addWorldHitboxes(bot, index) {
@@ -271,7 +300,8 @@ function _attachBotMesh(bot, index) {
   const { scale, footOffset } = _animGltfs['aimIdle'] ? _measureScale(_animGltfs['aimIdle']) : { scale: 0.0105, footOffset: 0 };
   bot.footOffset = footOffset;
 
-  for (const [animName, gltf] of Object.entries(_animGltfs)) {
+  const gltfMap = bot.weapon === 'pistol' ? _animGltfsPistol : _animGltfs;
+  for (const [animName, gltf] of Object.entries(gltfMap)) {
     const data = _cloneForAnim(animName, gltf, index, scale);
     scene.add(data.scene);
     bot.animScenes[animName] = data;
@@ -394,14 +424,13 @@ window.GUN_FIT = window.GUN_FIT || {
   roll:  0,
   scaleMin: 0.9, scaleMax: 1.15,
 };
-// Same idea for the 1911 pistol (one real contact — the right hand; "fore" is just a
-// point along the barrel that sets which way the muzzle points, scale stays 1).
+// 1911 pistol: one real contact (the right palm). Orientation is computed per
+// frame from the right FOREARM direction (elbow→wrist) — the wrist bone itself
+// rotates heavily through the pistol clips, so anything glued to it mis-aims.
 window.PISTOL_FIT = window.PISTOL_FIT || {
   grip:  [0, -0.060,  0.040],   // upper rear of the pistol grip, web of the right hand
-  fore:  [0, -0.040, -0.125],   // along the barrel — keeps muzzle on the hand line
   rPalm: [0, 0.06, 0.01],
-  lPalm: [0, 0.07, 0.01],
-  roll:  0,
+  roll:  0,                     // extra roll about the barrel (radians)
   scaleMin: 1.0, scaleMax: 1.0,
 };
 // Toggle the two-hand fit (default on). Set window.GUN_AUTOFIT = false to use GUN_OFF instead.
@@ -416,7 +445,7 @@ const _qR = new THREE.Quaternion(), _qL = new THREE.Quaternion();
 const _palmR = new THREE.Vector3(), _palmL = new THREE.Vector3();
 const _tgtR = new THREE.Vector3(), _tgtL = new THREE.Vector3();
 const _gripV = new THREE.Vector3(), _foreV = new THREE.Vector3(), _axisL = new THREE.Vector3();
-const _wFwd = new THREE.Vector3(), _wUp = new THREE.Vector3(0, 1, 0);
+const _wFwd = new THREE.Vector3(), _wUp = new THREE.Vector3(0, 1, 0), _faP = new THREE.Vector3();
 const _bx = new THREE.Vector3(), _by = new THREE.Vector3();
 const _wx = new THREE.Vector3(), _wy = new THREE.Vector3();
 const _mLocalInv = new THREE.Matrix4(), _mWorld = new THREE.Matrix4(), _mRot = new THREE.Matrix4();
@@ -500,16 +529,29 @@ function updateCharacterVisual(bot, dt) {
       _palmR.set(F.rPalm[0], F.rPalm[1], F.rPalm[2]).applyQuaternion(_qR);
       _tgtR.copy(_hR).add(_palmR);
 
-      // Reload/death let the left hand leave the gun — keep it glued to the right hand only.
+      // Reload/death let the left hand leave the gun — keep it glued to the right hand
+      // only. Pistols never use the two-hand fit: both hands clasp the same point,
+      // so the right→left palm axis is degenerate sideways noise.
       const anim = bot.activeAnim;
-      const gripped = window.GUN_AUTOFIT && lhBone && anim !== 'reload' && anim !== 'death';
+      const faBone = activeData?.rightForeArmBone;
+      const gripped = window.GUN_AUTOFIT && lhBone && anim !== 'reload' && anim !== 'death'
+        && bot.weapon !== 'pistol';
 
+      let fitOk = false;
       if (gripped) {
         lhBone.getWorldPosition(_hL);
         lhBone.getWorldQuaternion(_qL);
         _foreV.set(F.fore[0], F.fore[1], F.fore[2]);
         _palmL.set(F.lPalm[0], F.lPalm[1], F.lPalm[2]).applyQuaternion(_qL);
         _tgtL.copy(_hL).add(_palmL);
+        // Degenerate-pose guard: if the hands drift too close together or stack
+        // near-vertically (idle sway frames), the palm line is garbage — aligning
+        // the barrel to it makes the rifle go vertical with random roll.
+        const _spanW = _tgtL.distanceTo(_tgtR);
+        fitOk = _spanW > 0.16 && Math.abs(_tgtL.y - _tgtR.y) / _spanW < 0.8;
+      }
+
+      if (fitOk) {
 
         // Fit gun size to the hand span (clamped). Recomputed each gripped frame so live
         // tuning applies instantly; reload/death reuse the last value via the else branch.
@@ -542,6 +584,23 @@ function updateCharacterVisual(bot, dt) {
         if (F.roll) _qFit.multiply(_rollQ.setFromAxisAngle(_axisL, F.roll));
         // Remember orientation relative to the right wrist, for reload/death reuse.
         bot._gunGripRel.copy(_qR).invert().multiply(_qFit);
+      } else if (faBone && anim !== 'reload' && anim !== 'death') {
+        // Barrel along the right FOREARM (elbow→wrist), sights up. The forearm
+        // line is stable in every pose — the wrist bone itself rotates heavily
+        // through the pistol clips, so anything glued to it mis-aims. Used always
+        // for pistols, and as the rifle's fallback on degenerate palm-line frames.
+        faBone.getWorldPosition(_faP);
+        _wFwd.copy(_hR).sub(_faP);
+        if (_wFwd.lengthSq() < 1e-8) _wFwd.set(Math.sin(bot._smoothYaw), 0, Math.cos(bot._smoothYaw));
+        _wFwd.normalize();
+        _wx.crossVectors(_wUp, _wFwd);
+        if (_wx.lengthSq() < 1e-8) _wx.set(1, 0, 0); else _wx.normalize();
+        _wy.crossVectors(_wFwd, _wx).normalize();
+        _mWorld.makeBasis(_wx, _wy, _axisL.copy(_wFwd).negate());
+        _qFit.setFromRotationMatrix(_mWorld);
+        if (F.roll) _qFit.multiply(_rollQ.setFromAxisAngle(_axisL.set(0, 0, 1), F.roll));
+        if (bot.weapon === 'pistol') bot._gunFitScale = 1;
+        bot._gunGripRel.copy(_qR).invert().multiply(_qFit);
       } else {
         // Reuse the last known grip orientation relative to the wrist (or a sane default).
         if (bot._gunFitScale) {
@@ -552,11 +611,16 @@ function updateCharacterVisual(bot, dt) {
         }
       }
 
+      // Smooth the orientation so switching between fit modes (two-hand ↔ forearm
+      // fallback mid-run) can't pop the gun between frames.
+      if (!bot._qGunSm) bot._qGunSm = new THREE.Quaternion().copy(_qFit);
+      else bot._qGunSm.slerp(_qFit, Math.min(1, dt * 14));
+
       const scale = bot._gunFitScale || 1;
       bot.gunMesh.scale.setScalar(scale);
-      bot.gunMesh.quaternion.copy(_qFit);
+      bot.gunMesh.quaternion.copy(bot._qGunSm);
       // Seat the grip contact exactly in the right palm.
-      _gunOffVec.copy(_gripV).applyQuaternion(_qFit).multiplyScalar(scale);
+      _gunOffVec.copy(_gripV).applyQuaternion(bot._qGunSm).multiplyScalar(scale);
       bot.gunMesh.position.copy(_tgtR).sub(_gunOffVec);
       bot.gunMesh.visible = true;
     } else {
