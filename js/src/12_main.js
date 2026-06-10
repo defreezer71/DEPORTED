@@ -623,10 +623,11 @@ function update() {
     startKillCam();
   }
 
-  // Check victory
+  // Check victory — you win when no bots AND no remote players are left standing
   if (state.phase === 'playing' && !state.playerDead) {
     const aliveBotsCount = bots.filter(b => b.alive).length;
-    if (aliveBotsCount === 0) {
+    const aliveRemoteCount = Object.values(state.remotePlayers).filter(rp => !rp.dead).length;
+    if (aliveBotsCount === 0 && aliveRemoteCount === 0) {
       state.phase = 'victory';
       const winScreen = document.getElementById('victory-screen');
       document.getElementById('win-kills').textContent = state.kills;
@@ -877,10 +878,12 @@ function update() {
 
   if (!state.playerDead && !state.killCamActive) updateBots(renderDt);
 
-  // Snapshot interpolation — render each remote player at (now - INTERP_DELAY),
-  // smoothly interpolating between two real received snapshots. No rubber-banding.
-  const INTERP_DELAY = 100; // ms behind real-time
-  const renderTime = Date.now() - INTERP_DELAY;
+  // Snapshot interpolation — render each remote player slightly in the past on the
+  // server's clock, interpolating between two real snapshots. The delay adapts to
+  // measured arrival jitter (60–150ms); brief gaps are covered by extrapolation.
+  const INTERP_DELAY = Math.min(150, Math.max(60, (state._snapJitter || 25) * 3));
+  const renderTime = Date.now() + (state.clockOffset || 0) - INTERP_DELAY;
+  state.renderServerTime = renderTime; // shooter's view time — sent with shots for lag comp
 
   for (const id in state.remotePlayers) {
     const rp = state.remotePlayers[id];
@@ -896,9 +899,22 @@ function update() {
     }
 
     const alpha = (s1.t === s0.t) ? 1 : Math.max(0, Math.min(1, (renderTime - s0.t) / (s1.t - s0.t)));
-    rp.mesh.position.x = s0.x + (s1.x - s0.x) * alpha;
-    rp.mesh.position.y = s0.y + (s1.y - s0.y) * alpha;
-    rp.mesh.position.z = s0.z + (s1.z - s0.z) * alpha;
+
+    if (renderTime > s1.t && snaps.length >= 2 && !rp.dead) {
+      // Snapshots stalled (TCP hiccup) — dead-reckon forward up to 200ms so the
+      // player keeps moving instead of freezing, then hold.
+      const sa = snaps[snaps.length - 2], sb = s1;
+      const span = sb.t - sa.t;
+      const ahead = Math.min(renderTime - sb.t, 200);
+      const k = span > 0 ? ahead / span : 0;
+      rp.mesh.position.x = sb.x + (sb.x - sa.x) * k;
+      rp.mesh.position.y = sb.y + (sb.y - sa.y) * k;
+      rp.mesh.position.z = sb.z + (sb.z - sa.z) * k;
+    } else {
+      rp.mesh.position.x = s0.x + (s1.x - s0.x) * alpha;
+      rp.mesh.position.y = s0.y + (s1.y - s0.y) * alpha;
+      rp.mesh.position.z = s0.z + (s1.z - s0.z) * alpha;
+    }
 
     // Shortest-path yaw interpolation between snapshots
     if (s0.yaw !== undefined && s1.yaw !== undefined) {
@@ -916,6 +932,46 @@ function update() {
     const crouchTarget = rp.crouching ? -0.5 : 0;
     rp.crouchY += (crouchTarget - rp.crouchY) * Math.min(1, renderDt * 10);
     rp.mesh.position.y += rp.crouchY;
+
+    // Animated character puppet (same rig/anims/gun fit as bots), driven by the
+    // interpolated network state. The block mesh stays as hitbox + load fallback.
+    if (!rp.puppet && typeof createCharacterPuppet === 'function') {
+      rp.puppet = createCharacterPuppet();
+      if (rp.puppet && rp.mesh.userData.blockVisual) rp.mesh.userData.blockVisual.visible = false;
+    }
+    if (rp.puppet) {
+      const pu = rp.puppet;
+      const mp = rp.mesh.position;
+      // Speed estimate from interpolated motion (units/s, smoothed) → anim choice
+      if (rp._lastPX !== undefined && renderDt > 0) {
+        const sp = Math.hypot(mp.x - rp._lastPX, mp.z - rp._lastPZ) / renderDt;
+        rp._speed = (rp._speed || 0) * 0.8 + sp * 0.2;
+      }
+      rp._lastPX = mp.x; rp._lastPZ = mp.z;
+      // Group origin is eye height; the rig is placed at the feet. Crouch dip is
+      // undone — the crouch animation lowers the body itself.
+      pu.pos.set(mp.x, mp.y - rp.crouchY - CONFIG.playerHeight, mp.z);
+      if (!rp.dead) pu.deadY = pu.pos.y;
+      pu.alive = !rp.dead;
+      // Hysteresis on the walk/idle switch so position jitter can't flicker it
+      const sp = rp._speed || 0;
+      rp._moving = rp._moving ? sp > 0.4 : sp > 0.8;
+      const moving = rp._moving;
+      // Camera yaw 0 faces -Z; the rig's yaw 0 faces +Z — flip 180°.
+      // While idle, keep the feet planted through small look-arounds and only
+      // turn the body once the view strays >40° — otherwise the rig pivots with
+      // every mouse twitch and the feet "ice-skate" across the ground.
+      const rawYaw = rp.mesh.rotation.y + Math.PI;
+      if (pu._plantYaw === undefined) pu._plantYaw = rawYaw;
+      const yd = Math.atan2(Math.sin(rawYaw - pu._plantYaw), Math.cos(rawYaw - pu._plantYaw));
+      if (moving || Math.abs(yd) > 0.7) pu._plantYaw = rawYaw;
+      pu.yaw = pu._plantYaw; // updateCharacterVisual smooths the actual turn
+      const anim = !pu.alive ? 'death'
+        : rp.crouching ? (moving ? 'crouchWalk' : 'crouchIdle')
+        : moving ? 'walk' : 'rifleIdle';
+      _setBotAnim(pu, anim);
+      updateCharacterVisual(pu, renderDt);
+    }
   }
 
   // Debug overlay - remote player distances
@@ -929,7 +985,9 @@ function update() {
   document.getElementById('match-timer').textContent =
     String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
 
-  const aliveCount = bots.filter(b => b.alive).length + (state.playerDead ? 0 : 1);
+  const aliveCount = bots.filter(b => b.alive).length
+    + Object.values(state.remotePlayers).filter(rp => !rp.dead).length
+    + (state.playerDead ? 0 : 1);
   document.getElementById('alive-val').textContent = aliveCount;
 
   // Volcano eruption
@@ -1643,7 +1701,9 @@ function _buildMergedGeo(partDefs) {
 
 // Shared single material for all remote players — vertex colors carry per-player/part tinting.
 const _remotePlayerMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-const _remoteHitboxMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+// colorWrite AND depthWrite off — depth writes from an invisible mesh punch a
+// see-through hole in whatever renders behind it (the "floating head" glitch)
+const _remoteHitboxMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
 
 // Humanoid remote player — 2 draw calls per player (1 merged visual + 1 invisible hitbox).
 // Group origin = camera eye height; all geometry offsets downward so feet meet world ground.
@@ -1689,13 +1749,26 @@ function createRemotePlayerMesh(id) {
     { geo: new THREE.BoxGeometry(0.13, 0.12, 0.20),            color: 0x111111, pos: [0.11,  -1.57,  0.03]           },
   ]);
 
-  group.add(new THREE.Mesh(mergedGeo, _remotePlayerMat));
+  // Block-style fallback visual — hidden once the animated puppet attaches
+  // (character GLBs may still be loading); the group/hitbox stay for raycasting.
+  const blockVisual = new THREE.Mesh(mergedGeo, _remotePlayerMat);
+  group.add(blockVisual);
+  group.userData.blockVisual = blockVisual;
 
-  // Invisible hitbox — separate so it stays at the fixed head position for raycasting
+  // Invisible hitbox — separate so it stays at the fixed head position for raycasting.
+  // Group origin = eye height (feet + 1.7); the rig's head bone sits 1.78 above the
+  // feet, so the head sphere goes at +0.08 — not -0.10 (that was upper-chest).
   const hitbox = new THREE.Mesh(new THREE.SphereGeometry(0.22, 6, 4), _remoteHitboxMat);
-  hitbox.position.y = -0.10;
+  hitbox.position.y = 0.08;
   hitbox.userData.isHead = true;
   group.add(hitbox);
+
+  // Body hitbox cylinder — the hidden block visual's pose (arms at sides) doesn't
+  // match the animated puppet (arms forward on the rifle), so limb shots whiffed.
+  // Same generous dimensions as the bots' body cylinder, centered feet→shoulders.
+  const bodyHit = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.55, 8), _remoteHitboxMat);
+  bodyHit.position.y = -0.925; // group origin = eye height (feet + 1.7)
+  group.add(bodyHit);
 
   group.userData.id = id;
   scene.add(group);
@@ -1705,13 +1778,15 @@ function removeRemotePlayer(id) {
   const rp = state.remotePlayers[id];
   if (!rp) return;
   scene.remove(rp.mesh);
+  if (rp.puppet && typeof removeCharacterPuppet === 'function') removeCharacterPuppet(rp.puppet);
   delete state.remotePlayers[id];
   console.log('Player left:', id);
 }
 
-function updateRemotePlayers(playerList) {
+function updateRemotePlayers(playerList, serverT) {
   const seen = new Set();
-  const now = Date.now();
+  // Stamp snapshots with the server's clock (smooth) — not arrival time (jittery)
+  const now = serverT !== undefined ? serverT : Date.now();
 
   for (const p of playerList) {
     if (p.id === state.myId) continue;
@@ -1819,6 +1894,9 @@ window.toggleReady = function() {
   if (state.ws && state.ws.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify({ type: 'ready' }));
     console.log('[ready] sent');
+    // Ready-up is a user gesture — grab pointer lock now so the player is already
+    // locked and live when the countdown hits zero (no "click to play" screen).
+    try { renderer.domElement.requestPointerLock(); } catch (e) {}
   }
 };
 
@@ -1861,13 +1939,14 @@ function showRoomCode(code) {
 }
 
 // ── Unpack binary world snapshot from server ──
-// Format: [0x01][count] then per player: 6-byte id | flags | hp | armor | uint16 yaw | int16 x,y,z (×100)
+// Format: [0x01][count][uint32 serverTimeMs] then per player:
+//   6-byte id | flags | hp | armor | uint16 yaw | int16 x,y,z (×100)
 const _UNPACK_SCALE = 1 / 100;
 function unpackWorld(ab) {
   const dv = new DataView(ab);
   const count = dv.getUint8(1);
   const players = [];
-  let off = 2;
+  let off = 6;
   for (let i = 0; i < count; i++) {
     let id = '';
     for (let b = 0; b < 6; b++) { const c = dv.getUint8(off + b); if (c) id += String.fromCharCode(c); }
@@ -1885,8 +1964,12 @@ function unpackWorld(ab) {
 }
 
 function connectToServer() {
-  console.log('Connecting to wss://deported.onrender.com');
-  state.ws = new WebSocket('wss://deported.onrender.com');
+  // Local dev (page served from localhost) talks to the local server on 8081
+  const wsUrl = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'ws://' + location.hostname + ':8081'
+    : 'wss://deported.onrender.com';
+  console.log('Connecting to ' + wsUrl);
+  state.ws = new WebSocket(wsUrl);
   state.ws.binaryType = 'arraybuffer';
 
   state.ws.onopen = () => {
@@ -1901,8 +1984,29 @@ function connectToServer() {
     if (event.data instanceof ArrayBuffer) {
       const dv = new DataView(event.data);
       if (dv.getUint8(0) === 0x01) {
-        state.lastWorldAt = Date.now();
-        updateRemotePlayers(unpackWorld(event.data));
+        const arrival = Date.now();
+        state.lastWorldAt = arrival;
+        const serverT = dv.getUint32(2, true);
+
+        // Clock sync: (serverT - arrival) = clock offset minus one-way delay.
+        // The window max ≈ offset at minimum delay; smooth it so the remote
+        // timeline doesn't jump when the network hiccups.
+        if (!state._clockSamples) state._clockSamples = [];
+        state._clockSamples.push({ a: arrival, o: serverT - arrival });
+        while (state._clockSamples.length > 2 && state._clockSamples[0].a < arrival - 5000) state._clockSamples.shift();
+        let maxOff = -Infinity;
+        for (const s of state._clockSamples) if (s.o > maxOff) maxOff = s.o;
+        state.clockOffset = (state.clockOffset === undefined)
+          ? maxOff : state.clockOffset + (maxOff - state.clockOffset) * 0.1;
+
+        // Adaptive interpolation delay from snapshot arrival jitter
+        if (state._lastSnapArrival) {
+          const gap = arrival - state._lastSnapArrival;
+          state._snapJitter = (state._snapJitter || 20) * 0.95 + gap * 0.05;
+        }
+        state._lastSnapArrival = arrival;
+
+        updateRemotePlayers(unpackWorld(event.data), serverT);
       }
       return;
     }
@@ -1974,6 +2078,10 @@ function connectToServer() {
         })();
         state.inLobby = false;
         hideLobbyScreen();
+        // Fill the PvP match with bots to 21 combatants — without this, bots.length
+        // is 0 in PvP and the victory check fires instantly ("REPATRIATED!" at 0:03)
+        if (typeof spawnBots === 'function' && bots.length === 0) spawnBots();
+        adjustBotsForPlayerCount(state.lobbyPlayerCount || state.roomPlayerCount || 1);
         // Reset player to clean match start — no warmup gear carries over
         state.hp = 100;
         state.armor = 0;
@@ -1988,11 +2096,14 @@ function connectToServer() {
         );
         { const chatEl = document.getElementById('chat-container');
           if (chatEl) chatEl.style.setProperty('display', 'flex', 'important'); }
-        // Can't call requestPointerLock from WS handler (not a user gesture) — flag it
-        // and catch on next canvas click. Show prompt so player knows to click.
-        state.pendingLock = true;
-        { const pl = document.getElementById('click-to-play');
-          if (pl) pl.style.setProperty('display', 'flex', 'important'); }
+        // Players are normally already pointer-locked (ready-up grabs the lock).
+        // Only if the lock is missing: we can't request it from a WS handler (not a
+        // user gesture), so flag it and show the click-to-play fallback prompt.
+        if (!document.pointerLockElement) {
+          state.pendingLock = true;
+          const pl = document.getElementById('click-to-play');
+          if (pl) pl.style.setProperty('display', 'flex', 'important');
+        }
         break;
       case 'chat':
         addChatMessage(msg.id || 'unknown', msg.text || '');
@@ -2060,8 +2171,9 @@ function sendInputToServer() {
   state.ws.send(_inputBuf);
 }
 
-// Heartbeat — keeps connection alive when tab is backgrounded
-setInterval(sendInputToServer, 50);
+// 60Hz to match the server tick — at 20Hz two of every three snapshots just
+// repeated stale positions. ~1.5KB/s up. Doubles as keepalive when backgrounded.
+setInterval(sendInputToServer, 16);
 
 // Stale connection watchdog — Render's proxy can silently drop WS connections
 // without firing onclose. If no world snapshot arrives in 5s, force reconnect.

@@ -51,11 +51,13 @@ function applyHitEvent(evt) {
   }
 }
 
-// Fire-and-forget shoot message to server
+// Fire-and-forget shoot message to server. `at` is the interpolation render time
+// (server clock) — the server rewinds the target to that moment for lag compensation.
 function sendShoot(targetId, damage, headshot) {
   const sock = (state && state.ws) ? state.ws : (typeof ws !== 'undefined' ? ws : null);
   if (sock && sock.readyState === 1) {
-    sock.send(JSON.stringify({ type: 'shoot', targetId, damage, headshot }));
+    const at = Math.round(state.renderServerTime || 0);
+    sock.send(JSON.stringify({ type: 'shoot', targetId, damage, headshot, at }));
   }
 }
 

@@ -53,12 +53,15 @@ Modules are plain JS files concatenated in order — no bundler, no modules syst
 ### Server (`server/server.js`)
 
 Pure Node.js WebSocket server (no framework). Manages:
-- **Rooms**: auto-fill rooms (up to 20 players, immediate countdown) and PvP lobby rooms (waiting for majority-ready vote, 3-minute fill timer fallback)
-- **Tick loop**: 20 Hz (`setInterval` at 50ms) — broadcasts world snapshots (player positions, HP, events) to all room members
-- **Server-authoritative damage**: `shoot` messages are validated server-side (range check ≤600 units, damage capped at 200)
-- **Anti-cheat**: teleport detection (rejects moves >3.5 units per tick)
+- **Rooms**: auto-fill rooms (up to 20 players, immediate countdown) and PvP lobby rooms (waiting for majority-ready vote, 3-minute fill timer fallback). Room phase flips to `playing` shortly after `startMatch` (enables strict movement validation).
+- **Tick loop**: 60 Hz (`setInterval` at 16ms) — broadcasts binary world snapshots `[0x01][count][uint32 serverTimeMs]` + 17 bytes/player (id, flags, hp, armor, yaw, x/y/z int16 ×100). Events (hits etc.) go as JSON per tick.
+- **Inputs**: binary `0x02` packets (24 bytes: seq, pos, yaw, pitch, keys) sent by clients at 60 Hz; JSON `move`/`input` also accepted.
+- **Lag compensation**: per-player ~1.2s position history; `shoot` carries `at` (the shooter's interpolation render time on the server clock) and the target is rewound up to 800ms for the range check (≤600 units, damage capped at 200, max 15 shots/s).
+- **Movement validation** (`tryMove`): free outside `playing` (game-controlled teleports); during play a 50 u/s speed budget per elapsed time, self-healing resync after 10 consecutive rejections. Server spawn must match client `CONFIG.prisonPos`.
 
-WebSocket message types: `join`, `move`/`input`, `ready`, `shoot`, `chat` → `joined`, `lobbyState`, `startMatch`, `world`, `hit`, `chat`.
+Client netcode (12_main.js): snapshots are stamped with server time; the client estimates clock offset (windowed max of serverT−arrival, smoothed) and interpolates remote players on the server timeline with an adaptive 60–150ms delay, extrapolating up to 200ms across snapshot gaps. When served from localhost the client connects to `ws://localhost:8081` instead of the production Render server.
+
+WebSocket message types: `join`, `move`/`input`, `ready`, `shoot`, `chat` → `joined`, `lobbyState`, `startMatch`, binary world snapshot, `events`, `chat`.
 
 ### Note on `src/` vs `js/src/`
 

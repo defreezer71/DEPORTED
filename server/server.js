@@ -31,19 +31,62 @@ function makeRoom(code, isAuto) {
     players: {}, readySet: new Set(), events: [], tick: null
   };
   rooms[code].tick = setInterval(() => tickRoom(code), 16); // 60Hz
+  // Auto rooms count down client-side (~10s) — enable strict movement after that
+  if (isAuto) setTimeout(() => { if (rooms[code]) rooms[code].phase = 'playing'; }, 15000);
   return rooms[code];
 }
 
+// Server clock in a uint32 domain (wraps every ~49 days; only used for relative math)
+function svNow() { return Date.now() % 0x100000000; }
+
+// Movement validation. Outside 'playing' the game legitimately teleports players
+// (match-start spawn, warmup), so accept freely. During play, allow a speed budget
+// per elapsed time instead of a fixed per-message distance (input rate varies).
+// Persistent rejection self-heals: after 10 strikes, resync to the claimed position
+// — otherwise a single missed teleport wedges the player forever.
+function tryMove(room, player, x, y, z) {
+  const now = svNow();
+  if (room.phase === 'playing') {
+    const dt = Math.min(500, now - (player.lastMoveAt || now));
+    const maxDist = Math.max(2, 0.05 * dt); // 50 u/s budget
+    const dx = x - player.x, dz = z - player.z;
+    if (Math.sqrt(dx*dx + dz*dz) > maxDist) {
+      player.tpStrikes = (player.tpStrikes || 0) + 1;
+      if (player.tpStrikes <= 10) {
+        if (player.tpStrikes === 1) console.log('[cheat?]', player.id, 'teleport');
+        return false;
+      }
+      console.log('[resync]', player.id, 'accepting position after', player.tpStrikes, 'strikes');
+    }
+  }
+  player.tpStrikes = 0;
+  player.lastMoveAt = now;
+  player.x = x; player.y = y; player.z = z;
+  pushHist(player);
+  return true;
+}
+
+// Record a player's position history for lag compensation (~1.2s window)
+function pushHist(player) {
+  if (!player.hist) player.hist = [];
+  player.hist.push({ t: svNow(), x: player.x, y: player.y, z: player.z });
+  const cutoff = svNow() - 1200;
+  while (player.hist.length > 2 && player.hist[0].t < cutoff) player.hist.shift();
+}
+
 // ── Binary world snapshot ──
-// Format: [0x01][count] then per player: 6-byte id | flags | hp | armor | uint16 yaw | int16 x,y,z (×100, 1cm precision)
-// Total: 2 + N*17 bytes (vs 2 + N*23 with float32 — fits 60Hz in same bandwidth envelope as 20Hz float32)
+// Format: [0x01][count][uint32 serverTimeMs] then per player:
+//   6-byte id | flags | hp | armor | uint16 yaw | int16 x,y,z (×100, 1cm precision)
+// Total: 6 + N*17 bytes. The server timestamp lets clients interpolate on the
+// server's smooth clock instead of jittery TCP arrival times.
 const POS_SCALE = 100;
 function packWorldSnapshot(room) {
   const players = Object.values(room.players);
-  const buf = Buffer.allocUnsafe(2 + players.length * 17);
+  const buf = Buffer.allocUnsafe(6 + players.length * 17);
   buf[0] = 0x01;
   buf[1] = players.length;
-  let off = 2;
+  buf.writeUInt32LE(svNow(), 2);
+  let off = 6;
   for (const p of players) {
     const id = (p.id || '').slice(0, 6);
     for (let i = 0; i < 6; i++) buf[off + i] = i < id.length ? id.charCodeAt(i) : 0;
@@ -113,14 +156,24 @@ function broadcastLobbyState(code) {
   });
 }
 
+// Begin a match: countdown now, strict movement validation once clients are
+// actually playing (their match-start teleport happens on startMatch receipt).
+function startRoomMatch(code) {
+  const room = rooms[code];
+  if (!room || room.phase !== 'waiting') return;
+  room.phase = 'countdown';
+  const startAt = Date.now() + 2500;
+  broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt });
+  setTimeout(() => { if (rooms[code]) rooms[code].phase = 'playing'; }, 5000);
+}
+
 function checkMajority(code) {
   const room = rooms[code];
   if (!room || room.phase !== 'waiting') return;
   const total = Object.keys(room.players).length;
   if (total < 2) return;
   if (room.readySet.size >= Math.ceil(total * 0.51)) {
-    room.phase = 'countdown';
-    broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt: Date.now() + 2500 });
+    startRoomMatch(code);
     console.log('[room ' + code + '] startMatch triggered (players: ' + total + ')');
   }
 }
@@ -139,9 +192,7 @@ wss.on('connection', ws => {
       const x = buf.readFloatLE(3);
       const y = buf.readFloatLE(7);
       const z = buf.readFloatLE(11);
-      const dx = x - player.x, dz = z - player.z;
-      if (Math.sqrt(dx*dx+dz*dz) > 3.5) { console.log('[cheat?]', myId, 'teleport'); return; }
-      player.x = x; player.y = y; player.z = z;
+      if (!tryMove(rooms[myRoom], player, x, y, z)) return;
       player.yaw = buf.readFloatLE(15);
       const keys = buf[23];
       player.crouch = !!(keys & 16);
@@ -167,10 +218,12 @@ wss.on('connection', ws => {
       myRoom = code;
       if (!rooms[code]) makeRoom(code, isAuto);
       const room = rooms[code];
+      // Spawn inside the prison — must match the client's CONFIG.prisonPos
+      // (-105, 105) or movement validation starts from a desynced position.
       const a = Math.random()*Math.PI*2, r = Math.random()*8;
       room.players[myId] = {
         id: myId, name: msg.name || ('P_'+myId.slice(-4)), ws,
-        x: -75+Math.cos(a)*r, y: 0, z: 75+Math.sin(a)*r,
+        x: -105+Math.cos(a)*r, y: 0, z: 105+Math.sin(a)*r,
         hp: 100, armor: 0, dead: false, lastSeen: Date.now()
       };
       // Start 3-min fill timer when first player joins a waiting room
@@ -178,8 +231,7 @@ wss.on('connection', ws => {
         room.fillEndsAt = Date.now() + 3 * 60 * 1000;
         room.fillTimer = setTimeout(() => {
           if (rooms[code] && rooms[code].phase === 'waiting') {
-            rooms[code].phase = 'countdown';
-            broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt: Date.now() + 2500 });
+            startRoomMatch(code);
             console.log('[room ' + code + '] 3-min fill timer fired — auto-starting');
           }
         }, 3 * 60 * 1000);
@@ -197,10 +249,7 @@ wss.on('connection', ws => {
     player.lastSeen = Date.now();
 
     if (msg.type === 'move' || msg.type === 'input') {
-      // Allow position updates during waiting phase so players see each other in warmup
-      const dx = msg.x - player.x, dz = msg.z - player.z;
-      if (Math.sqrt(dx*dx+dz*dz) > 3.5) { console.log('[cheat?]', myId, 'teleport'); return; }
-      player.x = msg.x; player.y = msg.y || 0; player.z = msg.z;
+      if (!tryMove(room, player, msg.x, msg.y || 0, msg.z)) return;
       player.yaw = msg.yaw || 0;
       player.crouch = !!(msg.keys && msg.keys.shift);
     }
@@ -217,7 +266,29 @@ wss.on('connection', ws => {
       if (player.dead) return;
       const t = room.players[msg.targetId];
       if (!t || t.dead) return;
-      const dx = t.x-player.x, dz = t.z-player.z;
+
+      // Fire-rate cap: sliding 1s window (tolerates TCP burst delivery, unlike a
+      // min-gap check — queued packets can legitimately arrive 0ms apart)
+      const now = svNow();
+      if (!player.shotTimes) player.shotTimes = [];
+      while (player.shotTimes.length && now - player.shotTimes[0] > 1000) player.shotTimes.shift();
+      if (player.shotTimes.length >= 15) return;
+      player.shotTimes.push(now);
+
+      // Lag compensation: validate range against where the target was at the
+      // shooter's render time (msg.at, server-clock ms), rewinding up to 800ms.
+      let tx = t.x, tz = t.z;
+      const at = Number(msg.at);
+      if (Number.isFinite(at) && t.hist && t.hist.length) {
+        const targetT = now - Math.min(Math.max(now - at, 0), 800);
+        let best = t.hist[t.hist.length - 1];
+        for (let i = t.hist.length - 1; i >= 0; i--) {
+          best = t.hist[i];
+          if (t.hist[i].t <= targetT) break;
+        }
+        tx = best.x; tz = best.z;
+      }
+      const dx = tx-player.x, dz = tz-player.z;
       if (Math.sqrt(dx*dx+dz*dz) > 600) return;
       let dmg = Math.min(Number(msg.damage)||0, 200);
       if (t.armor > 0) { const abs = Math.min(t.armor, dmg*0.5); t.armor -= abs; dmg -= abs; }

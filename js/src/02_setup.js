@@ -126,7 +126,7 @@ scene.fog = new THREE.FogExp2(0x4a9fe8, 0.0018);
     const px2 = Math.cos(heading + Math.PI / 2) * offset + Math.cos(heading) * along;
     const pz2 = Math.sin(heading + Math.PI / 2) * offset + Math.sin(heading) * along;
     _cd.position.set(px2, 330 + seededRand() * 90, pz2);
-    _cd.scale.set(2100 + seededRand() * 400, 13 + seededRand() * 9, 1);  // span the sky, soft-fading ends
+    _cd.scale.set(2100 + seededRand() * 400, 26 + seededRand() * 18, 1);  // span the sky, soft-fading ends
     _cd.rotation.set(-Math.PI / 2, 0, -heading);
     _cd.updateMatrix();
     trailInst.setMatrixAt(i, _cd.matrix);
