@@ -124,67 +124,6 @@ function _makeBarkTex() {
   return t;
 }
 
-function _makeLeafTex() {
-  const c = document.createElement('canvas'); c.width = 256; c.height = 256;
-  const ctx = c.getContext('2d');
-
-  // Helper — traces a bumpy closed ellipse path (cartoon hand-drawn edge)
-  function _bumpyEllipsePath(cx, cy, rx, ry, rot) {
-    const steps = 72;
-    const f1 = 4 + Math.floor(Math.random() * 5);   // low-freq bumps
-    const f2 = 9 + Math.floor(Math.random() * 6);   // high-freq bumps
-    const amt = 0.06 + Math.random() * 0.07;
-    const phase = Math.random() * 6.28;
-    ctx.beginPath();
-    for (let s = 0; s <= steps; s++) {
-      const t = (s / steps) * 6.28;
-      const bump = 1 + Math.sin(t * f1 + phase) * amt + Math.sin(t * f2 + phase * 1.7) * amt * 0.45;
-      const bx = Math.cos(t) * rx * bump, by = Math.sin(t) * ry * bump;
-      const px = cx + bx * Math.cos(rot) - by * Math.sin(rot);
-      const py = cy + bx * Math.sin(rot) + by * Math.cos(rot);
-      s === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-  }
-
-  // Bright base green
-  ctx.fillStyle = '#52a822'; ctx.fillRect(0, 0, 256, 256);
-
-  // Medium shadow patches — flat dark green fill + bumpy cartoon outline
-  for (let i = 0; i < 16; i++) {
-    const lx = Math.random() * 256, ly = Math.random() * 256;
-    const lr = 10 + Math.random() * 20;
-    const rx = lr * (0.8 + Math.random() * 0.5), ry = lr * (0.8 + Math.random() * 0.5);
-    const rot = Math.random() * 3.14;
-    _bumpyEllipsePath(lx, ly, rx, ry, rot);
-    ctx.fillStyle = `rgba(22,72,8,${0.18 + Math.random() * 0.14})`; ctx.fill();
-    ctx.strokeStyle = 'rgba(18,58,5,0.75)'; ctx.lineWidth = 1.1; ctx.stroke();
-  }
-
-  // Smaller accent shadow blobs — with outlines
-  for (let i = 0; i < 22; i++) {
-    const lx = Math.random() * 256, ly = Math.random() * 256;
-    const lr = 5 + Math.random() * 11;
-    const rot = Math.random() * 3.14;
-    _bumpyEllipsePath(lx, ly, lr, lr * (0.75 + Math.random() * 0.5), rot);
-    ctx.fillStyle = `rgba(18,58,6,${0.13 + Math.random() * 0.12})`; ctx.fill();
-    ctx.strokeStyle = 'rgba(18,55,5,0.65)'; ctx.lineWidth = 0.85; ctx.stroke();
-  }
-
-  // Bright highlight patches — no outline, just flat colour
-  for (let i = 0; i < 8; i++) {
-    const lx = Math.random() * 256, ly = Math.random() * 256;
-    const lr = 12 + Math.random() * 22;
-    ctx.fillStyle = `rgba(100,210,38,${0.14 + Math.random() * 0.12})`;
-    ctx.beginPath(); ctx.ellipse(lx, ly, lr, lr * (0.7 + Math.random() * 0.5), Math.random() * 3.14, 0, 6.28); ctx.fill();
-  }
-
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(2, 2);
-  return t;
-}
-
 function _makeArborvitaeTex() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 256;
   const ctx = c.getContext('2d');
@@ -253,7 +192,6 @@ function _makeCrateTex() {
 }
 
 const _barkTex      = _makeBarkTex();
-const _leafTex      = _makeLeafTex();
 const _arborTex     = _makeArborvitaeTex();
 const _crateTex     = _makeCrateTex();
 
@@ -277,7 +215,9 @@ const _crateTex     = _makeCrateTex();
   const _tDummy = new THREE.Object3D();
   const _tCol   = new THREE.Color();
 
-  // ── 4 overlapping spheres per tree — Family Guy-style bumpy round canopy ──
+  // ── 4 overlapping faceted lobes per tree — low-poly polygon-art canopy ──
+  // No texture: flat-shaded facets catch the sun at different angles, and a baked
+  // vertical light gradient (bright crown → shaded underside) does the rest.
   // Bright cartoon greens
   const _oakGreenPalette = [
     [0.38, 0.68, 0.22],  // bright medium green
@@ -288,28 +228,45 @@ const _crateTex     = _makeCrateTex();
     [0.40, 0.66, 0.23],  // neutral bright
   ];
 
-  // Clone leaf texture for each sphere layer with different UV repeat — breaks up visible tiling
-  const _leafTexB = _leafTex.clone(); _leafTexB.repeat.set(1.4, 1.8); _leafTexB.needsUpdate = true;
-  const _leafTexC = _leafTex.clone(); _leafTexC.repeat.set(2.8, 2.3); _leafTexC.needsUpdate = true;
-  const _leafTexD = _leafTex.clone(); _leafTexD.repeat.set(2.0, 1.6); _leafTexD.needsUpdate = true;
-
-  const canopyMatA = new THREE.MeshLambertMaterial({ map: _leafTex });
-  const canopyMatB = new THREE.MeshLambertMaterial({ map: _leafTexB });
-  const canopyMatC = new THREE.MeshLambertMaterial({ map: _leafTexC });
-  const canopyMatD = new THREE.MeshLambertMaterial({ map: _leafTexD });
+  // Jittered icosahedron lobe. Displacement is hashed from vertex position so the
+  // duplicated corners of the non-indexed geometry move together (no face tearing),
+  // and computeVertexNormals on non-indexed geo yields per-face normals = facets.
+  function _facetedLobeGeo(seed) {
+    const g = new THREE.IcosahedronGeometry(1, 1);
+    const p = g.getAttribute('position');
+    const colors = new Float32Array(p.count * 3);
+    const v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      const n = Math.sin(v.x * 12.9898 + v.y * 78.233 + v.z * 37.719 + seed) * 43758.5453;
+      v.multiplyScalar(0.84 + (n - Math.floor(n)) * 0.32);
+      p.setXYZ(i, v.x, v.y, v.z);
+      // Vertical light ramp — multiplies the per-instance green. Kept neutral and
+      // capped near 1 so direct sun doesn't bleach the crowns yellow-white.
+      const t = Math.min(1, Math.max(0, (v.y + 1.16) / 2.32));
+      const br = 0.56 + t * 0.28;  // top capped at 0.84 — up-facing facets in full sun blow out otherwise
+      colors[i*3] = br * 0.96; colors[i*3+1] = br; colors[i*3+2] = br * 0.94;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    g.computeVertexNormals();
+    return g;
+  }
+  const _lobeMat = new THREE.MeshLambertMaterial({ vertexColors: true });
 
   const oakTrunkInst   = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.20, 0.62, 1, 10), new THREE.MeshLambertMaterial({map:_barkTex}), oakPlaces.length);
-  const oakCanopyInst  = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), canopyMatA, oakPlaces.length);
-  const oakCanopy2Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), canopyMatB, oakPlaces.length);
-  const oakCanopy3Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  9, 7), canopyMatC, oakPlaces.length);
-  const oakCanopy4Inst = new THREE.InstancedMesh(new THREE.SphereGeometry(1,  9, 7), canopyMatD, oakPlaces.length);
+  const oakCanopyInst  = new THREE.InstancedMesh(_facetedLobeGeo(1.7), _lobeMat, oakPlaces.length);
+  const oakCanopy2Inst = new THREE.InstancedMesh(_facetedLobeGeo(4.2), _lobeMat, oakPlaces.length);
+  const oakCanopy3Inst = new THREE.InstancedMesh(_facetedLobeGeo(7.9), _lobeMat, oakPlaces.length);
+  const oakCanopy4Inst = new THREE.InstancedMesh(_facetedLobeGeo(11.3), _lobeMat, oakPlaces.length);
   oakTrunkInst.castShadow = true;
   oakCanopyInst.castShadow = true; oakCanopy2Inst.castShadow = false; oakCanopy3Inst.castShadow = false; oakCanopy4Inst.castShadow = false;
 
   oakPlaces.forEach(({ x, z }, i) => {
     const h = getTerrainHeight(x, z);
-    const canopyR = 3.5 + seededRand() * 5.5;
-    const trunkH = Math.max(2.5 + seededRand() * 7.0, canopyR + 1.0);
+    const canopyR = 3.5 + seededRand() * 3.5;
+    // Big canopies get proportionally taller trunks so large oaks don't squat
+    // like boulders (also keeps sightlines clearer at head height).
+    const trunkH = Math.max(2.5 + seededRand() * 7.0, canopyR * 1.35 + 1.0);
     const trunkR = 0.36 + seededRand() * 0.32;
     // Per-tree base angle for lobe arrangement
     const offAngle = seededRand() * 6.28;
@@ -364,13 +321,16 @@ const _crateTex     = _makeCrateTex();
     targets.push(canopyHit); collidables.push(canopyHit);
   });
 
-  // ── Palm frond geometry: 7 outer fronds + 3 small upright top fronds ──
+  // ── Palm frond geometry: 8 outer fronds + 3 small upright top fronds ──
+  // Profile sections [reach, height, half-width] — longer arch, tip droops below the
+  // crown, and alternating wide/narrow half-widths give a serrated leaf silhouette.
+  const _frondProfile = [[0,0,0.045],[0.28,0.40,0.22],[0.52,0.50,0.13],[0.78,0.38,0.20],[1.02,0.08,0.07],[1.20,-0.28,0.02]];
   const palmFrondGeo = (() => {
     const pos = [], col = [], idx = [];
-    // 7 main outer fronds — arch out and droop
-    const frondS = [[0,0,0.04],[0.35,0.45,0.20],[0.75,0.40,0.12],[1.00,-0.05,0.03]];
-    for (let i = 0; i < 7; i++) {
-      const ba=i/7*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
+    // 8 main outer fronds — arch out and droop
+    const frondS = _frondProfile;
+    for (let i = 0; i < 8; i++) {
+      const ba=i/8*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
       const base=pos.length/3;
       frondS.forEach(([d,h,hw],si) => {
         const t=si/(frondS.length-1);
@@ -404,9 +364,9 @@ const _crateTex     = _makeCrateTex();
     const pos = [], col = [], idx = [];
     const vw = 0.010;
     const dark = [0.03, 0.18, 0.02];
-    const frondS = [[0,0,0.04],[0.35,0.45,0.20],[0.75,0.40,0.12],[1.00,-0.05,0.03]];
-    for (let i = 0; i < 7; i++) {
-      const ba=i/7*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
+    const frondS = _frondProfile;
+    for (let i = 0; i < 8; i++) {
+      const ba=i/8*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
       const base=pos.length/3;
       frondS.forEach(([d,h]) => {
         pos.push(sa*d-pa*vw,h,ca*d+pca*vw, sa*d+pa*vw,h,ca*d-pca*vw);
