@@ -21,6 +21,7 @@ const phys = {
   vel:      new THREE.Vector3(),
   grounded: false,
 };
+if (window.DBG) window.DBG.phys = phys;
 
 // Call once after buildCollisionCache() to seed phys from camera
 function physInit() {

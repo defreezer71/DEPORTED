@@ -192,6 +192,9 @@ const targets = [];
 const lootItems = [];
 const bots = [];
 
+// Debug hooks — game.js is an ES module, so expose key objects for console tuning.
+window.DBG = { state, scene, camera, bots, THREE, renderer };
+
 // ═══════════════════════════════════════════════════════════
 // LIGHTING
 // ═══════════════════════════════════════════════════════════
