@@ -1085,7 +1085,8 @@ if (false) {
       const geo = new THREE.SphereGeometry(r, 6, 5);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(x, y, z);
-      mesh.castShadow = true;
+      // No castShadow — 5 meshes per bush in the shadow pass for a ground-level
+      // blob shadow that's invisible under the bush itself.
       group.add(mesh);
     });
 

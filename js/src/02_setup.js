@@ -157,11 +157,15 @@ weaponCamera.position.set(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Cap at 1.5: retina (dpr 2) quadruples the fill cost vs dpr 1 for sharpness
+// this art style doesn't need — 1.5 is the sweet spot on Mac laptops.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setClearColor(0x1a4d8a, 1);
 renderer.shadowMap.enabled = true;
 renderer.autoClear = false;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// PCF (not PCFSoft): soft shadows multiply the per-pixel tap count across the
+// whole frame — too costly at this resolution for a barely visible difference.
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.domElement.style.position = 'fixed';
 renderer.domElement.style.inset = '0';
 renderer.domElement.style.zIndex = '0';

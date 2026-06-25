@@ -80,6 +80,9 @@ function shoot() {
   state.ammo[state.currentWeapon]--;
   state.shotsFired++;
   state.canFire = false;
+  // Hold the network shooting flag up briefly so remote clients see a firing
+  // stance across click gaps (rapid fire keeps refreshing it).
+  state.shootingUntil = performance.now() + 450;
 
   const isM4 = state.currentWeapon === 'm4';
 

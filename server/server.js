@@ -91,7 +91,7 @@ function packWorldSnapshot(room) {
     const id = (p.id || '').slice(0, 6);
     for (let i = 0; i < 6; i++) buf[off + i] = i < id.length ? id.charCodeAt(i) : 0;
     off += 6;
-    buf[off++] = (p.dead ? 1 : 0) | (p.crouch ? 2 : 0);
+    buf[off++] = (p.dead ? 1 : 0) | (p.crouch ? 2 : 0) | (p.pistol ? 4 : 0) | (p.shooting ? 8 : 0);
     buf[off++] = Math.max(0, Math.min(255, p.hp | 0));
     buf[off++] = Math.max(0, Math.min(255, (p.armor || 0) | 0));
     const yawNorm = ((p.yaw || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
@@ -196,6 +196,8 @@ wss.on('connection', ws => {
       player.yaw = buf.readFloatLE(15);
       const keys = buf[23];
       player.crouch = !!(keys & 16);
+      player.pistol = !!(keys & 32);
+      player.shooting = !!(keys & 64);
       return;
     }
 
@@ -224,7 +226,7 @@ wss.on('connection', ws => {
       room.players[myId] = {
         id: myId, name: msg.name || ('P_'+myId.slice(-4)), ws,
         x: -105+Math.cos(a)*r, y: 0, z: 105+Math.sin(a)*r,
-        hp: 100, armor: 0, dead: false, lastSeen: Date.now()
+        hp: 100, armor: 0, dead: false, pistol: false, shooting: false, lastSeen: Date.now()
       };
       // Start 3-min fill timer when first player joins a waiting room
       if (room.phase === 'waiting' && !room.fillTimer && Object.keys(room.players).length === 1) {

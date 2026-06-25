@@ -121,6 +121,7 @@ const fwd = new THREE.Vector3();
 const rgt = new THREE.Vector3();
 let minimapTimer = 0;
 let perfFrames = 0, perfLastTime = 0;
+let _mainTris = 0, _mainCalls = 0; // main-scene renderer.info, snapshotted right after the world render
 let headBobPhase = 0;
 let landingBobY = 0, landingBobVel = 0;
 let wasGrounded = true;
@@ -935,8 +936,14 @@ function update() {
 
     // Animated character puppet (same rig/anims/gun fit as bots), driven by the
     // interpolated network state. The block mesh stays as hitbox + load fallback.
+    const rpWeapon = rp.pistol ? 'pistol' : 'rifle';
+    if (rp.puppet && rp.puppet.weapon !== rpWeapon && !rp.dead) {
+      // Weapon switched — rebuild the puppet with the matching anim set + gun mesh
+      removeCharacterPuppet(rp.puppet);
+      rp.puppet = null;
+    }
     if (!rp.puppet && typeof createCharacterPuppet === 'function') {
-      rp.puppet = createCharacterPuppet();
+      rp.puppet = createCharacterPuppet(rpWeapon);
       if (rp.puppet && rp.mesh.userData.blockVisual) rp.mesh.userData.blockVisual.visible = false;
     }
     if (rp.puppet) {
@@ -966,8 +973,12 @@ function update() {
       const yd = Math.atan2(Math.sin(rawYaw - pu._plantYaw), Math.cos(rawYaw - pu._plantYaw));
       if (moving || Math.abs(yd) > 0.7) pu._plantYaw = rawYaw;
       pu.yaw = pu._plantYaw; // updateCharacterVisual smooths the actual turn
+      // Shooting shows the firing stance, but never overrides crouch — the
+      // crouch hitbox is lower, and a standing visual over it would desync
+      // what you see from what you can hit.
       const anim = !pu.alive ? 'death'
         : rp.crouching ? (moving ? 'crouchWalk' : 'crouchIdle')
+        : rp.shooting ? 'fire'
         : moving ? 'walk' : 'rifleIdle';
       _setBotAnim(pu, anim);
       updateCharacterVisual(pu, renderDt);
@@ -1349,17 +1360,16 @@ function update() {
     if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); impactParticles.splice(i, 1); }
   }
 
-  // Performance stats
+  // Performance stats — uses the post-main-render snapshot (_mainTris/_mainCalls):
+  // renderer.info resets per render() call, so reading it here would show the
+  // weapon overlay's numbers (~1k tris), not the actual scene workload.
   perfFrames++;
   if (clock.elapsedTime - perfLastTime >= 1) {
     const fps = perfFrames;
     perfFrames = 0;
     perfLastTime = clock.elapsedTime;
-    const info = renderer.info;
-    const tris = info.render.triangles;
-    const calls = info.render.calls;
     document.getElementById('perf-stats').textContent =
-      `FPS: ${fps} | Tris: ${(tris/1000).toFixed(1)}k | Calls: ${calls}`;
+      `FPS: ${fps} | Tris: ${(_mainTris/1000).toFixed(1)}k | Calls: ${_mainCalls}`;
   }
 
   // Apply head bob (position) + landing pitch kick (rotation) for this frame only
@@ -1370,6 +1380,8 @@ function update() {
   if (window.skyDome) window.skyDome.position.copy(camera.position);
   renderer.clear();
   renderer.render(scene, camera);
+  _mainTris = renderer.info.render.triangles;
+  _mainCalls = renderer.info.render.calls;
   if (!state.killCamActive && !state.playerDead || (state.killCamActive && state.killCamMode === 'pov')) {
     renderer.clearDepth();
     renderer.render(weaponScene, weaponCamera);
@@ -1802,6 +1814,8 @@ function updateRemotePlayers(playerList, serverT) {
     rp.hp = p.hp;
     rp.dead = p.dead;
     rp.crouching = p.crouch || false;
+    rp.pistol = p.pistol || false;
+    rp.shooting = p.shooting || false;
     rp.mesh.visible = !p.dead;
 
     rp.snapshots.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
@@ -1958,7 +1972,7 @@ function unpackWorld(ab) {
     const x     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
     const y     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
     const z     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
-    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2) });
+    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2), pistol: !!(flags & 4), shooting: !!(flags & 8) });
   }
   return players;
 }
@@ -2166,7 +2180,8 @@ function sendInputToServer() {
     (state.moveLeft    ? 4  : 0) |
     (state.moveRight   ? 8  : 0) |
     (state.crouching   ? 16 : 0) |
-    (state.shooting    ? 64 : 0);
+    (state.currentWeapon === 'pistol' ? 32 : 0) |
+    (performance.now() < (state.shootingUntil || 0) ? 64 : 0);
   _inputDV.setUint8(23, keys);
   state.ws.send(_inputBuf);
 }

@@ -83,6 +83,8 @@ const state = {
   reserveAmmo: { m4: 0, pistol: 0 },
   hp: 100, armor: 0,
   canFire: true, reloading: false, reloadPhase: null, switching: false, switchPhase: null,
+  shootingUntil: 0,   // performance.now() deadline — keeps the network "shooting" flag up briefly per shot
+
   nearbyLoot: null,
   kills: 0,
   // Match state

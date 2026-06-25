@@ -83,6 +83,8 @@ const state = {
   reserveAmmo: { m4: 0, pistol: 0 },
   hp: 100, armor: 0,
   canFire: true, reloading: false, reloadPhase: null, switching: false, switchPhase: null,
+  shootingUntil: 0,   // performance.now() deadline — keeps the network "shooting" flag up briefly per shot
+
   nearbyLoot: null,
   kills: 0,
   // Match state
@@ -277,11 +279,15 @@ weaponCamera.position.set(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// Cap at 1.5: retina (dpr 2) quadruples the fill cost vs dpr 1 for sharpness
+// this art style doesn't need — 1.5 is the sweet spot on Mac laptops.
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setClearColor(0x1a4d8a, 1);
 renderer.shadowMap.enabled = true;
 renderer.autoClear = false;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// PCF (not PCFSoft): soft shadows multiply the per-pixel tap count across the
+// whole frame — too costly at this resolution for a barely visible difference.
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.domElement.style.position = 'fixed';
 renderer.domElement.style.inset = '0';
 renderer.domElement.style.zIndex = '0';
@@ -2430,7 +2436,8 @@ if (false) {
       const geo = new THREE.SphereGeometry(r, 6, 5);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(x, y, z);
-      mesh.castShadow = true;
+      // No castShadow — 5 meshes per bush in the shadow pass for a ground-level
+      // blob shadow that's invisible under the bush itself.
       group.add(mesh);
     });
 
@@ -2497,7 +2504,7 @@ if (false) {
 const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India','Juliet',
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
-const BOT_COUNT = 20;
+const BOT_COUNT = 10;
 
 // ── GLTF character system ──
 // Each animation is a separate GLB (mesh + animation from same export = matching bind pose).
@@ -2609,7 +2616,9 @@ function _makeBotGun() {
   const add = (geo, mat, px, py, pz, rx=0, ry=0, rz=0) => {
     const m = new THREE.Mesh(geo, mat);
     m.position.set(px,py,pz); if(rx||ry||rz) m.rotation.set(rx,ry,rz);
-    m.castShadow = true; g.add(m);
+    // No castShadow: ~20 parts × 20 bots = ~400 shadow-pass draw calls for
+    // shadows nobody can see — the body rig's shadow covers the silhouette.
+    g.add(m);
   };
   // Barrel
   add(Cy(0.015,0.017,0.330,8), drk,   0, 0.000,-0.465, PI2,0,0);
@@ -2623,11 +2632,10 @@ function _makeBotGun() {
   add(B(0.060,0.008,0.205), mtl,    0, 0.026,-0.215);
   // Lower receiver
   add(B(0.056,0.050,0.205), drk,    0,-0.027,-0.215);
-  // Curved magazine — segments overlap (height > spacing) so the tilt steps can't
-  // open visible gaps; uniform color so the bottom doesn't read as a separate block
-  add(B(0.042,0.078,0.072), blk,    0,-0.106,-0.260, 0.09,0,0);
-  add(B(0.040,0.078,0.070), drk,    0,-0.168,-0.268, 0.19,0,0);
-  add(B(0.040,0.078,0.070), blk,    0,-0.226,-0.258, 0.27,0,0);
+  // Magazine — ONE tilted box. A stepped multi-box "curve" reads as a separate
+  // block glued onto the clip at bot-viewing distances.
+  add(B(0.042,0.195,0.072), blk,    0,-0.150,-0.262, 0.18,0,0);
+  add(B(0.044,0.014,0.074), mtl,    0,-0.250,-0.280, 0.18,0,0);  // base pad
   // Pistol grip
   add(B(0.038,0.094,0.046), wood,   0,-0.126,-0.130,-0.30,0,0);
   // Stock arms — run flush from the receiver back (rear edge z=-0.112) to the
@@ -2651,7 +2659,7 @@ function _makeBotPistol() {
   const add = (geo, mat, px, py, pz, rx=0, ry=0, rz=0) => {
     const m = new THREE.Mesh(geo, mat);
     m.position.set(px,py,pz); if(rx||ry||rz) m.rotation.set(rx,ry,rz);
-    m.castShadow = true; g.add(m);
+    g.add(m); // no castShadow — same reasoning as _makeBotGun
   };
   // Slide (top), barrel along -z
   add(B(0.026,0.030,0.200), mtl,  0, 0.020, -0.030);
@@ -2774,9 +2782,18 @@ function _setBotAnim(bot, animName) {
   if (!bot.animScenes) return;
   // Always allow re-triggering fire (rapid shots restart the clip)
   if (bot.activeAnim === animName && animName !== 'fire') return;
-  for (const data of Object.values(bot.animScenes)) data.scene.visible = false;
+  // DETACH inactive rigs from the scene graph — three r128 recurses into
+  // invisible subtrees in updateMatrixWorld, so merely hiding them leaves
+  // ~65 bones per rig × 10 rigs per character burning matrix updates every
+  // frame. Re-adding is cheap (no GPU re-upload; renderer caches survive).
   const target = bot.animScenes[animName];
+  for (const data of Object.values(bot.animScenes)) {
+    if (data === target) continue;
+    data.scene.visible = false;
+    if (data.scene.parent) scene.remove(data.scene);
+  }
   if (target) {
+    if (!target.scene.parent) scene.add(target.scene);
     target.scene.visible = true;
     if ((animName === 'death' || animName === 'fire' || animName === 'jump' || animName === 'reload') && target.action) target.action.reset().play();
     bot.mesh = target.scene;
@@ -2795,9 +2812,8 @@ function _attachBotMesh(bot, index) {
 
   const gltfMap = bot.weapon === 'pistol' ? _animGltfsPistol : _animGltfs;
   for (const [animName, gltf] of Object.entries(gltfMap)) {
-    const data = _cloneForAnim(animName, gltf, index, scale);
-    scene.add(data.scene);
-    bot.animScenes[animName] = data;
+    // Not added to the scene here — _setBotAnim attaches only the active rig
+    bot.animScenes[animName] = _cloneForAnim(animName, gltf, index, scale);
   }
 
   bot.gunMesh = bot.weapon === 'pistol' ? _makeBotPistol() : _makeBotGun();
@@ -2895,6 +2911,11 @@ function createBot(x, z, name, index) {
 
 let _botShootUnlockedAt = Infinity; // set when match goes live
 
+// Bot AI scratch — reused each frame (a fresh Vector3/Raycaster per engaging
+// bot per frame was measurable GC churn with 20 bots)
+const _aiEye = new THREE.Vector3(), _aiDir = new THREE.Vector3();
+const _aiRay = new THREE.Raycaster();
+
 // Gun sync helpers — reused each frame to avoid GC
 const _gunPos = new THREE.Vector3();
 const _gunQuat = new THREE.Quaternion();
@@ -2917,14 +2938,24 @@ window.GUN_FIT = window.GUN_FIT || {
   roll:  0,
   scaleMin: 0.9, scaleMax: 1.15,
 };
-// 1911 pistol: one real contact (the right palm). Orientation is computed per
-// frame from the right FOREARM direction (elbow→wrist) — the wrist bone itself
-// rotates heavily through the pistol clips, so anything glued to it mis-aims.
+// 1911 pistol: one real contact (the right palm). The gun is GLUED to the right
+// hand bone with one fixed rotation (`rot`, hand-local Euler XYZ) — the pistol
+// clips animate the hand as if it's holding the gun, so a single calibrated
+// constant is correct in every pose. (The old forearm heuristic pointed the
+// barrel along elbow→wrist and went backwards whenever the wrist cocked.)
 window.PISTOL_FIT = window.PISTOL_FIT || {
-  grip:  [0, -0.060,  0.040],   // upper rear of the pistol grip, web of the right hand
-  rPalm: [0, 0.06, 0.01],
+  grip:  [0, -0.060, -0.020],   // contact on the gun seated at the palm — z tuned so the slide rear sits over the fist, not past the fingertips
+  rPalm: [0, 0.02, 0.02],       // shorter than the rifle's — seats the slide rear into the thumb web
+  mid:   [0, 0, -0.16],         // two-hand poses: seat offset in gun space (x right, y up, z backward) from the RIGHT-HAND anchor — z pushes the grip forward so it lands in the palm with the trigger under the index finger. (grip pin stays shared with the walk wrist-glue, so tune the clasp seat here, not via grip)
+  rot:   [1.857, -0.195, -1.785], // hand→gun rotation: barrel along the forearm line at the PistolAim pose (probe-calibrated)
   roll:  0,                     // extra roll about the barrel (radians)
   scaleMin: 1.0, scaleMax: 1.0,
+  // Pistol clips with an extended RIGHT (aiming) arm → seat the gun in the right
+  // palm with the barrel along the right-forearm aim line; the left hand only
+  // supports. PistolIdle (standing) is one of these. Not in this list → bent-arm
+  // wrist-glue via `rot`. Live-tunable: push/splice anim names in the console
+  // (e.g. PISTOL_FIT.twoHand.push('walk')) to test the moving poses.
+  twoHand: ['aimIdle', 'fire', 'rifleIdle', 'walk', 'walkBack'],
 };
 // Toggle the two-hand fit (default on). Set window.GUN_AUTOFIT = false to use GUN_OFF instead.
 if (window.GUN_AUTOFIT === undefined) window.GUN_AUTOFIT = true;
@@ -2956,6 +2987,7 @@ function updateCharacterVisual(bot, dt) {
   bot._smoothYaw += yawDiff * Math.min(1, dt * 8);
 
   for (const [animName, data] of Object.entries(bot.animScenes)) {
+    if (!data.scene.parent) continue; // detached by _setBotAnim — skip entirely
     const fo = bot.footOffset ?? 0;
     if (!bot.alive) {
       data.scene.position.set(bot.pos.x, bot.deadY + fo, bot.pos.z);
@@ -3026,7 +3058,6 @@ function updateCharacterVisual(bot, dt) {
       // only. Pistols never use the two-hand fit: both hands clasp the same point,
       // so the right→left palm axis is degenerate sideways noise.
       const anim = bot.activeAnim;
-      const faBone = activeData?.rightForeArmBone;
       const gripped = window.GUN_AUTOFIT && lhBone && anim !== 'reload' && anim !== 'death'
         && bot.weapon !== 'pistol';
 
@@ -3077,25 +3108,51 @@ function updateCharacterVisual(bot, dt) {
         if (F.roll) _qFit.multiply(_rollQ.setFromAxisAngle(_axisL, F.roll));
         // Remember orientation relative to the right wrist, for reload/death reuse.
         bot._gunGripRel.copy(_qR).invert().multiply(_qFit);
-      } else if (faBone && anim !== 'reload' && anim !== 'death') {
-        // Barrel along the right FOREARM (elbow→wrist), sights up. The forearm
-        // line is stable in every pose — the wrist bone itself rotates heavily
-        // through the pistol clips, so anything glued to it mis-aims. Used always
-        // for pistols, and as the rifle's fallback on degenerate palm-line frames.
-        faBone.getWorldPosition(_faP);
-        _wFwd.copy(_hR).sub(_faP);
-        if (_wFwd.lengthSq() < 1e-8) _wFwd.set(Math.sin(bot._smoothYaw), 0, Math.cos(bot._smoothYaw));
-        _wFwd.normalize();
-        _wx.crossVectors(_wUp, _wFwd);
-        if (_wx.lengthSq() < 1e-8) _wx.set(1, 0, 0); else _wx.normalize();
-        _wy.crossVectors(_wFwd, _wx).normalize();
-        _mWorld.makeBasis(_wx, _wy, _axisL.copy(_wFwd).negate());
-        _qFit.setFromRotationMatrix(_mWorld);
+      } else if (bot.weapon === 'pistol' && anim !== 'reload' && anim !== 'death') {
+        const faBone = activeData.rightForeArmBone;
+        const _twoHand = F.twoHand || ['aimIdle', 'fire'];
+        if (faBone && lhBone && _twoHand.includes(anim)) {
+          // Extended-arm two-handed poses: the gun lives in the RIGHT PALM and
+          // the straighter right arm is the aiming arm; the left hand only
+          // supports nearby (we don't seat to it). Anchor on the right hand +
+          // right-forearm aim line — NOT the clasp midpoint, which floats the
+          // gun out between the two hands. Basis is rebuilt right-handed from
+          // cross products (never a negated makeBasis column → no det -1 mirror).
+          faBone.getWorldPosition(_faP);
+          _wFwd.copy(_hR).sub(_faP);   // right forearm → hand
+          // Bots aim by yaw (horizontal), but the PistolAim/Idle clips angle the
+          // forearm UP, tilting the gun skyward out of the palm. Flatten the aim
+          // toward horizontal: barrelLevel 0 = fully level, 1 = follow the arm.
+          _wFwd.y *= (F.barrelLevel ?? 0);
+          if (_wFwd.lengthSq() < 1e-8) _wFwd.set(Math.sin(bot._smoothYaw), 0, Math.cos(bot._smoothYaw));
+          _wFwd.normalize();
+          _axisL.copy(_wFwd).negate(); // basis z (right-handed; gun barrel is -z)
+          _wx.crossVectors(_wUp, _axisL);
+          if (_wx.lengthSq() < 1e-8) _wx.set(1, 0, 0); else _wx.normalize();
+          _wy.crossVectors(_axisL, _wx).normalize();
+          _mWorld.makeBasis(_wx, _wy, _axisL);
+          _qFit.setFromRotationMatrix(_mWorld);
+          // Seat in the right palm: start at the right hand, then a tunable
+          // offset in gun space (x right, y up, z backward) to settle the grip.
+          _tgtR.copy(_hR);
+          const M = F.mid || [0, 0, 0];
+          _tgtR.addScaledVector(_wx, M[0]).addScaledVector(_wy, M[1]).addScaledVector(_axisL, M[2]);
+        } else {
+          // Bent-arm poses (idle/run/kneel/jump): glue to the right hand with the
+          // calibrated hand→gun rotation — the hand is animated holding the gun,
+          // so the gun tracks it naturally.
+          const r = F.rot || [0, 0, 0];
+          _qFit.copy(_qR).multiply(_gunRotQ.setFromEuler(_gunRotE.set(r[0], r[1], r[2])));
+        }
         if (F.roll) _qFit.multiply(_rollQ.setFromAxisAngle(_axisL.set(0, 0, 1), F.roll));
-        if (bot.weapon === 'pistol') bot._gunFitScale = 1;
+        bot._gunFitScale = 1;
         bot._gunGripRel.copy(_qR).invert().multiply(_qFit);
       } else {
-        // Reuse the last known grip orientation relative to the wrist (or a sane default).
+        // Rifle on degenerate palm-line frames (kneel/idle sway) and reload/death:
+        // glue the gun to the right hand via the last good two-hand orientation.
+        // The hand keeps holding the rifle through these poses, so following the
+        // wrist looks right — aiming down the forearm here pointed the rifle
+        // backwards whenever the forearm swung sideways (kneeling).
         if (bot._gunFitScale) {
           _qFit.copy(_qR).multiply(bot._gunGripRel);
         } else {
@@ -3104,10 +3161,16 @@ function updateCharacterVisual(bot, dt) {
         }
       }
 
-      // Smooth the orientation so switching between fit modes (two-hand ↔ forearm
-      // fallback mid-run) can't pop the gun between frames.
-      if (!bot._qGunSm) bot._qGunSm = new THREE.Quaternion().copy(_qFit);
-      else bot._qGunSm.slerp(_qFit, Math.min(1, dt * 14));
+      // Smooth the orientation so anim/fit-mode switches (scene swaps pop the
+      // pose) can't pop the gun between frames — but track fast within a pose,
+      // or the gun visibly lags the arms while the bot whips around to a target.
+      if (bot._fitAnim !== anim) { bot._fitAnim = anim; bot._fitBlend = 0.15; }
+      if (!bot._qGunSm) { bot._qGunSm = new THREE.Quaternion().copy(_qFit); bot._fitBlend = 0; }
+      else {
+        const smRate = bot._fitBlend > 0 ? 14 : 40;
+        bot._fitBlend -= dt;
+        bot._qGunSm.slerp(_qFit, Math.min(1, dt * smRate));
+      }
 
       const scale = bot._gunFitScale || 1;
       bot.gunMesh.scale.setScalar(scale);
@@ -3124,20 +3187,20 @@ function updateCharacterVisual(bot, dt) {
 
 // ── Remote-player puppets — the bot character rig driven by network data ──
 let _puppetSeq = 100; // index offset past bot indices (only used for per-clone variation)
-function createCharacterPuppet() {
+function createCharacterPuppet(weapon = 'rifle') {
   if (!characterReady) return null;
   const { scale, footOffset } = _animGltfs['aimIdle'] ? _measureScale(_animGltfs['aimIdle']) : { scale: 0.0105, footOffset: 0 };
   const ent = {
-    pos: new THREE.Vector3(), yaw: 0, alive: true, deadY: 0, weapon: 'rifle',
+    pos: new THREE.Vector3(), yaw: 0, alive: true, deadY: 0, weapon,
     animScenes: {}, activeAnim: null, footOffset, mesh: null,
   };
-  for (const [animName, gltf] of Object.entries(_animGltfs)) {
-    const data = _cloneForAnim(animName, gltf, _puppetSeq, scale);
-    scene.add(data.scene);
-    ent.animScenes[animName] = data;
+  const gltfMap = weapon === 'pistol' ? _animGltfsPistol : _animGltfs;
+  for (const [animName, gltf] of Object.entries(gltfMap)) {
+    // Not added to the scene here — _setBotAnim attaches only the active rig
+    ent.animScenes[animName] = _cloneForAnim(animName, gltf, _puppetSeq, scale);
   }
   _puppetSeq++;
-  ent.gunMesh = _makeBotGun();
+  ent.gunMesh = weapon === 'pistol' ? _makeBotPistol() : _makeBotGun();
   ent.gunMesh.visible = false;
   scene.add(ent.gunMesh);
   return ent;
@@ -3248,16 +3311,17 @@ function updateBots(dt) {
     const engaging = bot.hasAmmo && distToPlayer < bot.aggroRange && !state.playerDead && Date.now() >= _botShootUnlockedAt;
     if (engaging) {
       bot.yaw = Math.atan2(dx, dz);
-      const botEye = new THREE.Vector3(bx, bot.pos.y + 1.7, bz);
-      const toPlayer = new THREE.Vector3(dx, camera.position.y - botEye.y, dz).normalize();
-      const losRay = new THREE.Raycaster(botEye, toPlayer, 0, distToPlayer);
-      const losHits = losRay.intersectObjects(collidables, false);
+      _aiEye.set(bx, bot.pos.y + 1.7, bz);
+      _aiDir.set(dx, camera.position.y - _aiEye.y, dz).normalize();
+      _aiRay.set(_aiEye, _aiDir);
+      _aiRay.far = distToPlayer;
+      const losHits = _aiRay.intersectObjects(collidables, false);
       let volcanoBlocking = false;
       const stepSize = distToPlayer / 20;
       for (let s = 1; s < 20; s++) {
         const t = s * stepSize;
-        const volH = getVolcanoHeight(botEye.x + toPlayer.x * t, botEye.z + toPlayer.z * t);
-        if (volH > 0.8 && botEye.y + toPlayer.y * t < volH - 0.1) { volcanoBlocking = true; break; }
+        const volH = getVolcanoHeight(_aiEye.x + _aiDir.x * t, _aiEye.z + _aiDir.z * t);
+        if (volH > 0.8 && _aiEye.y + _aiDir.y * t < volH - 0.1) { volcanoBlocking = true; break; }
       }
       bot.shootCooldown -= dt;
       if (bot.shootCooldown <= 0 && losHits.length === 0 && !volcanoBlocking) {
@@ -3435,6 +3499,7 @@ function updateBots(dt) {
     else if (!isEngaging && !isMoving) targetAnim = 'rifleIdle';
     else                               targetAnim = 'walk';
 
+    if (bot._dbgAnim) targetAnim = bot._dbgAnim; // headless test rig: force a pose
     _setBotAnim(bot, targetAnim);
     updateCharacterVisual(bot, dt);
 
@@ -3641,13 +3706,16 @@ depotCorners.forEach(({ x, z }) => {
   // ── Column helper: base disk + shaft + 3 ring bands + echinus neck + capital ──
   const groove = new THREE.MeshLambertMaterial({ color: 0x9E9A94 }); // darker — groove shadow
   const addCol = (lx, lz) => {
-    addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stone, lx, 0.11, lz);
+    // Only the shaft casts a shadow. The base/rings/neck hug the shaft, whose
+    // shadow already covers them — but each one is a draw call in the shadow
+    // pass, and 16 columns × 3 temples × 5 trim parts was ~240 calls/frame.
+    addM(new THREE.CylinderGeometry(colR * 1.28, colR * 1.28, 0.22, 12), stone, lx, 0.11, lz).castShadow = false;
     addM(new THREE.CylinderGeometry(colR, colR * 1.06, colH, 12), stone, lx, colH / 2, lz);
     // Three ring bands at 20%, 48%, 76% of shaft height
     for (const frac of [0.20, 0.48, 0.76])
-      addM(new THREE.CylinderGeometry(colR + 0.055, colR + 0.055, 0.09, 12), groove, lx, colH * frac, lz);
+      addM(new THREE.CylinderGeometry(colR + 0.055, colR + 0.055, 0.09, 12), groove, lx, colH * frac, lz).castShadow = false;
     // Echinus — flared neck from shaft top up to capital
-    addM(new THREE.CylinderGeometry(colR * 1.38, colR * 1.02, 0.26, 12), stone, lx, colH + 0.13, lz);
+    addM(new THREE.CylinderGeometry(colR * 1.38, colR * 1.02, 0.26, 12), stone, lx, colH + 0.13, lz).castShadow = false;
   };
 
   // Front face (+Z = bd/2) — 5 columns, player walks between them (gap ≈ 2.65 units)
@@ -5205,6 +5273,9 @@ function shoot() {
   state.ammo[state.currentWeapon]--;
   state.shotsFired++;
   state.canFire = false;
+  // Hold the network shooting flag up briefly so remote clients see a firing
+  // stance across click gaps (rapid fire keeps refreshing it).
+  state.shootingUntil = performance.now() + 450;
 
   const isM4 = state.currentWeapon === 'm4';
 
@@ -5650,6 +5721,7 @@ const fwd = new THREE.Vector3();
 const rgt = new THREE.Vector3();
 let minimapTimer = 0;
 let perfFrames = 0, perfLastTime = 0;
+let _mainTris = 0, _mainCalls = 0; // main-scene renderer.info, snapshotted right after the world render
 let headBobPhase = 0;
 let landingBobY = 0, landingBobVel = 0;
 let wasGrounded = true;
@@ -6464,8 +6536,14 @@ function update() {
 
     // Animated character puppet (same rig/anims/gun fit as bots), driven by the
     // interpolated network state. The block mesh stays as hitbox + load fallback.
+    const rpWeapon = rp.pistol ? 'pistol' : 'rifle';
+    if (rp.puppet && rp.puppet.weapon !== rpWeapon && !rp.dead) {
+      // Weapon switched — rebuild the puppet with the matching anim set + gun mesh
+      removeCharacterPuppet(rp.puppet);
+      rp.puppet = null;
+    }
     if (!rp.puppet && typeof createCharacterPuppet === 'function') {
-      rp.puppet = createCharacterPuppet();
+      rp.puppet = createCharacterPuppet(rpWeapon);
       if (rp.puppet && rp.mesh.userData.blockVisual) rp.mesh.userData.blockVisual.visible = false;
     }
     if (rp.puppet) {
@@ -6495,8 +6573,12 @@ function update() {
       const yd = Math.atan2(Math.sin(rawYaw - pu._plantYaw), Math.cos(rawYaw - pu._plantYaw));
       if (moving || Math.abs(yd) > 0.7) pu._plantYaw = rawYaw;
       pu.yaw = pu._plantYaw; // updateCharacterVisual smooths the actual turn
+      // Shooting shows the firing stance, but never overrides crouch — the
+      // crouch hitbox is lower, and a standing visual over it would desync
+      // what you see from what you can hit.
       const anim = !pu.alive ? 'death'
         : rp.crouching ? (moving ? 'crouchWalk' : 'crouchIdle')
+        : rp.shooting ? 'fire'
         : moving ? 'walk' : 'rifleIdle';
       _setBotAnim(pu, anim);
       updateCharacterVisual(pu, renderDt);
@@ -6878,17 +6960,16 @@ function update() {
     if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); impactParticles.splice(i, 1); }
   }
 
-  // Performance stats
+  // Performance stats — uses the post-main-render snapshot (_mainTris/_mainCalls):
+  // renderer.info resets per render() call, so reading it here would show the
+  // weapon overlay's numbers (~1k tris), not the actual scene workload.
   perfFrames++;
   if (clock.elapsedTime - perfLastTime >= 1) {
     const fps = perfFrames;
     perfFrames = 0;
     perfLastTime = clock.elapsedTime;
-    const info = renderer.info;
-    const tris = info.render.triangles;
-    const calls = info.render.calls;
     document.getElementById('perf-stats').textContent =
-      `FPS: ${fps} | Tris: ${(tris/1000).toFixed(1)}k | Calls: ${calls}`;
+      `FPS: ${fps} | Tris: ${(_mainTris/1000).toFixed(1)}k | Calls: ${_mainCalls}`;
   }
 
   // Apply head bob (position) + landing pitch kick (rotation) for this frame only
@@ -6899,6 +6980,8 @@ function update() {
   if (window.skyDome) window.skyDome.position.copy(camera.position);
   renderer.clear();
   renderer.render(scene, camera);
+  _mainTris = renderer.info.render.triangles;
+  _mainCalls = renderer.info.render.calls;
   if (!state.killCamActive && !state.playerDead || (state.killCamActive && state.killCamMode === 'pov')) {
     renderer.clearDepth();
     renderer.render(weaponScene, weaponCamera);
@@ -7331,6 +7414,8 @@ function updateRemotePlayers(playerList, serverT) {
     rp.hp = p.hp;
     rp.dead = p.dead;
     rp.crouching = p.crouch || false;
+    rp.pistol = p.pistol || false;
+    rp.shooting = p.shooting || false;
     rp.mesh.visible = !p.dead;
 
     rp.snapshots.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
@@ -7487,7 +7572,7 @@ function unpackWorld(ab) {
     const x     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
     const y     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
     const z     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
-    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2) });
+    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2), pistol: !!(flags & 4), shooting: !!(flags & 8) });
   }
   return players;
 }
@@ -7695,7 +7780,8 @@ function sendInputToServer() {
     (state.moveLeft    ? 4  : 0) |
     (state.moveRight   ? 8  : 0) |
     (state.crouching   ? 16 : 0) |
-    (state.shooting    ? 64 : 0);
+    (state.currentWeapon === 'pistol' ? 32 : 0) |
+    (performance.now() < (state.shootingUntil || 0) ? 64 : 0);
   _inputDV.setUint8(23, keys);
   state.ws.send(_inputBuf);
 }
