@@ -157,12 +157,23 @@ weaponCamera.position.set(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-// Cap at 1.5: retina (dpr 2) quadruples the fill cost vs dpr 1 for sharpness
-// this art style doesn't need — 1.5 is the sweet spot on Mac laptops.
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+// Adaptive resolution. The render scale (pixel ratio) is the dominant GPU fill
+// cost — at 1.5× on a laptop GPU, screen-filling moments (clustered bodies, the
+// full-screen damage vignette, shadows) blow the pixel budget and drop frames.
+// Normal play stays at the full 1.5× (no visible change); the game loop
+// (_adaptResolution) only lowers it toward 0.7 while frames are actually heavy and
+// raises it straight back when they clear — so 60fps holds through the heavy spots
+// and you only ever lose sharpness mid-action, where it's invisible.
+window._maxPR = Math.min(window.devicePixelRatio, 1.5);
+window._minPR = 0.7;
+window._curPR = window._maxPR;
+renderer.setPixelRatio(window._curPR);
 renderer.setClearColor(0x1a4d8a, 1);
 renderer.shadowMap.enabled = true;
 renderer.autoClear = false;
+// The world is static — only characters move — so we don't regenerate the shadow
+// map every frame. autoUpdate off; the loop sets needsUpdate at ~30Hz (12_main.js).
+renderer.shadowMap.autoUpdate = false;
 // PCF (not PCFSoft): soft shadows multiply the per-pixel tap count across the
 // whole frame — too costly at this resolution for a barely visible difference.
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -180,6 +191,32 @@ const bots = [];
 // Debug hooks — game.js is an ES module, so expose key objects for console tuning.
 window.DBG = { state, scene, camera, bots, THREE, renderer };
 
+// Draw-call probe — run DBG.perfProbe() in the console anywhere (e.g. standing in
+// the prison or at the canal) to see exactly where the draw calls go: total scene
+// meshes, how many cast shadows, and the split between the main pass and the
+// shadow pass. Renders twice (with/without shadows) to measure the shadow cost.
+window.DBG.perfProbe = function () {
+  let meshes = 0, visible = 0, casters = 0, instanced = 0;
+  scene.traverse(o => {
+    if (!o.isMesh) return;
+    meshes++;
+    if (o.visible) visible++;
+    if (o.castShadow) casters++;
+    if (o.isInstancedMesh) instanced++;
+  });
+  const wasEnabled = renderer.shadowMap.enabled;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.needsUpdate = true;
+  renderer.render(scene, camera);
+  const withShadow = renderer.info.render.calls, tris = renderer.info.render.triangles;
+  renderer.shadowMap.enabled = false;
+  renderer.render(scene, camera);
+  const mainOnly = renderer.info.render.calls;
+  renderer.shadowMap.enabled = wasEnabled;
+  console.log(`[probe] scene meshes ${meshes} | visible ${visible} | shadow-casters ${casters} | instanced ${instanced}`);
+  console.log(`[probe] draw calls — total ${withShadow} = main ${mainOnly} + shadow ${withShadow - mainOnly} | tris ${(tris/1000)|0}k`);
+};
+
 // ═══════════════════════════════════════════════════════════
 // LIGHTING
 // ═══════════════════════════════════════════════════════════
@@ -187,11 +224,24 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 const sun = new THREE.DirectionalLight(0xfffbe8, 2.2);
 sun.position.set(210, 367, -157);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.near = 1; sun.shadow.camera.far = 600;
-sun.shadow.camera.left = -170; sun.shadow.camera.right = 170;
-sun.shadow.camera.top = 170; sun.shadow.camera.bottom = -170;
+// 1024² (was 2048²): quarters the shadow fill/regeneration cost. The faceted,
+// low-poly art hides the lower resolution well.
+sun.shadow.mapSize.set(1024, 1024);
+// The shadow frustum used to be 340×340 — the WHOLE island — so every shadow
+// update re-rendered every tree, prison mesh and column on the map, a huge fixed
+// draw-call cost. Now it's a small box that FOLLOWS the player (updated each frame
+// in the game loop), so the shadow pass only draws casters near you. Bonus: 1024²
+// over a 140×140 area is far sharper than over 340×340.
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 360;
+sun.shadow.camera.left = -70; sun.shadow.camera.right = 70;
+sun.shadow.camera.top = 70; sun.shadow.camera.bottom = -70;
+sun.shadow.bias = -0.0004; // tighter texels — small negative bias avoids acne
 scene.add(sun);
+scene.add(sun.target); // directional light + target follow the player each frame
+// Light travel direction (sun → origin), kept constant so the SHADING direction
+// never changes even as we slide the light to keep the player centered.
+window._sunDir = sun.position.clone().normalize().negate();
+window._sunDist = 170; // how far up-light the sun sits from the player
 scene.add(new THREE.HemisphereLight(0x4488ff, 0x2d7a0a, 0.7));
 
 // ═══════════════════════════════════════════════════════════

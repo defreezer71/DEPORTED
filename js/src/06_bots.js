@@ -71,7 +71,11 @@ async function loadCharacterAssets() {
 
   characterReady = true;
   console.log('Character assets ready:', Object.keys(_animGltfs).join(', '));
-  for (let i = 0; i < bots.length; i++) _attachBotMesh(bots[i], i);
+  _getCharScale(); // do the one-time scale-probe clone now, not mid-countdown
+  _warmCharacterShaders(); // compile the skinned-mesh program now (menu) — not on the first countdown render
+  // Stagger attach (1 bot/frame in updateBots) instead of cloning all 10 idle rigs
+  // in a single frame — that one-frame burst was the remaining load-in glitch.
+  for (let i = 0; i < bots.length; i++) _attachQueue.push(i);
 
   // Replace old box kill-cam player mesh with a real Dummy character clone
   if (_animGltfs['aimIdle']) {
@@ -80,7 +84,7 @@ async function loadCharacterAssets() {
     const pclone = SkeletonUtils.clone(pg.scene);
     pclone.scale.setScalar(pscale);
     window._playerMeshFootOffset = pfoot;
-    pclone.traverse(c => { if (c.isMesh) { c.castShadow = true; c.frustumCulled = false; } });
+    pclone.traverse(_prepCharMesh);
     const pmixer = new THREE.AnimationMixer(pclone);
     const pclip = pg.animations?.[0];
     if (pclip) { pmixer.clipAction(pclip).setLoop(THREE.LoopRepeat).play(); }
@@ -101,86 +105,157 @@ function _findBone(root, namePart) {
   return found;
 }
 
-// Shared bot gun materials — created once
-const _bgMats = (() => {
-  const L = c => new THREE.MeshLambertMaterial({ color: c });
-  return { blk: L(0x0d0d0d), drk: L(0x161616), mtl: L(0x303030), wood: L(0x7a4a1a), wdDk: L(0x5a3010) };
-})();
+// Prep a character's meshes for shadow casting. Frustum culling stays OFF: a
+// SkinnedMesh culls against its bind-pose bounding sphere, which is unreliable for
+// an animated, root-motion rig — up close the body would wrongly cull out (leaving
+// the gun floating). Each character is only ~1 draw call anyway, so culling them
+// saved almost nothing; correctness wins.
+function _prepCharMesh(child) {
+  if (!child.isMesh) return;
+  child.castShadow = true;
+  child.frustumCulled = false;
+}
+
+// Character shadow LOD with a hard caster cap. Only the nearest few characters
+// within range cast shadows — when 10 bots bunch up (canal, prison) their shadows
+// overlap into a blob anyway, so capping to the closest handful is invisible but
+// bounds the shadow pass (each caster is a second skinned render). Re-traverses a
+// rig only when its on/off state actually flips. `_shadowOn` is cleared in
+// _setBotAnim when the active rig swaps so the new mesh re-applies.
+const _SHADOW_CHAR_DIST2 = 48 * 48;
+const _SHADOW_MAX_CASTERS = 4;
+const _shadowCandidates = [];
+const _byDist2 = (a, b) => a._dist2 - b._dist2;
+function _updateAllCharShadows() {
+  _shadowCandidates.length = 0;
+  for (const b of bots) {
+    if (!b.alive || !b.mesh) continue;
+    const dx = b.pos.x - camera.position.x, dz = b.pos.z - camera.position.z;
+    b._dist2 = dx * dx + dz * dz;
+    _shadowCandidates.push(b);
+  }
+  if (typeof state !== 'undefined' && state.remotePlayers) {
+    for (const id in state.remotePlayers) {
+      const pu = state.remotePlayers[id].puppet;
+      if (!pu || !pu.alive || !pu.mesh) continue;
+      const dx = pu.pos.x - camera.position.x, dz = pu.pos.z - camera.position.z;
+      pu._dist2 = dx * dx + dz * dz;
+      _shadowCandidates.push(pu);
+    }
+  }
+  _shadowCandidates.sort(_byDist2); // in place — small list (≤~30), no alloc
+  for (let i = 0; i < _shadowCandidates.length; i++) {
+    const ent = _shadowCandidates[i];
+    const want = i < _SHADOW_MAX_CASTERS && ent._dist2 < _SHADOW_CHAR_DIST2;
+    if (ent._shadowOn === want) continue;
+    ent._shadowOn = want;
+    ent.mesh.traverse(c => { if (c.isMesh) c.castShadow = want; });
+  }
+}
+
+// Shared bot-gun colors + one merged, vertex-colored material. Each gun was ~13
+// separate part meshes = ~13 draw calls; with 10 visible bots clustered (canal,
+// prison) that's ~130 draw calls just for guns. Merged into a single geometry per
+// gun, each gun is 1 draw call. Visuals are identical (flat per-part colors ride
+// in vertex colors instead of per-part materials).
+const _bgCols = { blk: 0x0d0d0d, drk: 0x161616, mtl: 0x303030, wood: 0x7a4a1a, wdDk: 0x5a3010 };
+const _gunMergeMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const _gunMergeDummy = new THREE.Object3D();
+function _mergeParts(parts) {
+  let total = 0;
+  const processed = [];
+  for (const p of parts) {
+    const g = p.geo.toNonIndexed();
+    _gunMergeDummy.position.set(p.px, p.py, p.pz);
+    _gunMergeDummy.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
+    _gunMergeDummy.scale.set(1, 1, 1);
+    _gunMergeDummy.updateMatrix();
+    g.applyMatrix4(_gunMergeDummy.matrix); // bake offset/rotation into verts + normals
+    total += g.attributes.position.count;
+    processed.push({ g, c: new THREE.Color(p.color) });
+  }
+  const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+  let off = 0;
+  for (const { g, c } of processed) {
+    const n = g.attributes.position.count;
+    pos.set(g.attributes.position.array, off * 3);
+    nor.set(g.attributes.normal.array, off * 3);
+    for (let i = 0; i < n; i++) { col[(off+i)*3] = c.r; col[(off+i)*3+1] = c.g; col[(off+i)*3+2] = c.b; }
+    off += n;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal',   new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+  return geo;
+}
 
 function _makeBotGun() {
-  const g = new THREE.Group();
-  const { blk, drk, mtl, wood, wdDk } = _bgMats;
+  const C = _bgCols;
   const B  = (w,h,d) => new THREE.BoxGeometry(w,h,d);
   const Cy = (rt,rb,h,s=8) => new THREE.CylinderGeometry(rt,rb,h,s);
   const PI2 = Math.PI/2;
-  const add = (geo, mat, px, py, pz, rx=0, ry=0, rz=0) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(px,py,pz); if(rx||ry||rz) m.rotation.set(rx,ry,rz);
-    // No castShadow: ~20 parts × 20 bots = ~400 shadow-pass draw calls for
-    // shadows nobody can see — the body rig's shadow covers the silhouette.
-    g.add(m);
-  };
+  const parts = [];
+  // No castShadow (merged mesh defaults to it off) — the body rig's shadow covers
+  // the silhouette; a gun shadow nobody sees isn't worth a shadow-pass draw.
+  const add = (geo, color, px,py,pz, rx=0,ry=0,rz=0) => parts.push({ geo, color, px,py,pz, rx,ry,rz });
   // Barrel
-  add(Cy(0.015,0.017,0.330,8), drk,   0, 0.000,-0.465, PI2,0,0);
-  add(Cy(0.024,0.024,0.030,8), mtl,   0, 0.000,-0.520, PI2,0,0);
-  add(Cy(0.026,0.026,0.040,8), mtl,   0, 0.000,-0.650, PI2,0,0);
+  add(Cy(0.015,0.017,0.330,8), C.drk,   0, 0.000,-0.465, PI2,0,0);
+  add(Cy(0.024,0.024,0.030,8), C.mtl,   0, 0.000,-0.520, PI2,0,0);
+  add(Cy(0.026,0.026,0.040,8), C.mtl,   0, 0.000,-0.650, PI2,0,0);
   // Handguard
-  add(B(0.052,0.022,0.215), wood,   0, 0.014,-0.425);
-  add(B(0.056,0.024,0.215), wdDk,   0,-0.016,-0.425);
+  add(B(0.052,0.022,0.215), C.wood,   0, 0.014,-0.425);
+  add(B(0.056,0.024,0.215), C.wdDk,   0,-0.016,-0.425);
   // Upper receiver
-  add(B(0.058,0.026,0.205), drk,    0, 0.013,-0.215);
-  add(B(0.060,0.008,0.205), mtl,    0, 0.026,-0.215);
+  add(B(0.058,0.026,0.205), C.drk,    0, 0.013,-0.215);
+  add(B(0.060,0.008,0.205), C.mtl,    0, 0.026,-0.215);
   // Lower receiver
-  add(B(0.056,0.050,0.205), drk,    0,-0.027,-0.215);
+  add(B(0.056,0.050,0.205), C.drk,    0,-0.027,-0.215);
   // Magazine — ONE tilted box. A stepped multi-box "curve" reads as a separate
   // block glued onto the clip at bot-viewing distances.
-  add(B(0.042,0.195,0.072), blk,    0,-0.150,-0.262, 0.18,0,0);
-  add(B(0.044,0.014,0.074), mtl,    0,-0.250,-0.280, 0.18,0,0);  // base pad
+  add(B(0.042,0.195,0.072), C.blk,    0,-0.150,-0.262, 0.18,0,0);
+  add(B(0.044,0.014,0.074), C.mtl,    0,-0.250,-0.280, 0.18,0,0);  // base pad
   // Pistol grip
-  add(B(0.038,0.094,0.046), wood,   0,-0.126,-0.130,-0.30,0,0);
+  add(B(0.038,0.094,0.046), C.wood,   0,-0.126,-0.130,-0.30,0,0);
   // Stock arms — run flush from the receiver back (rear edge z=-0.112) to the
   // butt plate; short enough that the butt doesn't clip into the chest
-  add(B(0.008,0.008,0.214), drk,   -0.028, 0.002, -0.005);
-  add(B(0.008,0.008,0.214), drk,   -0.028,-0.032, -0.005);
-  add(B(0.012,0.064,0.020), mtl,   -0.028,-0.015,  0.112);
+  add(B(0.008,0.008,0.214), C.drk,   -0.028, 0.002, -0.005);
+  add(B(0.008,0.008,0.214), C.drk,   -0.028,-0.032, -0.005);
+  add(B(0.012,0.064,0.020), C.mtl,   -0.028,-0.015,  0.112);
   // Front sight
-  add(B(0.034,0.006,0.014), mtl,    0, 0.031,-0.570);
-  return g;
+  add(B(0.034,0.006,0.014), C.mtl,    0, 0.031,-0.570);
+  return new THREE.Mesh(_mergeParts(parts), _gunMergeMat);
 }
 
 // 1911-style pistol for bots holding the secondary. Built barrel-forward (-z),
 // grip down/back (+y down, +z back), origin near the grip so it seats in the palm.
 function _makeBotPistol() {
-  const g = new THREE.Group();
-  const { blk, drk, mtl, wood } = _bgMats;
+  const C = _bgCols;
   const B  = (w,h,d) => new THREE.BoxGeometry(w,h,d);
   const Cy = (rt,rb,h,s=8) => new THREE.CylinderGeometry(rt,rb,h,s);
   const PI2 = Math.PI/2;
-  const add = (geo, mat, px, py, pz, rx=0, ry=0, rz=0) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(px,py,pz); if(rx||ry||rz) m.rotation.set(rx,ry,rz);
-    g.add(m); // no castShadow — same reasoning as _makeBotGun
-  };
+  const parts = [];
+  const add = (geo, color, px,py,pz, rx=0,ry=0,rz=0) => parts.push({ geo, color, px,py,pz, rx,ry,rz });
   // Slide (top), barrel along -z
-  add(B(0.026,0.030,0.200), mtl,  0, 0.020, -0.030);
+  add(B(0.026,0.030,0.200), C.mtl,  0, 0.020, -0.030);
   // Muzzle / bushing
-  add(Cy(0.011,0.011,0.022,8), drk, 0, 0.020, -0.135, PI2,0,0);
+  add(Cy(0.011,0.011,0.022,8), C.drk, 0, 0.020, -0.135, PI2,0,0);
   // Frame beneath the slide
-  add(B(0.024,0.022,0.182), drk,  0,-0.004, -0.020);
+  add(B(0.024,0.022,0.182), C.drk,  0,-0.004, -0.020);
   // Trigger guard
-  add(B(0.018,0.030,0.010), drk,  0,-0.030,  0.012);
-  add(B(0.020,0.008,0.044), drk,  0,-0.030, -0.012);
+  add(B(0.018,0.030,0.010), C.drk,  0,-0.030,  0.012);
+  add(B(0.020,0.008,0.044), C.drk,  0,-0.030, -0.012);
   // Grip — angled down and slightly back
-  add(B(0.030,0.110,0.040), wood, 0,-0.070,  0.045, -0.30,0,0);
+  add(B(0.030,0.110,0.040), C.wood, 0,-0.070,  0.045, -0.30,0,0);
   // Magazine baseplate
-  add(B(0.032,0.014,0.042), blk,  0,-0.124,  0.062, -0.30,0,0);
+  add(B(0.032,0.014,0.042), C.blk,  0,-0.124,  0.062, -0.30,0,0);
   // Hammer
-  add(B(0.012,0.020,0.012), drk,  0, 0.030,  0.080);
+  add(B(0.012,0.020,0.012), C.drk,  0, 0.030,  0.080);
   // Rear sight
-  add(B(0.020,0.008,0.012), blk,  0, 0.038,  0.058);
+  add(B(0.020,0.008,0.012), C.blk,  0, 0.038,  0.058);
   // Front sight
-  add(B(0.006,0.010,0.008), blk,  0, 0.038, -0.120);
-  return g;
+  add(B(0.006,0.010,0.008), C.blk,  0, 0.038, -0.120);
+  return new THREE.Mesh(_mergeParts(parts), _gunMergeMat);
 }
 
 function _measureScale(gltf) {
@@ -206,9 +281,7 @@ function _cloneForAnim(animName, gltf, botIndex, scale) {
   const clone = SkeletonUtils.clone(gltf.scene);
   clone.scale.setScalar(scale);
 
-  clone.traverse(child => {
-    if (child.isMesh) { child.castShadow = true; child.frustumCulled = false; }
-  });
+  clone.traverse(_prepCharMesh);
 
   // Mixer — same GLB as clone, bind poses guaranteed to match
   const mixer = new THREE.AnimationMixer(clone);
@@ -282,12 +355,19 @@ function _setBotAnim(bot, animName) {
   if (!bot.animScenes) return;
   // Always allow re-triggering fire (rapid shots restart the clip)
   if (bot.activeAnim === animName && animName !== 'fire') return;
+  // Lazy-clone this rig the first time it's requested (see _attachBotMesh).
+  let target = bot.animScenes[animName];
+  if (!target && bot._gltfMap && bot._gltfMap[animName]) {
+    target = bot.animScenes[animName] =
+      _cloneForAnim(animName, bot._gltfMap[animName], bot._animIndex, bot._animScale);
+  }
   // DETACH inactive rigs from the scene graph — three r128 recurses into
   // invisible subtrees in updateMatrixWorld, so merely hiding them leaves
   // ~65 bones per rig × 10 rigs per character burning matrix updates every
   // frame. Re-adding is cheap (no GPU re-upload; renderer caches survive).
-  const target = bot.animScenes[animName];
-  for (const data of Object.values(bot.animScenes)) {
+  // for..in (not Object.values) so this allocates nothing per call.
+  for (const k in bot.animScenes) {
+    const data = bot.animScenes[k];
     if (data === target) continue;
     data.scene.visible = false;
     if (data.scene.parent) scene.remove(data.scene);
@@ -297,8 +377,39 @@ function _setBotAnim(bot, animName) {
     target.scene.visible = true;
     if ((animName === 'death' || animName === 'fire' || animName === 'jump' || animName === 'reload') && target.action) target.action.reset().play();
     bot.mesh = target.scene;
+    bot._shadowOn = undefined; // new rig attached — re-apply shadow LOD next frame
   }
   bot.activeAnim = animName;
+}
+
+// Scale/footOffset is identical for every character (same source rig) — measure
+// once (it does a throwaway clone) and cache, instead of per bot at spawn.
+let _charScaleCache = null;
+function _getCharScale() {
+  if (!_charScaleCache) {
+    _charScaleCache = _animGltfs['aimIdle'] ? _measureScale(_animGltfs['aimIdle']) : { scale: 0.0105, footOffset: 0 };
+  }
+  return _charScaleCache;
+}
+
+// Compile the skinned-mesh shader program ahead of time. The first time any
+// character renders, three lazily links its program — a one-frame stall. We do it
+// here (right when assets finish loading, while the menu is up) by briefly adding a
+// throwaway idle rig to the scene and calling renderer.compile, so the first bot
+// appearing during the countdown doesn't hitch. The rig is removed immediately and
+// never drawn to screen.
+let _charShadersWarmed = false;
+function _warmCharacterShaders() {
+  if (_charShadersWarmed || !_animGltfs['rifleIdle']) return;
+  if (typeof renderer === 'undefined' || typeof scene === 'undefined' || typeof camera === 'undefined') return;
+  _charShadersWarmed = true;
+  try {
+    const { scale } = _getCharScale();
+    const warm = _cloneForAnim('rifleIdle', _animGltfs['rifleIdle'], 999, scale);
+    scene.add(warm.scene);
+    renderer.compile(scene, camera); // links the program for the rig's material
+    scene.remove(warm.scene);
+  } catch (e) { console.warn('shader pre-warm skipped', e); }
 }
 
 function _attachBotMesh(bot, index) {
@@ -307,21 +418,70 @@ function _attachBotMesh(bot, index) {
   bot.activeAnim = null;
   bot.mesh = null;
 
-  const { scale, footOffset } = _animGltfs['aimIdle'] ? _measureScale(_animGltfs['aimIdle']) : { scale: 0.0105, footOffset: 0 };
+  const { scale, footOffset } = _getCharScale();
   bot.footOffset = footOffset;
 
-  const gltfMap = bot.weapon === 'pistol' ? _animGltfsPistol : _animGltfs;
-  for (const [animName, gltf] of Object.entries(gltfMap)) {
-    // Not added to the scene here — _setBotAnim attaches only the active rig
-    bot.animScenes[animName] = _cloneForAnim(animName, gltf, index, scale);
-  }
+  // Lazy: don't clone all ~13 rigs up front (cloning every bot's full set in one
+  // frame is the load-in freeze). Stash what _setBotAnim needs to clone each rig
+  // the first time it's actually used. During countdown a bot only needs idle.
+  bot._gltfMap = bot.weapon === 'pistol' ? _animGltfsPistol : _animGltfs;
+  bot._animIndex = index;
+  bot._animScale = scale;
 
   bot.gunMesh = bot.weapon === 'pistol' ? _makeBotPistol() : _makeBotGun();
   bot.gunMesh.visible = false;
   scene.add(bot.gunMesh);
 
   _addWorldHitboxes(bot, index);
-  _setBotAnim(bot, 'walk');
+  _setBotAnim(bot, 'rifleIdle');
+  _queueBotPrewarm(bot);
+}
+
+// Rig cloning is the heaviest one-time CPU cost (SkeletonUtils.clone + mixer
+// binding of a 66-bone rig, a few ms each, ~12 per character). Doing it lazily
+// during combat caused mid-fight dips; doing it all at spawn caused a freeze. So:
+// clone idle immediately (staggered attach, 1/frame), then pre-warm the rest a few
+// per frame — which lands during the ~10s countdown while the player is idle
+// watching the timer, NOT during the fight. Combat then runs with every rig ready.
+const _attachQueue = [];
+const _prewarmQueue = []; // flat [bot, animName, bot, animName, ...]
+function _queueBotPrewarm(ent) {
+  if (!ent._gltfMap) return;
+  for (const animName in ent._gltfMap) {
+    if (!ent.animScenes[animName]) _prewarmQueue.push(ent, animName);
+  }
+}
+function _drainCharWork() {
+  // Attach is prioritized so bots appear promptly (1 idle clone/frame).
+  if (_attachQueue.length) {
+    const idx = _attachQueue.shift();
+    if (bots[idx] && !bots[idx].animScenes) _attachBotMesh(bots[idx], idx);
+    return;
+  }
+  // Then pre-warm exactly ONE rig/frame — gentlest possible spread (~130 clones over
+  // ~2s, well inside the 10s idle countdown), so the countdown barely dips and
+  // combat starts fully warm.
+  while (_prewarmQueue.length) {
+    const ent = _prewarmQueue.shift();
+    const animName = _prewarmQueue.shift();
+    if (!ent._removed && ent.animScenes && !ent.animScenes[animName] && ent._gltfMap && ent._gltfMap[animName]) {
+      const data = _cloneForAnim(animName, ent._gltfMap[animName], ent._animIndex, ent._animScale);
+      data.scene.visible = false; // inactive — stays detached until _setBotAnim picks it
+      ent.animScenes[animName] = data;
+      return; // exactly one clone this frame
+    }
+  }
+}
+
+// True once every bot's full rig set (idle + all pre-warmed anims) is cloned and
+// the work queues are drained. Used to hold the match countdown until loading is
+// finished, so the heavy one-time clone cost lands on the loading hold instead of
+// dropping frames during the countdown / early match.
+function charLoadComplete() {
+  if (!characterReady) return false;
+  if (_attachQueue.length || _prewarmQueue.length) return false;
+  for (const b of bots) { if (!b.animScenes) return false; }
+  return true;
 }
 
 function findBotByMesh(mesh) {
@@ -405,7 +565,10 @@ function createBot(x, z, name, index) {
     currentAction: null,
   };
   bots.push(bot);
-  if (characterReady) _attachBotMesh(bot, index);
+  // Queue the attach (1/frame in updateBots) rather than cloning a rig synchronously
+  // here — spawnBots makes all 10 at once, and that burst was the countdown load-in
+  // glitch. index === array position (see spawnBots), which _drainCharWork relies on.
+  if (characterReady) _attachQueue.push(index);
   return bot;
 }
 
@@ -486,7 +649,9 @@ function updateCharacterVisual(bot, dt) {
   const yawDiff = Math.atan2(Math.sin(targetYaw - bot._smoothYaw), Math.cos(targetYaw - bot._smoothYaw));
   bot._smoothYaw += yawDiff * Math.min(1, dt * 8);
 
-  for (const [animName, data] of Object.entries(bot.animScenes)) {
+  // for..in (not Object.entries) — runs every frame per character, must not allocate.
+  for (const animName in bot.animScenes) {
+    const data = bot.animScenes[animName];
     if (!data.scene.parent) continue; // detached by _setBotAnim — skip entirely
     const fo = bot.footOffset ?? 0;
     if (!bot.alive) {
@@ -689,24 +854,26 @@ function updateCharacterVisual(bot, dt) {
 let _puppetSeq = 100; // index offset past bot indices (only used for per-clone variation)
 function createCharacterPuppet(weapon = 'rifle') {
   if (!characterReady) return null;
-  const { scale, footOffset } = _animGltfs['aimIdle'] ? _measureScale(_animGltfs['aimIdle']) : { scale: 0.0105, footOffset: 0 };
+  const { scale, footOffset } = _getCharScale();
   const ent = {
     pos: new THREE.Vector3(), yaw: 0, alive: true, deadY: 0, weapon,
     animScenes: {}, activeAnim: null, footOffset, mesh: null,
+    // Lazy clone, same as bots — avoids a 13-rig clone hitch each time a remote
+    // player first comes into view in a full lobby. Pre-warm fills in the rest.
+    _gltfMap: weapon === 'pistol' ? _animGltfsPistol : _animGltfs,
+    _animIndex: _puppetSeq++,
+    _animScale: scale,
   };
-  const gltfMap = weapon === 'pistol' ? _animGltfsPistol : _animGltfs;
-  for (const [animName, gltf] of Object.entries(gltfMap)) {
-    // Not added to the scene here — _setBotAnim attaches only the active rig
-    ent.animScenes[animName] = _cloneForAnim(animName, gltf, _puppetSeq, scale);
-  }
-  _puppetSeq++;
   ent.gunMesh = weapon === 'pistol' ? _makeBotPistol() : _makeBotGun();
   ent.gunMesh.visible = false;
   scene.add(ent.gunMesh);
+  _setBotAnim(ent, 'rifleIdle');
+  _queueBotPrewarm(ent); // background-clone the rest, same as bots
   return ent;
 }
 function removeCharacterPuppet(ent) {
   if (!ent) return;
+  ent._removed = true; // any queued pre-warm clones for this ent become no-ops
   for (const d of Object.values(ent.animScenes)) scene.remove(d.scene);
   if (ent.gunMesh) scene.remove(ent.gunMesh);
 }
@@ -720,7 +887,10 @@ function spawnBots() {
     const px = CONFIG.prisonPos.x - CONFIG.prisonSize / 2 + 5 + col * ((CONFIG.prisonSize - 10) / 4);
     const pz = CONFIG.prisonPos.z - CONFIG.prisonSize / 2 + 5 + row * ((CONFIG.prisonSize - 10) / 3);
     const bot = createBot(px, pz, BOT_NAMES[i] || 'Bot', i);
-    bot.exitDelay = 0;
+    // Stagger prison exit so all 10 don't switch idle→walk + activate AI on the
+    // single frame the gate opens (that synchronized burst was the countdown-zero
+    // hitch). ~0.12s apart also reads more naturally — bots file out, not burst.
+    bot.exitDelay = i * 0.12;
     // Assign a spread-out first waypoint so bots fan across the map immediately
     const sectorAngle = (i / BOT_COUNT) * Math.PI * 2 + (Math.random() - 0.5) * 0.4;
     const sectorR = 55 + Math.random() * 55;
@@ -729,6 +899,7 @@ function spawnBots() {
 }
 
 function updateBots(dt) {
+  _drainCharWork(); // ≤1 rig clone/frame: staggered attach + background pre-warm
   for (const bot of bots) {
     if (!bot.alive) continue;
 
@@ -811,20 +982,29 @@ function updateBots(dt) {
     const engaging = bot.hasAmmo && distToPlayer < bot.aggroRange && !state.playerDead && Date.now() >= _botShootUnlockedAt;
     if (engaging) {
       bot.yaw = Math.atan2(dx, dz);
-      _aiEye.set(bx, bot.pos.y + 1.7, bz);
-      _aiDir.set(dx, camera.position.y - _aiEye.y, dz).normalize();
-      _aiRay.set(_aiEye, _aiDir);
-      _aiRay.far = distToPlayer;
-      const losHits = _aiRay.intersectObjects(collidables, false);
-      let volcanoBlocking = false;
-      const stepSize = distToPlayer / 20;
-      for (let s = 1; s < 20; s++) {
-        const t = s * stepSize;
-        const volH = getVolcanoHeight(_aiEye.x + _aiDir.x * t, _aiEye.z + _aiDir.z * t);
-        if (volH > 0.8 && _aiEye.y + _aiDir.y * t < volH - 0.1) { volcanoBlocking = true; break; }
-      }
       bot.shootCooldown -= dt;
-      if (bot.shootCooldown <= 0 && losHits.length === 0 && !volcanoBlocking) {
+      // Line-of-sight + volcano occlusion are only needed at the instant the bot
+      // wants to fire, so run them only when the cooldown is up — not every frame.
+      // With a cluster of bots all engaging at once (the canal chokepoint), this is
+      // the difference between ~10 full raycasts PER FRAME and ~10 per second.
+      if (bot.shootCooldown <= 0) {
+        _aiEye.set(bx, bot.pos.y + 1.7, bz);
+        _aiDir.set(dx, camera.position.y - _aiEye.y, dz).normalize();
+        _aiRay.set(_aiEye, _aiDir);
+        _aiRay.far = distToPlayer;
+        const losHits = _aiRay.intersectObjects(collidables, false);
+        let volcanoBlocking = false;
+        const stepSize = distToPlayer / 20;
+        for (let s = 1; s < 20; s++) {
+          const t = s * stepSize;
+          const volH = getVolcanoHeight(_aiEye.x + _aiDir.x * t, _aiEye.z + _aiDir.z * t);
+          if (volH > 0.8 && _aiEye.y + _aiDir.y * t < volH - 0.1) { volcanoBlocking = true; break; }
+        }
+        if (losHits.length > 0 || volcanoBlocking) {
+          // Blocked — retry shortly (not next frame) so an occluded bot near the
+          // player doesn't re-raycast at 60Hz.
+          bot.shootCooldown = 0.12 + Math.random() * 0.08;
+        } else {
         bot.shootCooldown = 0.8 + Math.random() * 1.5;
         const fireDur = bot.animScenes?.fire?.clipDur ?? 0.8;
         bot.fireAnimUntil = Date.now() + fireDur * 1000;
@@ -860,6 +1040,7 @@ function updateBots(dt) {
           SFX.hitmarker();
         }
         playNoise(0.06, 0.08 * Math.max(0.2, 1 - distToPlayer / 80), 3000, 'bandpass');
+        }
       }
     }
 
@@ -1016,6 +1197,10 @@ function updateBots(dt) {
       }
     }
   }
+
+  // Shadow caster selection — once per frame, after all character positions are set
+  // (bots above + remote puppets earlier this frame).
+  _updateAllCharShadows();
 
   // Update kill-cam player dummy mesh
   if (window._playerMeshMixer && window._playerMesh && window._playerMesh.visible) {

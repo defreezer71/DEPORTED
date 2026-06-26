@@ -135,6 +135,44 @@ let weaponJumpY = 0, weaponJumpVel = 0;
 const FIXED_DT = 1 / 64;
 let physicsAccumulator = 0;
 
+// Frame counters for work that doesn't need to run every frame.
+let _shadowFrame = 0;     // shadow map regenerates on even frames (~30Hz)
+let _waterWaveFrame = 0;  // water wave displacement updates on even frames
+
+// ── Adaptive resolution ──
+// Measure FPS over short windows and nudge the renderer pixel ratio: down when
+// we're below target (free up GPU fill), up when we have headroom. Drops fast and
+// recovers slowly so it settles instead of oscillating. This is what holds 60fps
+// through the fill-heavy spots (clustered bodies, damage vignette, shadows).
+let _prAccum = 0, _prFrames = 0;
+function _adaptResolution(dt) {
+  _prAccum += dt; _prFrames++;
+  if (_prAccum < 0.25) return;     // re-evaluate ~4×/second so it reacts quickly
+  const fps = _prFrames / _prAccum;
+  _prAccum = 0; _prFrames = 0;
+  let pr = window._curPR;
+  if (fps < 57 && pr > window._minPR) {
+    // Drop proportional to how far below 60 we are — a crater (e.g. 30fps when shot)
+    // drops hard and instantly, a small dip eases down.
+    const deficit = (58 - fps) / 58;
+    pr = Math.max(window._minPR, +(pr - Math.max(0.1, deficit * 1.3)).toFixed(2));
+  } else if (fps > 59.5 && pr < window._maxPR) {
+    pr = Math.min(window._maxPR, +(pr + 0.07).toFixed(2)); // recover gently to avoid oscillation
+  }
+  if (pr !== window._curPR) {
+    window._curPR = pr;
+    renderer.setPixelRatio(pr); // three re-applies setSize internally
+  }
+}
+
+// Reused per-frame scratch — hoisted out of update() to avoid heap churn / GC hitches.
+const _lootLookDir = new THREE.Vector3();
+const _lootWP = new THREE.Vector3();
+const _lootToVec = new THREE.Vector3();
+const _lootScan = [];                 // refilled in place, never reallocated
+const _restPos = new THREE.Vector3();
+const _wepTargetPos = new THREE.Vector3();
+
 // ── Instanced Ash Cloud Pool — 1 draw call for ALL ash particles ──
 const ASH_POOL_SIZE = 300;
 const ashGeo = new THREE.SphereGeometry(1, 5, 4);
@@ -543,6 +581,30 @@ function update() {
   requestAnimationFrame(update);
   const renderDt = Math.min(clock.getDelta(), 0.05);
 
+  _adaptResolution(renderDt); // scale render resolution to hold 60fps under load
+
+  // Regenerate the shadow map at ~30Hz instead of every frame (autoUpdate is off).
+  // Set before any render() this frame so the first one picks it up; three resets
+  // needsUpdate to false after it renders the shadow pass.
+  if ((_shadowFrame++ & 1) === 0) renderer.shadowMap.needsUpdate = true;
+
+  // Slide the sun (shadow frustum) to stay centered on the player, keeping its
+  // travel direction constant so shading doesn't change. This is what lets the
+  // shadow pass draw only nearby casters instead of the entire island.
+  // The follow point is snapped to a texel-sized world grid so the frustum jumps
+  // in whole-texel steps as you move — otherwise the shadow edges shimmer.
+  if (window._sunDir) {
+    const _texel = 140 / 1024; // ortho width / shadow map size ≈ world units per texel
+    const _px = Math.round(camera.position.x / _texel) * _texel;
+    const _pz = Math.round(camera.position.z / _texel) * _texel;
+    sun.target.position.set(_px, 0, _pz);
+    sun.position.set(
+      _px - _sunDir.x * _sunDist,
+      -_sunDir.y * _sunDist,
+      _pz - _sunDir.z * _sunDist
+    );
+  }
+
   refreshDynamicColliders();
 
   // ── Fixed-timestep physics accumulator ──
@@ -577,12 +639,25 @@ function update() {
   }
 
   if (state.phase === 'countdown') {
+    // Hold the timer until all character rigs are loaded. While waiting we drain the
+    // clone work aggressively (frame rate doesn't matter on a "…" loading hold) and
+    // show "…"; the 10s countdown only starts once everyone's in — so the load-in
+    // cost happens here instead of dropping frames mid-countdown / early match.
+    if (!state.matchStartAt && typeof charLoadComplete === 'function') {
+      const cdElL = document.getElementById('countdown-num');
+      if (charLoadComplete()) {
+        state.matchStartAt = Date.now() + 10000;
+      } else {
+        for (let i = 0; i < 12; i++) _drainCharWork();
+        if (cdElL) { cdElL.textContent = '…'; cdElL.classList.add('show'); }
+      }
+    }
     state.countdownTime = state.matchStartAt
       ? 1 - (Date.now() - state.matchStartAt) / 1000
-      : state.countdownTime - renderDt;
+      : state.countdownTime;
     const num = Math.ceil(state.countdownTime);
     const cdEl = document.getElementById('countdown-num');
-    if (num > 0 && num <= 10) {
+    if (state.matchStartAt && num > 0 && num <= 10) {
       cdEl.textContent = num;
       cdEl.classList.add('show');
     }
@@ -626,9 +701,12 @@ function update() {
 
   // Check victory — you win when no bots AND no remote players are left standing
   if (state.phase === 'playing' && !state.playerDead) {
-    const aliveBotsCount = bots.filter(b => b.alive).length;
-    const aliveRemoteCount = Object.values(state.remotePlayers).filter(rp => !rp.dead).length;
-    if (aliveBotsCount === 0 && aliveRemoteCount === 0) {
+    let anyAlive = false;
+    for (const b of bots) { if (b.alive) { anyAlive = true; break; } }
+    if (!anyAlive) {
+      for (const id in state.remotePlayers) { if (!state.remotePlayers[id].dead) { anyAlive = true; break; } }
+    }
+    if (!anyAlive) {
       state.phase = 'victory';
       const winScreen = document.getElementById('victory-screen');
       document.getElementById('win-kills').textContent = state.kills;
@@ -996,9 +1074,9 @@ function update() {
   document.getElementById('match-timer').textContent =
     String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
 
-  const aliveCount = bots.filter(b => b.alive).length
-    + Object.values(state.remotePlayers).filter(rp => !rp.dead).length
-    + (state.playerDead ? 0 : 1);
+  let aliveCount = state.playerDead ? 0 : 1;
+  for (const b of bots) if (b.alive) aliveCount++;
+  for (const id in state.remotePlayers) if (!state.remotePlayers[id].dead) aliveCount++;
   document.getElementById('alive-val').textContent = aliveCount;
 
   // Volcano eruption
@@ -1127,14 +1205,19 @@ function update() {
     state.waterLevel = -0.3 + riseProgress * (CONFIG.volcanoHeight * 0.85 + 0.3);
     water.position.y = state.waterLevel;
 
-    const waterPosAttr = water.geometry.attributes.position;
-    for (let i = 0; i < waterPosAttr.count; i++) {
-      const wx = waterPosAttr.getX(i);
-      const wy = waterPosAttr.getY(i);
-      const wave = Math.sin(wx * 0.3 + clock.elapsedTime * 1.5) * Math.cos(wy * 0.3 + clock.elapsedTime) * 0.15;
-      waterPosAttr.setZ(i, wave);
+    // Wave displacement re-uploads the whole position buffer — only the back half
+    // of every match touches this, so do it at ~30Hz. The rise (position.y) above
+    // still updates every frame, so the surface height stays smooth.
+    if ((_waterWaveFrame++ & 1) === 0) {
+      const waterPosAttr = water.geometry.attributes.position;
+      for (let i = 0; i < waterPosAttr.count; i++) {
+        const wx = waterPosAttr.getX(i);
+        const wy = waterPosAttr.getY(i);
+        const wave = Math.sin(wx * 0.3 + clock.elapsedTime * 1.5) * Math.cos(wy * 0.3 + clock.elapsedTime) * 0.15;
+        waterPosAttr.setZ(i, wave);
+      }
+      waterPosAttr.needsUpdate = true;
     }
-    waterPosAttr.needsUpdate = true;
 
     // Damage is terrain-based — jumping on water doesn't let you escape damage
     const groundUnderPlayer = getTerrainHeight(camera.position.x, camera.position.z);
@@ -1182,10 +1265,12 @@ function update() {
   // Loot proximity
   state.nearbyLoot = null;
   let closestDist = 2.5;
-  const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-  const _lootWP = new THREE.Vector3();
-  const allLootSources = [...lootItems, ...depotCrates];
-  for (const loot of allLootSources) {
+  _lootLookDir.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  // Refill the scan list in place (no per-frame array allocation).
+  _lootScan.length = 0;
+  for (const l of lootItems) _lootScan.push(l);
+  for (const c of depotCrates) _lootScan.push(c);
+  for (const loot of _lootScan) {
     loot.getWorldPosition(_lootWP);
     const dx = _lootWP.x - camera.position.x;
     const dz = _lootWP.z - camera.position.z;
@@ -1196,8 +1281,8 @@ function update() {
       const sdx = camera.position.x - shedX, sdz = camera.position.z - shedZ;
       if (Math.sqrt(sdx * sdx + sdz * sdz) > 12) continue;
     }
-    const toLoot = new THREE.Vector3(dx, 0, dz).normalize();
-    const dot = lookDir.x * toLoot.x + lookDir.z * toLoot.z;
+    _lootToVec.set(dx, 0, dz).normalize();
+    const dot = _lootLookDir.x * _lootToVec.x + _lootLookDir.z * _lootToVec.z;
     if (dot > 0.7 && dist < closestDist) { closestDist = dist; state.nearbyLoot = loot; }
   }
   pickupPrompt.textContent = state.nearbyLoot ? `[F] ${state.nearbyLoot.userData.label}` : '';
@@ -1304,21 +1389,23 @@ function update() {
 
   // Weapon bob + reload animation
   weaponBobPhase += renderDt * (isMoving ? 10 : 1.5);
-  const restPos = state.currentWeapon === 'm4' ? new THREE.Vector3(0.25, -0.22, -0.38) : new THREE.Vector3(0.2, -0.2, -0.3);
-  let targetPos;
+  const restPos = state.currentWeapon === 'm4'
+    ? _restPos.set(0.25, -0.22, -0.38)
+    : _restPos.set(0.2, -0.2, -0.3);
+  const targetPos = _wepTargetPos;
 
   if (state.reloadPhase === 'down' || state.switchPhase === 'down') {
-    targetPos = restPos.clone();
+    targetPos.copy(restPos);
     targetPos.y = -0.7;
     targetPos.x += 0.05;
     weaponGroup.rotation.x = -0.3;
   } else if (state.reloadPhase === 'up' || state.switchPhase === 'up') {
-    targetPos = restPos.clone();
+    targetPos.copy(restPos);
   } else if (state.ads) {
     const adsX = state.currentWeapon === 'm4' ? 0 : -0.15;
-    targetPos = new THREE.Vector3(adsX, -0.04, restPos.z + 0.06);
+    targetPos.set(adsX, -0.04, restPos.z + 0.06);
   } else {
-    targetPos = restPos.clone();
+    targetPos.copy(restPos);
     if (isMoving) {
       targetPos.x += Math.sin(weaponBobPhase) * 0.008;
       targetPos.y += Math.abs(Math.cos(weaponBobPhase)) * 0.008 - 0.004;
@@ -1369,7 +1456,7 @@ function update() {
     perfFrames = 0;
     perfLastTime = clock.elapsedTime;
     document.getElementById('perf-stats').textContent =
-      `FPS: ${fps} | Tris: ${(_mainTris/1000).toFixed(1)}k | Calls: ${_mainCalls}`;
+      `FPS: ${fps} | Tris: ${(_mainTris/1000).toFixed(1)}k | Calls: ${_mainCalls} | Res: ${window._curPR.toFixed(2)}x`;
   }
 
   // Apply head bob (position) + landing pitch kick (rotation) for this frame only
@@ -1421,7 +1508,7 @@ window.startBotMatch = function() {
   if (ov) ov.classList.add("hidden");
   if (typeof spawnBots === 'function') spawnBots();
   state.phase = "countdown";
-  state.matchStartAt = Date.now() + 10000;
+  state.matchStartAt = null; // countdown timer waits until all rigs are loaded (see update loop)
   renderer.domElement.requestPointerLock();
 };
 window.showPvPOptions = function() {

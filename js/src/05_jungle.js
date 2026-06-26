@@ -1047,6 +1047,42 @@ if (false) {
   const bushColors = [0x3a7a1a, 0x2d6614, 0x4a8c20, 0x336018, 0x528c24];
   const rng = (() => { let s = 9371; return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; }; })();
 
+  // One shared material for every bush (was a fresh MeshLambertMaterial per blob —
+  // 350 materials / 350 draw calls). Per-blob tint now rides in vertex colors.
+  const _bushMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const _bushDummy = new THREE.Object3D();
+  // Merge a bush's 5 blobs into one geometry → 1 mesh + 1 draw call per bush.
+  function _mergeBush(blobs, darkColor, baseColor) {
+    let total = 0;
+    const parts = [];
+    blobs.forEach(({ r, y, x, z }, i) => {
+      const g = new THREE.SphereGeometry(r, 6, 5).toNonIndexed();
+      _bushDummy.position.set(x, y, z);
+      _bushDummy.rotation.set(0, 0, 0);
+      _bushDummy.scale.set(1, 1, 1);
+      _bushDummy.updateMatrix();
+      g.applyMatrix4(_bushDummy.matrix); // bake blob offset into the verts
+      total += g.attributes.position.count;
+      parts.push({ g, c: new THREE.Color(i < 2 ? darkColor : baseColor) });
+    });
+    const pos = new Float32Array(total * 3);
+    const nor = new Float32Array(total * 3);
+    const col = new Float32Array(total * 3);
+    let off = 0;
+    for (const { g, c } of parts) {
+      const n = g.attributes.position.count;
+      pos.set(g.attributes.position.array, off * 3);
+      nor.set(g.attributes.normal.array, off * 3);
+      for (let k = 0; k < n; k++) { col[(off + k) * 3] = c.r; col[(off + k) * 3 + 1] = c.g; col[(off + k) * 3 + 2] = c.b; }
+      off += n;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal',   new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    return geo;
+  }
+
   const bushPositions = [];
   let attempts = 0;
   while (bushPositions.length < 35 && attempts++ < 2000) {
@@ -1079,16 +1115,9 @@ if (false) {
       { r: 0.45 * scale, y: 1.50 * scale, x: -0.1 * scale,    z: -0.1 * scale },
     ];
 
-    blobs.forEach(({ r, y, x, z }, i) => {
-      const col = i < 2 ? darkColor : baseColor;
-      const mat = new THREE.MeshLambertMaterial({ color: col });
-      const geo = new THREE.SphereGeometry(r, 6, 5);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(x, y, z);
-      // No castShadow — 5 meshes per bush in the shadow pass for a ground-level
-      // blob shadow that's invisible under the bush itself.
-      group.add(mesh);
-    });
+    // One merged, vertex-colored mesh per bush (no castShadow — a ground-level
+    // blob shadow is invisible under the bush itself).
+    group.add(new THREE.Mesh(_mergeBush(blobs, darkColor, baseColor), _bushMat));
 
     scene.add(group);
     // Collision proxy — same footprint as the bush cluster
@@ -1130,13 +1159,7 @@ if (false) {
       { r: 0.65 * scale, y: 1.20 * scale, x:  0.15 * scale, z:  0.1 * scale },
       { r: 0.45 * scale, y: 1.50 * scale, x: -0.1 * scale,  z: -0.1 * scale },
     ];
-    blobs.forEach(({ r, y, x, z }, i) => {
-      const col = i < 2 ? darkColor : baseColor;
-      const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 5),
-        new THREE.MeshLambertMaterial({ color: col }));
-      mesh.position.set(x, y, z);
-      group.add(mesh);
-    });
+    group.add(new THREE.Mesh(_mergeBush(blobs, darkColor, baseColor), _bushMat));
     scene.add(group);
     const _bCol2 = new THREE.Mesh(
       new THREE.BoxGeometry(2.0 * scale, 1.4 * scale, 2.0 * scale),
