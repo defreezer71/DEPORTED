@@ -1,9 +1,25 @@
 # Performance investigation — frame drops in auto-join matches (handoff)
 
-Status as of 2026-06-25: **partially improved, not solved.** The game holds ~60fps in
-open play but drops at: (1) bot load-in / countdown, (2) gate opening, (3) canal
-crossing, and (4) the moment the player is shot. Handing off to a future model
+Status as of 2026-06-26: **substantially improved.** Handing off to a future model
 (Mythos / Fable 5) — start here instead of re-deriving.
+
+## CRITICAL CONTEXT — the dev's display is 75Hz, not 60Hz
+`requestAnimationFrame` runs at the monitor refresh rate; it is NOT capped at 60.
+On this machine open play now reads **75fps** (HUD `FPS:`). This means:
+- "Smooth" for this user = **75**, so every earlier dip to 47/40/30 was a drop from
+  75 (very noticeable), and targeting 60 was wrong.
+- **Adaptive resolution (`_adaptResolution`) currently targets ~60** (drops <57, raises
+  >59.5). On a 75Hz display it should target the actual refresh rate — detect it
+  (e.g. measure rAF interval, or assume 75/144) and aim there, or it will sit at ~60
+  and feel like a permanent drop from native. **This is the first knob to revisit.**
+- The big win that got open play to 75: the **countdown load-gate** (shipped) moved
+  the one-time rig-clone cost onto a blank loading hold BEFORE the match, so the early
+  game (where the drops lived) now runs clean. The load-in/gate/canal drops were
+  largely the clone cost happening during play.
+
+## Earlier status (2026-06-25)
+Game held ~60fps in open play but dropped at: (1) bot load-in / countdown, (2) gate
+opening, (3) canal crossing, (4) the moment the player is shot.
 
 ## What the data established (high confidence)
 - **Each character is exactly 1 draw call.** Parsed the GLBs: 1 mesh, 1 primitive,
