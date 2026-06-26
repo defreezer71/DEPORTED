@@ -6502,12 +6502,14 @@ function update() {
     // show "…"; the 10s countdown only starts once everyone's in — so the load-in
     // cost happens here instead of dropping frames mid-countdown / early match.
     if (!state.matchStartAt && typeof charLoadComplete === 'function') {
-      const cdElL = document.getElementById('countdown-num');
       if (charLoadComplete()) {
         state.matchStartAt = Date.now() + 10000;
       } else {
+        // Loading: drain the clone work fast, but keep the screen blank — the
+        // countdown number only appears once everyone's in.
         for (let i = 0; i < 12; i++) _drainCharWork();
-        if (cdElL) { cdElL.textContent = '…'; cdElL.classList.add('show'); }
+        const cdElL = document.getElementById('countdown-num');
+        if (cdElL) cdElL.classList.remove('show');
       }
     }
     state.countdownTime = state.matchStartAt
