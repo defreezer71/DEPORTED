@@ -318,14 +318,16 @@ window.DBG = { state, scene, camera, bots, THREE, renderer };
 // meshes, how many cast shadows, and the split between the main pass and the
 // shadow pass. Renders twice (with/without shadows) to measure the shadow cost.
 window.DBG.perfProbe = function () {
-  let meshes = 0, visible = 0, casters = 0, instanced = 0;
+  let meshes = 0, visible = 0, casters = 0, instanced = 0, skinned = 0;
   scene.traverse(o => {
-    if (!o.isMesh) return;
+    if (!o.isMesh && !o.isSkinnedMesh) return;
     meshes++;
     if (o.visible) visible++;
     if (o.castShadow) casters++;
     if (o.isInstancedMesh) instanced++;
+    if (o.isSkinnedMesh) skinned++;
   });
+  // Current-view draw-call split (main vs shadow pass) + live tri count for this view.
   const wasEnabled = renderer.shadowMap.enabled;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.needsUpdate = true;
@@ -334,9 +336,32 @@ window.DBG.perfProbe = function () {
   renderer.shadowMap.enabled = false;
   renderer.render(scene, camera);
   const mainOnly = renderer.info.render.calls;
+  // 360° yaw sweep from where you're standing — quantifies the no-occlusion-culling
+  // swing in draw calls (face the open island and the whole map draws even behind
+  // walls; face a cliff and almost nothing does). Shadows off for speed; the camera
+  // is restored afterward and the next frame re-derives it from state.yaw anyway.
+  const savedQuat = camera.quaternion.clone();
+  const sweepEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  let minC = Infinity, maxC = 0, minYaw = 0, maxYaw = 0, minT = Infinity, maxT = 0;
+  for (let k = 0; k < 24; k++) {
+    sweepEuler.set(-0.12, (k / 24) * Math.PI * 2, 0);
+    camera.quaternion.setFromEuler(sweepEuler);
+    camera.updateMatrixWorld(true);
+    renderer.render(scene, camera);
+    const c = renderer.info.render.calls, t = renderer.info.render.triangles;
+    if (c < minC) { minC = c; minYaw = k * 15; }
+    if (c > maxC) { maxC = c; maxYaw = k * 15; }
+    if (t < minT) minT = t;
+    if (t > maxT) maxT = t;
+  }
+  camera.quaternion.copy(savedQuat);
+  camera.updateMatrixWorld(true);
   renderer.shadowMap.enabled = wasEnabled;
-  console.log(`[probe] scene meshes ${meshes} | visible ${visible} | shadow-casters ${casters} | instanced ${instanced}`);
-  console.log(`[probe] draw calls — total ${withShadow} = main ${mainOnly} + shadow ${withShadow - mainOnly} | tris ${(tris/1000)|0}k`);
+  renderer.shadowMap.needsUpdate = true;
+  const mem = renderer.info.memory;
+  console.log(`[probe] scene meshes ${meshes} | visible ${visible} | skinned ${skinned} | shadow-casters ${casters} | instanced ${instanced} | geom ${mem.geometries} | tex ${mem.textures}`);
+  console.log(`[probe] this view — draw calls total ${withShadow} = main ${mainOnly} + shadow ${withShadow - mainOnly} | tris ${(tris/1000)|0}k`);
+  console.log(`[probe] 360° sweep — calls ${minC} (@${minYaw}°) … ${maxC} (@${maxYaw}°) | tris ${(minT/1000)|0}k … ${(maxT/1000)|0}k`);
 };
 
 // ═══════════════════════════════════════════════════════════

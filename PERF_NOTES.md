@@ -17,6 +17,36 @@ On this machine open play now reads **75fps** (HUD `FPS:`). This means:
   game (where the drops lived) now runs clean. The load-in/gate/canal drops were
   largely the clone cost happening during play.
 
+## Captured numbers (2026-06-27) — real M1/Metal render via headless harness
+First hard measurement of the scene workload. Drove the actual game in Google Chrome
+(ANGLE Metal, Apple M1) and read `renderer.info` on true GPU renders. Geometry counts
+are GPU-independent and exact; the frame-cost figures are **render-only** (exclude the
+per-frame game CPU: bot AI, physics, mixers, gun-fit IK) at a 1641×1026 backbuffer, so
+treat their fps as a render ceiling, not end-to-end (end-to-end on-device is 75).
+
+- **Triangles: ~1.55M baseline, ~1.578M facing the open island.** The static world is
+  the *entire* geometry budget — it barely moves as you spin 360°. Characters are noise
+  (~1 draw call + a few k tris each).
+- **Scene census:** 1,398 meshes (1,389 visible), ~1,155 geometries, 219 shadow-casters,
+  24 InstancedMesh, 10 textures, 26 shader programs.
+- **Draw calls swing 62 → 852 on camera direction alone** (360° sweep from prison spawn:
+  62 facing a cliff @120°, 852 facing the island @300°). Confirms: no occlusion culling.
+- **Render frame cost (M1, 1641×1026, render-only):** worst island view = 852 calls /
+  1.578M tris / **10.9ms median** (~92fps ceiling); same view no-shadow = 10.0ms; looking
+  away = 65 calls / **4.9ms** (~204fps). Shadows add only ~0.9ms at this view.
+- **Refines the fill-bound read:** the ~790 extra draw calls at the corner cost ~6ms
+  (4.9→10.9ms) at the *same* tris and resolution — that's real draw-call / command-
+  encoding (CPU) cost, not fill. So there are **two distinct hot spots**: the corner
+  spawn is **draw-call bound** (no occlusion culling → 852 calls; fix = step 4 below),
+  while the drop-to-30-when-shot is **fill bound** (full-screen vignette; fix = adaptive
+  res). They are different problems and want different fixes.
+- **Bandwidth is a non-issue:** down `(6+N·17)·60` B/s ≈ 20KB/s at the 20-player cap;
+  up `24·60` ≈ 1.4KB/s. Bots are client-simulated and never hit the wire.
+
+`DBG.perfProbe()` now prints all of the above live in any browser tab: the scene census,
+the current-view main/shadow split + tri count, AND a 360° draw-call sweep (min/max calls
+with the yaw where each occurs). Run it standing at the prison corner to see the swing.
+
 ## Earlier status (2026-06-25)
 Game held ~60fps in open play but dropped at: (1) bot load-in / countdown, (2) gate
 opening, (3) canal crossing, (4) the moment the player is shot.
@@ -61,8 +91,10 @@ Reverted (caused a bug):
 
 ## Recommended next steps (data-driven, not guessing)
 1. **Get a real CPU/GPU profile.** Chrome DevTools Performance trace during a canal
-   cross / when-shot. We never confirmed CPU-vs-GPU bound. `DBG.perfProbe()` (console)
-   prints the main-vs-shadow draw-call split; was added but never run.
+   cross / when-shot. `DBG.perfProbe()` has now been run (see Captured numbers above):
+   it prints the census, current-view main/shadow split, and a 360° draw-call sweep.
+   Still want a DevTools timeline trace of the *when-shot* spike to confirm it's the
+   vignette fill cost end-to-end (the harness render-only bench can't see game CPU).
 2. **If GPU/fill:** adaptive res should work — make it react harder/faster, and note
    the damage vignette composites at *device* resolution (not affected by renderer
    pixel ratio) so it may need to be drawn into the WebGL canvas or made cheaper.
