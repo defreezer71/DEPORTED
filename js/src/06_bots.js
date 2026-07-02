@@ -4,7 +4,10 @@
 const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India','Juliet',
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
-const BOT_COUNT = 10;
+// Duel mode is player-vs-player only — no bots. The AI/character code below
+// stays intact (the character rig loader is also used for remote players);
+// spawnBots() simply loops zero times. Flip mode to 'br' to bring bots back.
+const BOT_COUNT = CONFIG.mode === 'duel' ? 0 : 10;
 
 // ── GLTF character system ──
 // Each animation is a separate GLB (mesh + animation from same export = matching bind pose).

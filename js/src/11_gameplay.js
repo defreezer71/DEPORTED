@@ -338,12 +338,16 @@ function updateHUD() {
 // ═══════════════════════════════════════════════════════════
 const mCtx = document.getElementById('minimap-canvas').getContext('2d');
 function drawMinimap() {
-  const w = 150, h = 150, scale = w / CONFIG.islandSize, cx = w / 2, cy = h / 2;
+  // Scale to the actual map size (island 253 / city 120) via `half`.
+  const w = 150, h = 150, mapSize = half * 2, scale = w / mapSize, cx = w / 2, cy = h / 2;
   mCtx.fillStyle = '#0a6699'; mCtx.fillRect(0, 0, w, h);
-  const iSize = CONFIG.islandSize * scale;
-  mCtx.fillStyle = '#3a5a2a';
+  const iSize = mapSize * scale;
+  mCtx.fillStyle = (CONFIG.world === 'city') ? '#33363c' : '#3a5a2a';
   mCtx.fillRect(cx - iSize / 2, cy - iSize / 2, iSize, iSize);
 
+  // Island-only minimap features — volcano / canal / flood / prison all live
+  // in the removed island world files. City draws just the arena + player.
+  if (CONFIG.world === 'island') {
   // Volcano
   mCtx.beginPath();
   mCtx.arc(cx, cy, CONFIG.volcanoRadius * scale, 0, Math.PI * 2);
@@ -381,6 +385,7 @@ function drawMinimap() {
   // Prison
   mCtx.fillStyle = '#808080';
   mCtx.fillRect(cx + prison.x * scale - pw * scale / 2, cy + prison.z * scale - pw * scale / 2, pw * scale, pw * scale);
+  }
 
   // Bots (alive = red dots)
   bots.forEach(b => {

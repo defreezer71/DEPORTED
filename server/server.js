@@ -220,12 +220,13 @@ wss.on('connection', ws => {
       myRoom = code;
       if (!rooms[code]) makeRoom(code, isAuto);
       const room = rooms[code];
-      // Spawn inside the prison — must match the client's CONFIG.prisonPos
-      // (-105, 105) or movement validation starts from a desynced position.
+      // Spawn at the city duel spawn — must match the client's CONFIG.spawnPos
+      // (city A = 0,-50) or movement validation starts from a desynced position.
+      // TODO(duel): assign spawn A/B by join order for the two-player match.
       const a = Math.random()*Math.PI*2, r = Math.random()*8;
       room.players[myId] = {
         id: myId, name: msg.name || ('P_'+myId.slice(-4)), ws,
-        x: -105+Math.cos(a)*r, y: 0, z: 105+Math.sin(a)*r,
+        x: 0+Math.cos(a)*r, y: 0, z: -50+Math.sin(a)*r,
         hp: 100, armor: 0, dead: false, pistol: false, shooting: false, lastSeen: Date.now()
       };
       // Start 3-min fill timer when first player joins a waiting room

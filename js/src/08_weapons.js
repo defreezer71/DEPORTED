@@ -273,7 +273,9 @@ function buildCollisionCache() {
   collidableCache.length = 0;
   for (const obj of collidables) {
     obj.updateMatrixWorld(true); // force world matrix before BB compute
-    const isDynamic = (obj === gateDoorL || obj === gateDoorR);
+    // Gate doors are the only moving collidables, and they're island-only
+    // (removed in the city build) — short-circuit before referencing them.
+    const isDynamic = CONFIG.world === 'island' && (obj === gateDoorL || obj === gateDoorR);
     const bb = new THREE.Box3().setFromObject(obj);
     collidableCache.push({ bb, dynamic: isDynamic, obj });
   }

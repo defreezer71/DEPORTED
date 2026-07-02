@@ -86,7 +86,10 @@ const crateStrip  = new THREE.MeshPhongMaterial({ color: 0x999999, shininess: 55
 const crateCorner = new THREE.MeshPhongMaterial({ color: 0x666666, shininess: 65 });
 const depotCrates = [];
 
-depotCorners.forEach(({ x, z }) => {
+// Ammo depots are BR only — duel is fixed-loadout, no pickups. Declarations
+// above (windowPanes/obbCollidables/obbFloors/depotCrates) stay defined (empty)
+// so physics + shot raycast still resolve them.
+if (CONFIG.mode === 'br') depotCorners.forEach(({ x, z }) => {
   const h = getTerrainHeight(x, z);
   const rotY = Math.atan2(-x, -z);
   const cosR = Math.cos(rotY), sinR = Math.sin(rotY);
@@ -312,8 +315,8 @@ depotCorners.forEach(({ x, z }) => {
   group.updateMatrixWorld(true);
 });
 
-// ── Outer-ring scattered loot — 10 crates beyond the canal ──
-{
+// ── Outer-ring scattered loot — 10 crates beyond the canal (BR only) ──
+if (CONFIG.mode === 'br') {
   const outerLoot = [
     [ 104,  34, 'ammo_m4'],
     [  65,  89, 'armor'],

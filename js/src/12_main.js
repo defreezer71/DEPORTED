@@ -672,12 +672,16 @@ function update() {
       state.phase = 'playing';
       window._killCamBot = null;
       cdEl.classList.remove('show');
-      state.gateOpening = true;
-      SFX.gate_creak();
-      const idx1 = collidables.indexOf(gateDoorL);
-      if (idx1 >= 0) collidables.splice(idx1, 1);
-      const idx2 = collidables.indexOf(gateDoorR);
-      if (idx2 >= 0) collidables.splice(idx2, 1);
+      // Prison gate swing is island-only (gateDoorL/R live in the island world
+      // file, which the city build removes). Duel has no gate.
+      if (CONFIG.world === 'island') {
+        state.gateOpening = true;
+        SFX.gate_creak();
+        const idx1 = collidables.indexOf(gateDoorL);
+        if (idx1 >= 0) collidables.splice(idx1, 1);
+        const idx2 = collidables.indexOf(gateDoorR);
+        if (idx2 >= 0) collidables.splice(idx2, 1);
+      }
     }
   }
 
@@ -701,8 +705,10 @@ function update() {
     startKillCam();
   }
 
-  // Check victory — you win when no bots AND no remote players are left standing
-  if (state.phase === 'playing' && !state.playerDead) {
+  // Check victory — you win when no bots AND no remote players are left standing.
+  // BR only: in duel, winning is "first to 2 kills" (handled separately), so the
+  // last-alive check must NOT fire (with 0 bots it would win instantly).
+  if (CONFIG.mode === 'br' && state.phase === 'playing' && !state.playerDead) {
     let anyAlive = false;
     for (const b of bots) { if (b.alive) { anyAlive = true; break; } }
     if (!anyAlive) {
@@ -1081,9 +1087,9 @@ function update() {
   for (const id in state.remotePlayers) if (!state.remotePlayers[id].dead) aliveCount++;
   document.getElementById('alive-val').textContent = aliveCount;
 
-  // Volcano eruption
+  // Volcano eruption — BR storm only (references island `water`/plume objects)
   const eruptionTime = state.waterRiseStart - 15;
-  if (state.matchTime >= eruptionTime && !state.erupted) {
+  if (CONFIG.mode === 'br' && state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
     state.eruptionStartTime = state.matchTime;
     // Reset plume — evenly stagger so no wave gap on startup
@@ -1188,7 +1194,7 @@ function update() {
     state.shakeOffset.set(0, 0, 0);
   }
 
-  if (state.matchTime >= state.waterRiseStart) {
+  if (CONFIG.mode === 'br' && state.matchTime >= state.waterRiseStart) {
     if (!state.waterRising) {
       state.waterRising = true;
       water.visible = true;
@@ -1299,23 +1305,30 @@ function update() {
     loot.rotation.y += renderDt * 1.5;
   }
 
-  // Smoke
-  smokeInst.visible = !state.erupted;
-  ashMesh.visible = !state.erupted;
-  if (!state.erupted) _plumeGroup.visible = false;
-  for (const s of smokeParticles) {
-    const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
-    const spread = 1 + riseT * 0.07;
-    _smokeDummy.position.set(
-      s.ox * spread + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 1.5,
-      CONFIG.volcanoHeight + 2 + riseT,
-      s.oz * spread + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 1.5
-    );
-    _smokeDummy.scale.setScalar(s.size * (1 + riseT * 0.035));
-    _smokeDummy.updateMatrix();
-    smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
+  // Smoke — island volcano only (smokeInst lives in the island world file,
+  // which the city build swaps out). ashMesh/_plumeGroup are defined here in
+  // 12_main, so we still force them hidden in the city.
+  if (CONFIG.world === 'island') {
+    smokeInst.visible = !state.erupted;
+    ashMesh.visible = !state.erupted;
+    if (!state.erupted) _plumeGroup.visible = false;
+    for (const s of smokeParticles) {
+      const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
+      const spread = 1 + riseT * 0.07;
+      _smokeDummy.position.set(
+        s.ox * spread + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 1.5,
+        CONFIG.volcanoHeight + 2 + riseT,
+        s.oz * spread + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 1.5
+      );
+      _smokeDummy.scale.setScalar(s.size * (1 + riseT * 0.035));
+      _smokeDummy.updateMatrix();
+      smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
+    }
+    smokeInst.instanceMatrix.needsUpdate = true;
+  } else {
+    ashMesh.visible = false;
+    _plumeGroup.visible = false;
   }
-  smokeInst.instanceMatrix.needsUpdate = true;
 
   // Water vignette
   if (state.waterRising) {
@@ -1532,10 +1545,13 @@ window.startPvPMatch = function() {
   state.phase = "lobby";
   state.inLobby = true;
   camera.position.set(
-    CONFIG.prisonPos.x + (Math.random() - 0.5) * 8,
+    CONFIG.spawnPos.x + (Math.random() - 0.5) * 8,
     CONFIG.playerHeight,
-    CONFIG.prisonPos.z + (Math.random() - 0.5) * 8
+    CONFIG.spawnPos.z + (Math.random() - 0.5) * 8
   );
+  // Reseed the capsule from the spawn camera — physics drives the camera, so
+  // without this the capsule keeps its old position and the spawn is ignored.
+  if (CONFIG.newPhysics) physInit();
   state.ammo.m4 = 30; state.ammo.pistol = 15;
   state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
   try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
@@ -2193,10 +2209,12 @@ function connectToServer() {
         if (typeof updateHUD === 'function') updateHUD();
         state.velocityY = 0;
         camera.position.set(
-          CONFIG.prisonPos.x + (Math.random() - 0.5) * 10,
+          CONFIG.spawnPos.x + (Math.random() - 0.5) * 10,
           CONFIG.playerHeight,
-          CONFIG.prisonPos.z + (Math.random() - 0.5) * 10
+          CONFIG.spawnPos.z + (Math.random() - 0.5) * 10
         );
+        // Reseed the capsule to the match-start spawn (physics drives the camera).
+        if (CONFIG.newPhysics) physInit();
         { const chatEl = document.getElementById('chat-container');
           if (chatEl) chatEl.style.setProperty('display', 'flex', 'important'); }
         // Players are normally already pointer-locked (ready-up grabs the lock).

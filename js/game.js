@@ -44,6 +44,19 @@ const CONFIG = {
   // false = legacy AABB system (checkCollisionAndStep) — original behaviour
   newPhysics: true,
 
+  // ── Release profile ──
+  // A "shelf" switch, like newPhysics: the battle-royale island build stays fully
+  // intact and one flag-flip away. Nothing is deleted.
+  //   mode:  'br'     = 20-player battle royale        | 'duel' = 1v1, first-to-2 kills, respawns
+  //   world: 'island' = procedural volcano island      | 'city' = flat 120u plaza arena
+  // `mode` gates bots, the rising-water storm, matchmaking and win condition.
+  // `world` selects the map; the actual geometry is swapped in build.sh (island
+  // world files vs. city world files), so the island source stays untouched.
+  // Baseline = current island BR; flipped to 'duel'/'city' at cutover once the
+  // gates and city geometry are in place.
+  mode: 'duel',
+  world: 'city',
+
   weapons: {
     m4: {
       name: 'M4', magSize: 30, fireRate: 100,
@@ -61,6 +74,11 @@ const CONFIG = {
     }
   }
 };
+
+// Player spawn point, resolved from the active world so the initial camera
+// (02_setup) and the physics seed are correct from load. City duel spawns are
+// refined in 03_city.js (CITY_SPAWNS); this is the bootstrap default.
+CONFIG.spawnPos = (CONFIG.world === 'city') ? { x: 0, z: -50 } : CONFIG.prisonPos;
 
 // ═══════════════════════════════════════════════════════════
 // STATE
@@ -267,7 +285,7 @@ sunMesh.renderOrder = 0;
 scene.add(sunMesh);
 
 const camera = new THREE.PerspectiveCamera(CONFIG.normalFov, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(CONFIG.prisonPos.x, CONFIG.playerHeight, CONFIG.prisonPos.z);
+camera.position.set(CONFIG.spawnPos.x, CONFIG.playerHeight, CONFIG.spawnPos.z);
 const weaponScene = new THREE.Scene();
 const weaponAmbient = new THREE.AmbientLight(0xffffff, 0.8);
 weaponScene.add(weaponAmbient);
@@ -392,2209 +410,100 @@ window._sunDist = 170; // how far up-light the sun sits from the player
 scene.add(new THREE.HemisphereLight(0x4488ff, 0x2d7a0a, 0.7));
 
 // ═══════════════════════════════════════════════════════════
-// TERRAIN
 // ═══════════════════════════════════════════════════════════
-const half = CONFIG.islandSize / 2;
-
-
-// Used by jungle placement to keep trees out of the canal zone
-const _CANAL_R = 85, _CANAL_W = 1.25;
-function isInStream(x, z) {
-  const w = _CANAL_W + 6; // extra buffer keeps trees/bushes clear of canal edges
-  if (Math.abs(z + _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true; // North
-  if (Math.abs(x - _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true; // East
-  if (Math.abs(z - _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true; // South
-  if (Math.abs(x + _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true; // West
-  return false;
-}
-// Tight version — only excludes the actual water channel (for grass placement)
-function isInCanalWater(x, z) {
-  const w = _CANAL_W + 0.2;
-  if (Math.abs(z + _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true;
-  if (Math.abs(x - _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true;
-  if (Math.abs(z - _CANAL_R) < w && Math.abs(x) <= _CANAL_R + w) return true;
-  if (Math.abs(x + _CANAL_R) < w && Math.abs(z) <= _CANAL_R + w) return true;
-  return false;
-}
-
-function getVolcanoHeight(x, z) {
-  const dist = Math.sqrt(x * x + z * z);
-  if (dist > CONFIG.volcanoRadius) return 0;
-  const t = 1 - dist / CONFIG.volcanoRadius;
-  const smooth = t * t * t * (t * (t * 6 - 15) + 10);
-  let h = smooth * CONFIG.volcanoHeight;
-  if (dist < CONFIG.volcanoRadius * 0.18) {
-    const flatT = dist / (CONFIG.volcanoRadius * 0.18);
-    h = CONFIG.volcanoHeight - (1 - flatT * flatT) * 1.2;
-  }
-  return Math.max(0, h);
-}
-
-function getTerrainHeight(x, z) {
-  if (Math.abs(x) > half || Math.abs(z) > half) return -5;
-  const vh = getVolcanoHeight(x, z);
-
-  const raw = Math.sin(x * 0.15) * Math.cos(z * 0.15) * 0.3;
-
-  // Flatten terrain within 10 units of each canal side so the canal walls
-  // never float above or sink into a terrain ridge/valley.
-  const R = _CANAL_R, buf = 10;
-  const dS = (Math.abs(x) <= R + buf) ? Math.abs(z + R) : 999;
-  const dN = (Math.abs(x) <= R + buf) ? Math.abs(z - R) : 999;
-  const dE = (Math.abs(z) <= R + buf) ? Math.abs(x - R) : 999;
-  const dW = (Math.abs(z) <= R + buf) ? Math.abs(x + R) : 999;
-  const dist = Math.min(dS, dN, dE, dW);
-  const flatRaw = dist >= buf ? raw : raw * (dist / buf) * (dist / buf) * (3 - 2 * (dist / buf));
-
-  // Smoothly blend flat terrain into volcano over a 0→1.5 unit transition zone.
-  // The old hard threshold (vh > 0.5 → return vh) caused a visible floor jump.
-  if (vh <= 0)   return flatRaw;
-  if (vh >= 1.5) return vh;
-  const bt = vh / 1.5;
-  const st = bt * bt * (3 - 2 * bt);   // smoothstep
-  return flatRaw + (vh - flatRaw) * st;
-}
-
+// CITY ARENA — flat 120u duel map
+// Replaces the island world files (03_terrain / 04_world / 05_jungle)
+// in the build; see build.sh. The island source is left untouched on
+// the shelf. To restore the island: swap the filenames back in build.sh
+// and set CONFIG.world='island' / CONFIG.mode='br'.
+//
+// This module honours the same "world contract" the rest of the code
+// expects from the island files:
+//   • const half                      — world-bound clamp (12_main), loot, bots
+//   • getTerrainHeight/GroundHeight    — physics floor + assorted consumers
+//   • getVolcanoHeight                 — shooting LOS (returns 0 → never blocks)
+//   • isInStream/isInCanalWater        — jungle-only no-ops (safety stubs)
+//   • pushes solid geometry into `collidables` (movement, 08b_physics)
+//     AND `targets` (bullet raycast in 11_gameplay) — same as prison walls,
+//     so every building/crate/wall is real cover that blocks shots.
 // ═══════════════════════════════════════════════════════════
-// BUILD GROUND MESH
-// ═══════════════════════════════════════════════════════════
-const groundSeg = 180;
-const groundGeo = new THREE.PlaneGeometry(CONFIG.islandSize, CONFIG.islandSize, groundSeg, groundSeg);
-const gPosAttr = groundGeo.attributes.position;
 
-for (let i = 0; i < gPosAttr.count; i++) {
-  const x = gPosAttr.getX(i);
-  const y = gPosAttr.getY(i);
-  gPosAttr.setZ(i, getTerrainHeight(x, y));
-}
-groundGeo.computeVertexNormals();
+const ARENA = 120;
+const half = ARENA / 2;   // 60
 
-const groundColors = new Float32Array(gPosAttr.count * 3);
-for (let i = 0; i < gPosAttr.count; i++) {
-  const x = gPosAttr.getX(i);
-  const y = gPosAttr.getY(i);
-  const h = getTerrainHeight(x, y);
-  let r, g, b;
-  // Use distance from center to determine volcano zone (not height) — prevents green bleed at base
-  const vDist = Math.sqrt(x * x + y * y);
-  const onVolcano = vDist < CONFIG.volcanoRadius * 0.98 && getVolcanoHeight(x, y) > 0.2;
-  if (onVolcano) {
-    const t = Math.min(h / CONFIG.volcanoHeight, 1);
-    // Polar coords — radial channels run down from summit like real lava flows
-    const angle  = Math.atan2(y, x);
-    const normR  = Math.sqrt(x*x + y*y) / CONFIG.volcanoRadius;
-    // Primary flow channels — 9 main ridges radiating from crater
-    const flowA  = Math.sin(angle * 9  + normR * 4.5) * 0.085;
-    // Secondary channels between primaries
-    const flowB  = Math.sin(angle * 17 + normR * 3.2 + 0.8) * 0.045;
-    // Slow large-scale undulation — breaks regularity without adding pattern
-    const flowC  = Math.sin(angle * 4  - normR * 2.1 + 1.3) * 0.035;
-    // Fine surface roughness — mixed irrational frequencies to avoid grid
-    const rough  = Math.sin(x * 8.3 + y * 11.7) * 0.016 + Math.cos(x * 19.1 - y * 13.4) * 0.010;
-    // Subtle height strata (geological layering)
-    const strata = Math.sin(h * 2.2) * 0.028 + Math.sin(h * 5.5) * 0.013;
-    // Combined surface noise
-    const surf = flowA + flowB + flowC + rough + strata;
-    // Occasional brown scatter — clamped so it only shows in patches, not uniformly
-    const brownNoise = Math.sin(x * 3.7 + y * 5.1) * Math.cos(x * 7.3 - y * 2.9);
-    const brown = Math.max(0, brownNoise - 0.45) * 0.18;  // only fires where noise peaks, sparse
-    // Zone blends — sharper transitions for visible banding
-    const rustBlend = Math.max(0, Math.min(1, (t - 0.20) / 0.25));
-    const ashBlend  = Math.max(0, Math.min(1, (t - 0.58) / 0.22));
-    const rimBlend  = Math.max(0, (t - 0.84) / 0.16);
-    // Colors: dark charcoal basalt → medium grey slope → lighter grey → dark red crater rim
-    const basaltR = 0.17 + surf * 0.55 + brown * 1.0;
-    const basaltG = 0.17 + surf * 0.54 + brown * 0.5;
-    const basaltB = 0.16 + surf * 0.52;
-    // Mid-slope: slightly lighter grey, flow channels still prominent
-    const rustR   = 0.25 + surf * 0.60 + brown * 1.0;
-    const rustG   = 0.24 + surf * 0.58 + brown * 0.5;
-    const rustB   = 0.23 + surf * 0.56;
-    // Upper slope: cool grey, subtle strata
-    const ashR    = 0.31 + rough * 0.18 + strata * 0.10 + brown * 0.7;
-    const ashG    = 0.30 + rough * 0.17 + strata * 0.09 + brown * 0.35;
-    const ashB    = 0.29 + rough * 0.16 + strata * 0.08;
-    // Crater rim: dark volcanic red — keep the red summit (15% darker)
-    const rimR    = 0.255 + rough * 0.238;
-    const rimG    = 0.043 + rough * 0.051;
-    const rimB    = 0.026 + rough * 0.034;
-    r = basaltR + (rustR - basaltR) * rustBlend + (ashR - rustR) * ashBlend + (rimR - ashR) * rimBlend;
-    g = basaltG + (rustG - basaltG) * rustBlend + (ashG - rustG) * ashBlend + (rimG - ashG) * rimBlend;
-    b = basaltB + (rustB - basaltB) * rustBlend + (ashB - rustB) * ashBlend + (rimB - ashB) * rimBlend;
-    r = Math.max(0, Math.min(1, r));
-    g = Math.max(0, Math.min(1, g));
-    b = Math.max(0, Math.min(1, b));
-  } else {
-    // Multi-octave noise for rich micro-variation
-    const n1 = Math.sin(x * 0.48 + 0.3) * Math.cos(y * 0.71 + 0.1) * 0.11;
-    const n2 = Math.sin(x * 2.31 + y * 1.72) * 0.055;
-    const n3 = Math.sin(x * 0.11 - 0.2) * Math.cos(y * 0.094 + 0.5) * 0.08;
-    const n4 = Math.sin(x * 5.7 + y * 4.3) * 0.028;
-    const n5 = Math.cos(x * 9.1 - y * 7.8) * 0.016;
-    const n6 = Math.sin(x * 18.3 + y * 22.7) * 0.008; // fine detail
-    const grass = n1 + n2 + n3 + n4 + n5 + n6;
-    const warmth = Math.sin(x * 0.07 + y * 0.05) * 0.03;
-    // Moisture map — damp dark green near canal, dry olive elsewhere
-    const dS = Math.abs(y + _CANAL_R), dN = Math.abs(y - _CANAL_R);
-    const dE = Math.abs(x - _CANAL_R), dW = Math.abs(x + _CANAL_R);
-    const nearCanal = Math.max(0, 1 - Math.min(dS, dN, dE, dW) / 22);
-    const moisture = nearCanal * 0.06;
-    // Subtle dirt-path variation along diagonals
-    const dirtPatch = Math.max(0, Math.sin(x * 0.22 + y * 0.19) * Math.cos(x * 0.15 - y * 0.28) - 0.55) * 0.18;
-    const baseG = 0.28 + grass + moisture;
-    r = Math.max(0, (0.07 + grass * 0.7 + warmth + seededRand() * 0.022 + dirtPatch * 1.1) * 0.60);
-    g = Math.max(0, (baseG   + seededRand() * 0.038 - dirtPatch * 0.3) * 0.62);
-    b = Math.max(0, (0.04 + grass * 0.35 - warmth * 0.6 + moisture * 0.4) * 0.60);
-  }
-  groundColors[i * 3] = r;
-  groundColors[i * 3 + 1] = g;
-  groundColors[i * 3 + 2] = b;
-}
-groundGeo.setAttribute('color', new THREE.BufferAttribute(groundColors, 3));
+// ── Flat-world contract: ground is y=0 everywhere, no volcano, no canal ──
+function getTerrainHeight(x, z) { return 0; }
+function getGroundHeight(x, z)  { return 0; }
+function getVolcanoHeight(x, z) { return 0; }
+function isInStream(x, z)       { return false; }
+function isInCanalWater(x, z)   { return false; }
 
-const ground = new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ vertexColors: true }));
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
-
-// ── Raised canal — square corners, axis-aligned sides ──
-{
-  const CANAL_R    = 85;
-  const canalH     = 0.847; // +10%
-  const canalOuter = 1.25;
-  const wallThick  = 0.29;
-  const canalInner = canalOuter - wallThick;
-  const _s = 2.5;
-
-  const _waterMat = new THREE.MeshLambertMaterial({
-    color: 0x1a8ed8, transparent: true, opacity: 0.84, side: THREE.DoubleSide,
-  });
-
-  // Brick texture for canal walls
-  const _brickCanvas = document.createElement('canvas'); _brickCanvas.width = 256; _brickCanvas.height = 128;
-  const _bctx = _brickCanvas.getContext('2d');
-  _bctx.fillStyle = '#291a11'; _bctx.fillRect(0, 0, 256, 128);
-  const bW = 64, bH = 28;
-  for (let row = 0; row < 6; row++) {
-    const offsetX = (row % 2) * bW * 0.5;
-    for (let col = -1; col < 5; col++) {
-      const bx = col * bW + offsetX, by = row * bH;
-      const shade = 0.88 + Math.random() * 0.24;
-      _bctx.fillStyle = `rgba(${Math.floor(50*shade)},${Math.floor(28*shade)},${Math.floor(16*shade)},1)`;
-      _bctx.fillRect(bx + 2, by + 2, bW - 4, bH - 4);
-      for (let gi = 0; gi < 5; gi++) {
-        _bctx.fillStyle = `rgba(0,0,0,${0.04 + Math.random()*0.06})`;
-        _bctx.fillRect(bx + 2 + Math.random()*(bW-8), by + 2 + Math.random()*(bH-6), bW*0.3, 1);
-      }
-    }
-  }
-  _bctx.fillStyle = 'rgba(18,11,8,0.92)';
-  for (let row = 0; row <= 6; row++) { _bctx.fillRect(0, row * bH, 256, 2); }
-  for (let row = 0; row < 6; row++) {
-    const offsetX = (row % 2) * bW * 0.5;
-    for (let col = -1; col < 5; col++) { _bctx.fillRect(col*bW+offsetX, row*bH, 2, bH); }
-  }
-  const _brickTex = new THREE.CanvasTexture(_brickCanvas);
-  _brickTex.wrapS = _brickTex.wrapT = THREE.RepeatWrapping;
-
-  const _wallMat = new THREE.MeshLambertMaterial({ map: _brickTex, side: THREE.DoubleSide });
-
-  // addQuad with UV: uvArr receives UVs computed from quad horizontal/vertical spans
-  const addQuad = (arr, uvArr, idx, x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3) => {
-    const b = arr.length / 3;
-    arr.push(x0,y0,z0, x1,y1,z1, x2,y2,z2, x3,y3,z3);
-    if (uvArr) {
-      const sc = 0.55;
-      const dx=x1-x0,dz=z1-z0; const hL=Math.sqrt(dx*dx+dz*dz)*sc;
-      const dx2=x2-x0,dy2=y2-y0,dz2=z2-z0; const vL=Math.sqrt(dx2*dx2+dy2*dy2+dz2*dz2)*sc;
-      uvArr.push(0,0, hL,0, 0,vL, hL,vL);
-    }
-    idx.push(b, b+1, b+2, b+1, b+3, b+2);
-  };
-
-  function mkPts(x0,z0,x1,z1) {
-    const dx=x1-x0, dz=z1-z0, dist=Math.sqrt(dx*dx+dz*dz);
-    const n = Math.max(2, Math.ceil(dist/_s)+1);
-    return Array.from({length:n},(_,i)=>({x:x0+dx*i/(n-1), z:z0+dz*i/(n-1)}));
-  }
-
-  function segNorm(seg) {
-    const dx=seg[seg.length-1].x-seg[0].x, dz=seg[seg.length-1].z-seg[0].z;
-    const l=Math.sqrt(dx*dx+dz*dz)||1;
-    return {nx:-dz/l, nz:dx/l};
-  }
-
-  // Miter between two normals — bisects the joint and scales to keep wall width consistent
-  function miter(n1, n2) {
-    const mx=n1.nx+n2.nx, mz=n1.nz+n2.nz;
-    const ml=Math.sqrt(mx*mx+mz*mz);
-    if (ml<0.001) return n1;
-    const dot=(mx/ml)*n1.nx+(mz/ml)*n1.nz;
-    const s=Math.min(1/Math.max(dot,0.25),4);
-    return {nx:(mx/ml)*s, nz:(mz/ml)*s};
-  }
-
-  const C=CANAL_R;
-  const segments = [
-    mkPts(-C,-C,  C,-C),
-    mkPts( C,-C,  C, C),
-    mkPts( C, C, -C, C),
-    mkPts(-C, C, -C,-C),
-  ];
-
-  const NS = segments.length;
-  const norms = segments.map(segNorm);
-  // At each junction, use a miter that correctly bridges the two adjacent segments
-  const startM = segments.map((_,i) => miter(norms[(i-1+NS)%NS], norms[i]));
-  const endM   = segments.map((_,i) => miter(norms[i], norms[(i+1)%NS]));
-
-  const allWaterV=[], allWaterI=[];
-
-  for (let si=0; si<NS; si++) {
-    const seg=segments[si], sn=norms[si];
-    const wv=[], wuv=[], wi=[];
-
-    for (let i=0; i<seg.length-1; i++) {
-      const p=seg[i], q=seg[i+1];
-      // Junction endpoints use miter; interior points use straight segment normal
-      const mp = (i===0)            ? startM[si] : sn;
-      const mq = (i===seg.length-2) ? endM[si]   : sn;
-      const yB=-1.0, yT=canalH, fY=0.08;
-
-      // Island-side wall (inner face of canal)
-      addQuad(wv,wuv,wi, p.x+mp.nx*canalOuter,yB,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yB,q.z+mq.nz*canalOuter,
-                     p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
-      addQuad(wv,wuv,wi, p.x+mp.nx*canalInner,yB,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yB,q.z+mq.nz*canalInner,
-                     p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner);
-      addQuad(wv,wuv,wi, p.x+mp.nx*canalInner,yT,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,yT,q.z+mq.nz*canalInner,
-                     p.x+mp.nx*canalOuter,yT,p.z+mp.nz*canalOuter, q.x+mq.nx*canalOuter,yT,q.z+mq.nz*canalOuter);
-
-      // Exterior wall
-      addQuad(wv,wuv,wi, p.x-mp.nx*canalOuter,yB,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yB,q.z-mq.nz*canalOuter,
-                     p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
-      addQuad(wv,wuv,wi, p.x-mp.nx*canalInner,yB,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yB,q.z-mq.nz*canalInner,
-                     p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner);
-      addQuad(wv,wuv,wi, p.x-mp.nx*canalInner,yT,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,yT,q.z-mq.nz*canalInner,
-                     p.x-mp.nx*canalOuter,yT,p.z-mp.nz*canalOuter, q.x-mq.nx*canalOuter,yT,q.z-mq.nz*canalOuter);
-
-      // Concrete floor
-      addQuad(wv,wuv,wi, p.x-mp.nx*canalInner,fY,p.z-mp.nz*canalInner, q.x-mq.nx*canalInner,fY,q.z-mq.nz*canalInner,
-                     p.x+mp.nx*canalInner,fY,p.z+mp.nz*canalInner, q.x+mq.nx*canalInner,fY,q.z+mq.nz*canalInner);
-
-      // Water
-      const ww=canalInner-0.05, yw=canalH*0.75;
-      addQuad(allWaterV,null,allWaterI, p.x-mp.nx*ww,yw,p.z-mp.nz*ww, q.x-mq.nx*ww,yw,q.z-mq.nz*ww,
-                                   p.x+mp.nx*ww,yw,p.z+mp.nz*ww, q.x+mq.nx*ww,yw,q.z+mq.nz*ww);
-    }
-
-    const g=new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(wv),3));
-    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(wuv),2));
-    g.setIndex(wi);
-    g.computeVertexNormals();
-    // Visual only — collision handled by axis-aligned strips below
-    scene.add(new THREE.Mesh(g,_wallMat));
-  }
-
-  // Collision — two thin walls per side (inner + outer) with an open gap between.
-  // Players walk up to the inner wall (must jump over, top at 0.77 > STEP_HEIGHT 0.45).
-  // Once airborne and past the inner wall, they land in the gap where getTerrainHeight
-  // returns -0.8, sinking to the canal floor. Outer wall prevents escaping off-island.
-  const cHgt = 1.0 + canalH;            // original wall height
-  const cY   = cHgt / 2 - 1.0;         // box top at canalH (0.77) above ground
-  const cInn = C - canalOuter;          // 83.75 — inner face radius
-  const cOut = C + canalOuter;          // 86.25 — outer face radius
-  const wC   = 0.5;                     // collision wall thickness (wider than visual for safety)
-  const iLen = cInn * 2;               // inner walls stop at adjacent canal zone — no corner overlap
-  const oLen = cOut * 2 + wC;          // outer walls span full perimeter including corners
-  [
-    // South inner / outer
-    [0,          -(cInn + wC/2), iLen,  wC  ],
-    [0,          -(cOut - wC/2), oLen,  wC  ],
-    // East inner / outer
-    [cInn + wC/2,  0,            wC,   iLen ],
-    [cOut - wC/2,  0,            wC,   oLen ],
-    // North inner / outer
-    [0,           cInn + wC/2,   iLen,  wC  ],
-    [0,           cOut - wC/2,   oLen,  wC  ],
-    // West inner / outer
-    [-(cInn + wC/2), 0,          wC,   iLen ],
-    [-(cOut - wC/2), 0,          wC,   oLen ],
-  ].forEach(([x, z, w, d]) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, cHgt, d), new THREE.MeshBasicMaterial());
-    m.position.set(x, cY, z);
-    m.visible = false;
-    scene.add(m);
-    collidables.push(m);
-  });
-
-  const waterGeo=new THREE.BufferGeometry();
-  waterGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allWaterV),3));
-  waterGeo.setIndex(allWaterI);
-  waterGeo.computeVertexNormals();
-  window.streamWater=new THREE.Mesh(waterGeo,_waterMat);
-  scene.add(window.streamWater);
-}
-
-// Crater marking
-const crater = new THREE.Mesh(
-  new THREE.CircleGeometry(8, 20),
-  new THREE.MeshLambertMaterial({ color: 0x3a2a1a })
-);
-crater.rotation.x = -Math.PI / 2;
-crater.position.set(0, CONFIG.volcanoHeight - 0.8, 0);
-scene.add(crater);
-
-// ── Instanced Smoke — 1 draw call for all volcano smoke puffs ──
-const SMOKE_COUNT = 18;
-const smokeGeo = new THREE.SphereGeometry(1, 7, 6); // unit sphere, scaled per instance
-const smokeMat = new THREE.MeshBasicMaterial({ color: 0x6b4a28, transparent: true, opacity: 0.30 });
-const smokeInst = new THREE.InstancedMesh(smokeGeo, smokeMat, SMOKE_COUNT);
-smokeInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-scene.add(smokeInst);
-
-// Store per-instance smoke data (replaces smokeParticles array of meshes)
-const smokeParticles = [];
-const _smokeDummy = new THREE.Object3D();
-for (let i = 0; i < SMOKE_COUNT; i++) {
-  const size = 1.0 + seededRand() * 2.5;
-  const baseY = CONFIG.volcanoHeight + 1 + seededRand() * 16;
-  smokeParticles.push({
-    baseY,
-    phase: seededRand() * 6.28,
-    speed: 0.4 + seededRand() * 0.8,
-    size,
-    ox: (seededRand() - 0.5) * 6,
-    oz: (seededRand() - 0.5) * 6,
-    index: i
-  });
-  // Set initial matrix so nothing is at origin on frame 0
-  _smokeDummy.position.set((seededRand() - 0.5) * 6, baseY, (seededRand() - 0.5) * 6);
-  _smokeDummy.scale.setScalar(size);
-  _smokeDummy.updateMatrix();
-  smokeInst.setMatrixAt(i, _smokeDummy.matrix);
-}
-smokeInst.instanceMatrix.needsUpdate = true;
-
-// ═══════════════════════════════════════════════════════════
-// WATER PLANE — Hidden until water starts rising
-// ═══════════════════════════════════════════════════════════
-const water = new THREE.Mesh(
-  new THREE.PlaneGeometry(CONFIG.islandSize + 60, CONFIG.islandSize + 60, 30, 30),
-  new THREE.MeshLambertMaterial({ color: 0x0c4878, transparent: true, opacity: 0.6 })
-);
-water.rotation.x = -Math.PI / 2;
-water.position.y = -5;
-water.visible = false;
-scene.add(water);
-
-// ── Rising bubble particles along perimeter — single instanced mesh ──
-const BUBBLE_COUNT = 40;
-const bubbleMat  = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.35 });
-const bubbleInst = new THREE.InstancedMesh(
-  new THREE.SphereGeometry(1, 5, 4),   // unit sphere — scaled per instance
-  bubbleMat,
-  BUBBLE_COUNT
-);
-bubbleInst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-const _bubbleData = [];   // { bx, bz, baseY, speed, phase, size }
-const _bubbleDummy = new THREE.Object3D();
-let _bubbleCount = 0;
-for (let i = 0; i < BUBBLE_COUNT; i++) {
-  const angle = seededRand() * Math.PI * 2;
-  const dist  = half - 4 - seededRand() * 12;
-  const bx    = Math.cos(angle) * dist;
-  const bz    = Math.sin(angle) * dist;
-  if (Math.abs(bx - CONFIG.prisonPos.x) < CONFIG.prisonSize / 2 + 5 &&
-      Math.abs(bz - CONFIG.prisonPos.z) < CONFIG.prisonSize / 2 + 5) {
-    // Park off-screen so the slot doesn't flicker
-    _bubbleDummy.position.set(0, -9999, 0); _bubbleDummy.scale.setScalar(0.01);
-    _bubbleDummy.updateMatrix(); bubbleInst.setMatrixAt(i, _bubbleDummy.matrix);
-    _bubbleData.push(null);
-    continue;
-  }
-  const size  = 0.4 + seededRand() * 0.7;
-  const baseY = -1 + seededRand() * 2;
-  const speed = 0.4 + seededRand() * 0.8;
-  const phase = seededRand() * 6.28;
-  _bubbleData.push({ bx, bz, baseY, speed, phase, size, y: baseY });
-  _bubbleDummy.position.set(bx, baseY, bz);
-  _bubbleDummy.scale.setScalar(size);
-  _bubbleDummy.updateMatrix();
-  bubbleInst.setMatrixAt(i, _bubbleDummy.matrix);
-  _bubbleCount++;
-}
-bubbleInst.instanceMatrix.needsUpdate = true;
-// Expose for update loop
-window._bubbleInst = bubbleInst;
-window._bubbleData = _bubbleData;
-window._bubbleDummy2 = _bubbleDummy;
-scene.add(bubbleInst);
-
-// ═══════════════════════════════════════════════════════════
-// CLIFF WALLS — Single color, smooth height variation
-// ═══════════════════════════════════════════════════════════
-function createCliffSection(x, z, w, d, h) {
-  const cliffH = h || CONFIG.cliffHeight;
-  const extendedH = cliffH + 3;
-  const segsW = Math.max(1, Math.round(w / 8));
-  const segsH = 4;
-  const segsD = Math.max(1, Math.round(d / 8));
-  const geo = new THREE.BoxGeometry(w, extendedH, d, segsW, segsH, segsD);
-  const pos = geo.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-  for (let i = 0; i < pos.count; i++) {
-    const vx = pos.getX(i) + x;
-    const vy = pos.getY(i) + (extendedH / 2 - 3);
-    const t = (vy + 5) / (extendedH + 5);
-    const band = Math.sin(vy * 1.8) * 0.06 + Math.sin(vy * 4.3) * 0.03;
-    const nx = Math.sin(vx * 0.41 + z * 0.17) * 0.05 + Math.cos(vx * 1.2) * 0.03;
-    const base = 0.36 + t * 0.12 + band + nx;
-    colors[i*3]   = Math.min(1, base + 0.08);
-    colors[i*3+1] = Math.min(1, base * 0.88);
-    colors[i*3+2] = Math.min(1, base * 0.72);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(x, extendedH / 2 - 3, z);
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  scene.add(mesh);
-  collidables.push(mesh);
-  return mesh;
-}
-
-const ct = CONFIG.cliffThickness;
-const segCount = 20;
-const segLen = (CONFIG.islandSize + ct * 2) / segCount;
-const wallLen = CONFIG.islandSize + ct * 2;
-const avgH = CONFIG.cliffHeight + 4;
-
-[
-  { px: 0, pz: -half - ct/2, w: wallLen, d: ct },
-  { px: 0, pz:  half + ct/2, w: wallLen, d: ct },
-  { px:  half + ct/2, pz: 0, w: ct, d: CONFIG.islandSize },
-  { px: -half - ct/2, pz: 0, w: ct, d: CONFIG.islandSize },
-].forEach(({ px, pz, w, d }) => {
-  const geo = new THREE.BoxGeometry(w, avgH, d, Math.max(1,Math.round(w/8)), 4, Math.max(1,Math.round(d/8)));
-  const pos2 = geo.attributes.position;
-  const cols2 = new Float32Array(pos2.count * 3);
-  for (let i = 0; i < pos2.count; i++) {
-    const vy = pos2.getY(i) + (avgH / 2 - 3);
-    const vx = pos2.getX(i) + px;
-    const depthT = Math.max(0, Math.min(1, (vy + 2) / avgH));
-    const waveB  = Math.sin(vy * 2.1 + vx * 0.08) * 0.035 + Math.sin(vy * 5.3) * 0.015;
-    const foamT  = Math.max(0, (depthT - 0.80) / 0.20);
-    const oceanR = 0.01 + depthT * 0.09 + waveB * 0.5 + foamT * 0.72;
-    const oceanG = 0.07 + depthT * 0.33 + waveB * 1.2 + foamT * 0.85;
-    const oceanB = 0.20 + depthT * 0.46 + waveB       + foamT * 0.76;
-    cols2[i*3]   = Math.min(1, oceanR);
-    cols2[i*3+1] = Math.min(1, oceanG);
-    cols2[i*3+2] = Math.min(1, oceanB);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(cols2, 3));
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
-  mesh.position.set(px, avgH / 2 - 3, pz);
-  scene.add(mesh);
-  collidables.push(mesh);
-});
-
-// ── Ocean foam caps — cresting white wave tops on each perimeter wall ──
-window._oceanFoam = [];
-const foamMat = new THREE.MeshBasicMaterial({ color: 0xe8f8ff, transparent: true, opacity: 0.82 });
-const foamY   = avgH - 3 + 0.38;
-[
-  { px: 0,            pz: -half - ct/2, w: wallLen + ct, d: ct + 0.5 },
-  { px: 0,            pz:  half + ct/2, w: wallLen + ct, d: ct + 0.5 },
-  { px:  half + ct/2, pz: 0,            w: ct + 0.5,     d: CONFIG.islandSize },
-  { px: -half - ct/2, pz: 0,            w: ct + 0.5,     d: CONFIG.islandSize },
-].forEach(({ px, pz, w, d }, i) => {
-  const foam = new THREE.Mesh(new THREE.BoxGeometry(w, 0.55, d), foamMat);
-  foam.position.set(px, foamY, pz);
-  foam.userData.baseY = foamY;
-  scene.add(foam);
-  window._oceanFoam.push(foam);
-});
-// ═══════════════════════════════════════════════════════════
-// PRISON COMPOUND — Taller walls
-// ═══════════════════════════════════════════════════════════
-const prison = { x: CONFIG.prisonPos.x, z: CONFIG.prisonPos.z, size: CONFIG.prisonSize };
-const pw = prison.size;
-const pwh = CONFIG.prisonWallHeight;
-const pwt = 0.6;
-
-// ── Prison stone texture — dark grey masonry blocks ──
-{
-  const _sc = document.createElement('canvas');
-  _sc.width = _sc.height = 512;
-  const _sx = _sc.getContext('2d');
-  _sx.fillStyle = '#1c1b19';
-  _sx.fillRect(0, 0, 512, 512);
-  const _rowH = 27, _gap = 4;
-  const _rows = Math.ceil(512 / (_rowH + _gap)) + 2;
-  const _rng = (() => { let s = 42; return () => { s = (s * 1664525 + 1013904223) & 0x7fffffff; return s / 0x7fffffff; }; })();
-  for (let row = 0; row < _rows; row++) {
-    const y = row * (_rowH + _gap);
-    const shift = (row % 2) === 0 ? 0 : 55;
-    let x = -shift;
-    while (x < 560) {
-      const bw = 52 + Math.floor(_rng() * 42);
-      const s  = 60 + Math.floor((_rng() - 0.5) * 20);
-      _sx.fillStyle = `rgb(${s},${s - 1},${s - 3})`;
-      _sx.fillRect(x + 2, y + 2, bw - 3, _rowH - 2);
-      _sx.fillStyle = 'rgba(255,255,255,0.05)';
-      _sx.fillRect(x + 2, y + 2, bw - 3, 3);
-      _sx.fillStyle = 'rgba(0,0,0,0.22)';
-      _sx.fillRect(x + 2, y + _rowH - 5, bw - 3, 5);
-      x += bw;
-    }
-  }
-  window._prisonStoneTex = new THREE.CanvasTexture(_sc);
-  window._prisonStoneTex.wrapS = window._prisonStoneTex.wrapT = THREE.RepeatWrapping;
-  window._prisonStoneTex.repeat.set(3, 2);
-}
-
-// ── Prison materials — stone masonry ──
-const prisonWallMat  = new THREE.MeshLambertMaterial({ color: 0xbbbbbb, map: window._prisonStoneTex });
-const prisonWallDark = new THREE.MeshLambertMaterial({ color: 0x4e4e48 });
-const prisonAccent   = new THREE.MeshLambertMaterial({ color: 0x52524a, map: window._prisonStoneTex });
-const prisonMetal    = new THREE.MeshLambertMaterial({ color: 0x38383a });
-const prisonRust     = new THREE.MeshLambertMaterial({ color: 0x6b4030 });
-const prisonCap      = new THREE.MeshLambertMaterial({ color: 0x555550 });
-
-// Invisible collider material — meshes using this are NOT added to the scene.
-// updateMatrixWorld(true) is called after positioning so Box3.setFromObject()
-// gets a correct world transform without issuing any draw calls.
-const colliderMat = new THREE.MeshBasicMaterial({
-  transparent: true, opacity: 0,
-  depthWrite: false, colorWrite: false
-});
-
-function createPrisonWall(x, z, w, h, d) {
-  // Main wall body — visual only
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), prisonWallMat);
-  mesh.position.set(x, h / 2, z);
-  mesh.castShadow = true; mesh.receiveShadow = true;
-  scene.add(mesh);
-  targets.push(mesh);
-
-  // Wall cap
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, 0.22, d + 0.05), prisonCap);
-  cap.position.set(x, h + 0.12, z);
-  cap.castShadow = true;
-  scene.add(cap);
-
-  // Horizontal concrete band at mid-height — protrudes 0.18 to avoid z-fighting
-  const band = new THREE.Mesh(new THREE.BoxGeometry(w + 0.36, 0.18, d + 0.36), prisonWallDark);
-  band.position.set(x, h * 0.45, z);
-  scene.add(band);
-
-  // Lower base strip
-  const base = new THREE.Mesh(new THREE.BoxGeometry(w + 0.36, 0.35, d + 0.36), prisonAccent);
-  base.position.set(x, 0.175, z);
-  base.receiveShadow = true;
-  scene.add(base);
-
-  // Invisible collider — padded +0.5 on the thin axis to prevent clipping
-  const cw = w < d ? w + 0.5 : w;
-  const cd = d < w ? d + 0.5 : d;
-  const collider = new THREE.Mesh(new THREE.BoxGeometry(cw, h, cd), colliderMat);
-  collider.position.set(x, h / 2, z);
-  collider.updateMatrixWorld(true);
-  collidables.push(collider);
-
-  return mesh;
-}
-
-// North wall (z-)
-createPrisonWall(prison.x, prison.z - pw / 2, pw, pwh, pwt);
-// South wall (z+)
-createPrisonWall(prison.x, prison.z + pw / 2, pw, pwh, pwt);
-// East wall (x+) — split with gate gap
-const gateWidth = 6;
-const eastWallLen = (pw - gateWidth) / 2;
-createPrisonWall(prison.x + pw / 2, prison.z - pw / 2 + eastWallLen / 2, pwt, pwh, eastWallLen);
-createPrisonWall(prison.x + pw / 2, prison.z + pw / 2 - eastWallLen / 2, pwt, pwh, eastWallLen);
-// West wall
-createPrisonWall(prison.x - pw / 2, prison.z, pwt, pwh, pw);
-
-// Prison floor — stone-textured courtyard
-{
-  const floorTex = window._prisonStoneTex.clone();
-  floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
-  floorTex.repeat.set(pw / 1.8, pw / 1.8);
-  floorTex.needsUpdate = true;
-  const floorMat = new THREE.MeshLambertMaterial({ color: 0xaaaaaa, map: floorTex });
-  // Slab extends deep underground so top is always at y=0.5 regardless of terrain variation
-  const floor = new THREE.Mesh(new THREE.BoxGeometry(pw - pwt, 6, pw - pwt), floorMat);
-  floor.position.set(prison.x, -2.5, prison.z);
-  floor.receiveShadow = true;
-  scene.add(floor);
-  floor.updateMatrixWorld(true);
-  collidables.push(floor);
-}
-
-// Ground height helper — wraps getTerrainHeight but raises to slab surface inside prison
-const _prisonSlabTop = 0.5;
-const _prisonInnerMinX = prison.x - pw / 2 + pwt;
-const _prisonInnerMaxX = prison.x + pw / 2 - pwt;
-const _prisonInnerMinZ = prison.z - pw / 2 + pwt;
-const _prisonInnerMaxZ = prison.z + pw / 2 - pwt;
-function getGroundHeight(x, z) {
-  const th = getTerrainHeight(x, z);
-  if (x > _prisonInnerMinX && x < _prisonInnerMaxX &&
-      z > _prisonInnerMinZ && z < _prisonInnerMaxZ) {
-    return Math.max(th, _prisonSlabTop);
-  }
-  return th;
-}
-
-// Vertical pilasters
-{
-  const pilasterMat = new THREE.MeshLambertMaterial({ color: 0xbbbbbb, map: window._prisonStoneTex });
-  const wallDefs = [
-    { axis: 'x', fixed: prison.z - pw/2, from: prison.x - pw/2, to: prison.x + pw/2, faceZ: true },
-    { axis: 'x', fixed: prison.z + pw/2, from: prison.x - pw/2, to: prison.x + pw/2, faceZ: true },
-    { axis: 'z', fixed: prison.x - pw/2, from: prison.z - pw/2, to: prison.z + pw/2, faceZ: false },
-  ];
-  wallDefs.forEach(({ axis, fixed, from, to, faceZ }) => {
-    const count = 5;
-    for (let i = 1; i < count; i++) {
-      const t = i / count;
-      const pos = from + (to - from) * t;
-      const px = faceZ ? pos : fixed;
-      const pz = faceZ ? fixed : pos;
-      const pil = new THREE.Mesh(new THREE.BoxGeometry(faceZ ? 0.28 : pwt + 0.28, pwh, faceZ ? pwt + 0.28 : 0.28), pilasterMat);
-      pil.position.set(px, pwh / 2, pz);
-      pil.castShadow = true;
-      scene.add(pil);
-    }
-  });
-}
-
-// Gate posts
-for (const side of [-1, 1]) {
-  const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, pwh + 2.2, 0.8), prisonAccent);
-  post.position.set(prison.x + pw / 2, (pwh + 2.2) / 2, prison.z + side * (gateWidth / 2));
-  post.castShadow = true;
-  scene.add(post);
-  const postCap = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.25, 1.1), prisonMetal);
-  postCap.position.set(prison.x + pw / 2, pwh + 2.2 + 0.12, prison.z + side * (gateWidth / 2));
-  scene.add(postCap);
-  const lightBox = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.35, 0.4), new THREE.MeshLambertMaterial({ color: 0x888860, emissive: 0x444420, emissiveIntensity: 0.6 }));
-  lightBox.position.set(prison.x + pw / 2 - 0.3, pwh + 1.6, prison.z + side * (gateWidth / 2));
-  scene.add(lightBox);
-}
-
-// Gate sign
-const signBeam = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.5, gateWidth + 1.8), prisonMetal);
-signBeam.position.set(prison.x + pw / 2, pwh + 1.8, prison.z);
-scene.add(signBeam);
-const signFace = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.38, gateWidth + 1.4), new THREE.MeshLambertMaterial({ color: 0x1a1a1a, emissive: 0x0a0a08, emissiveIntensity: 0.3 }));
-signFace.position.set(prison.x + pw / 2 - 0.2, pwh + 1.8, prison.z);
-scene.add(signFace);
-
-// Gate doors — dark oak with raised panels, rails, and stud rows
-const gateHalfW = gateWidth / 2;
-const oakMat    = new THREE.MeshLambertMaterial({ color: 0x1e0f05 }); // dark oak base
-const oakFrame  = new THREE.MeshLambertMaterial({ color: 0x2c1a09 }); // slightly lighter frame
-const oakPanel  = new THREE.MeshLambertMaterial({ color: 0x160c03 }); // recessed panel
-const oakStud   = new THREE.MeshLambertMaterial({ color: 0x18120a }); // iron stud
-
-const dt = pwt + 0.25;   // door thickness 0.85
-const dw = gateHalfW;    // door width 3
-const dh = pwh;           // door height 10
-// dir: -1 = protrude toward -x (interior face), +1 = protrude toward +x (exterior face)
-function buildDoorFace(door, faceX, dir) {
-  const o = (n) => faceX + dir * n; // offset helper
-
-  // ── Horizontal rails: top frieze, centre divider, bottom plinth ──
-  const railDefs = [
-    { cy: dh/2 - 0.52, rh: 0.95 },
-    { cy: 0.0,           rh: 0.72 },
-    { cy: -dh/2 + 0.55, rh: 1.05 },
-  ];
-  for (const { cy, rh } of railDefs) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.10, rh, dw - 0.02), oakPanel);
-    rail.position.set(o(0.05), cy, 0);
-    door.add(rail);
-    const raise = new THREE.Mesh(new THREE.BoxGeometry(0.12, rh - 0.18, dw - 0.16), oakFrame);
-    raise.position.set(o(0.06), cy, 0);
-    door.add(raise);
-    const studsZ = 7;
-    for (let s = 0; s < studsZ; s++) {
-      const sz = -dw/2 + 0.25 + s * ((dw - 0.5) / (studsZ - 1));
-      const stud = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.10, 0.10), oakStud);
-      stud.position.set(o(0.09), cy, sz);
-      door.add(stud);
-    }
-  }
-
-  // ── Vertical stiles ──
-  for (const sz of [-1, 1]) {
-    const stile = new THREE.Mesh(new THREE.BoxGeometry(0.10, dh, 0.22), oakPanel);
-    stile.position.set(o(0.05), 0, sz * (dw/2 - 0.11));
-    door.add(stile);
-  }
-
-  // ── Raised panels: upper + lower ──
-  const panelDefs = [
-    { cy:  2.1, ph: 3.5 },
-    { cy: -2.3, ph: 3.3 },
-  ];
-  for (const { cy, ph } of panelDefs) {
-    const pw2 = dw - 0.55;
-    const bg = new THREE.Mesh(new THREE.BoxGeometry(0.07, ph, pw2), oakPanel);
-    bg.position.set(o(0.035), cy, 0);
-    door.add(bg);
-    const field = new THREE.Mesh(new THREE.BoxGeometry(0.10, ph - 0.28, pw2 - 0.28), oakFrame);
-    field.position.set(o(0.05), cy, 0);
-    door.add(field);
-    for (const [isH, len, oz, oy] of [
-      [true,  pw2, 0,           ph/2 - 0.09],
-      [true,  pw2, 0,          -ph/2 + 0.09],
-      [false, ph,  pw2/2-0.09, 0            ],
-      [false, ph, -pw2/2+0.09, 0            ],
-    ]) {
-      const mol = new THREE.Mesh(new THREE.BoxGeometry(0.12, isH ? 0.12 : len, isH ? len : 0.12), oakMat);
-      mol.position.set(o(0.06), cy + oy, oz);
-      door.add(mol);
-    }
-    const ps = 6;
-    for (const oy of [ph/2 - 0.09, -ph/2 + 0.09]) {
-      for (let s = 0; s < ps; s++) {
-        const sz = -pw2/2 + 0.15 + s * ((pw2 - 0.3) / (ps - 1));
-        const stud = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), oakStud);
-        stud.position.set(o(0.10), cy + oy, sz);
-        door.add(stud);
-      }
-    }
-  }
-}
-
-const gateDoorL = new THREE.Mesh(new THREE.BoxGeometry(dt, dh, dw), oakMat);
-const gatePivotL = new THREE.Group();
-gatePivotL.position.set(prison.x + pw / 2, 0, prison.z - gateWidth / 2);
-gateDoorL.position.set(0, dh / 2, dw / 2);
-gatePivotL.add(gateDoorL);
-scene.add(gatePivotL);
-collidables.push(gateDoorL);
-buildDoorFace(gateDoorL, -dt/2 - 0.01, -1); // interior face
-buildDoorFace(gateDoorL, +dt/2 + 0.01, +1); // exterior face
-
-const gateDoorR = new THREE.Mesh(new THREE.BoxGeometry(dt, dh, dw), oakMat);
-const gatePivotR = new THREE.Group();
-gatePivotR.position.set(prison.x + pw / 2, 0, prison.z + gateWidth / 2);
-gateDoorR.position.set(0, dh / 2, -dw / 2);
-gatePivotR.add(gateDoorR);
-scene.add(gatePivotR);
-collidables.push(gateDoorR);
-buildDoorFace(gateDoorR, -dt/2 - 0.01, -1); // interior face
-buildDoorFace(gateDoorR, +dt/2 + 0.01, +1); // exterior face
-let gateOpenProgress = 0;
-
-const towerH = pwh + 3.5;
-const towerCorners = [
-  { x: prison.x + pw / 2 - 1.5, z: prison.z - pw / 2 + 1.5, fX: -1, fZ:  1 },
-  { x: prison.x - pw / 2 + 1.5, z: prison.z - pw / 2 + 1.5, fX:  1, fZ:  1 },
-  { x: prison.x + pw / 2 - 1.5, z: prison.z + pw / 2 - 1.5, fX: -1, fZ: -1 },
-  { x: prison.x - pw / 2 + 1.5, z: prison.z + pw / 2 - 1.5, fX:  1, fZ: -1 },
+// ── Duel spawns (180°-rotationally symmetric). The server assigns A/B per
+// player; the solo/map-test uses A. Kept here so client + server share the
+// exact numbers (movement validation rejects a client/server spawn mismatch). ──
+const CITY_SPAWNS = [
+  { x: 0, z: -50, yaw: 0 },        // A — north end, faces +z toward center
+  { x: 0, z:  50, yaw: Math.PI },  // B — south end, faces -z
 ];
+CONFIG.spawnPos = CITY_SPAWNS[0];  // default client spawn (overrides the island default)
 
-towerCorners.forEach(tc => {
-  const fX = tc.fX, fZ = tc.fZ;
+// ── Materials ──
+const _groundMat = new THREE.MeshLambertMaterial({ color: 0x3b3d42 }); // asphalt plaza
+const _bldgMat   = new THREE.MeshLambertMaterial({ color: 0x6b6f76 }); // corner buildings
+const _sideMat   = new THREE.MeshLambertMaterial({ color: 0x585c63 }); // side buildings
+const _monMat    = new THREE.MeshLambertMaterial({ color: 0x8a7f6a }); // monument (stone)
+const _crateMat  = new THREE.MeshLambertMaterial({ color: 0x8a6a3a }); // crate cover
+const _wallMat   = new THREE.MeshLambertMaterial({ color: 0x4a4d53 }); // perimeter facade
 
-  const base = new THREE.Mesh(new THREE.BoxGeometry(3.4, towerH, 3.4), prisonWallMat);
-  base.position.set(tc.x, towerH / 2, tc.z);
-  base.castShadow = true; base.receiveShadow = true;
-  scene.add(base);
-
-  // Invisible collider for tower
-  const towerCollider = new THREE.Mesh(new THREE.BoxGeometry(3.9, towerH, 3.9), colliderMat);
-  towerCollider.position.set(tc.x, towerH / 2, tc.z);
-  towerCollider.updateMatrixWorld(true);
-  collidables.push(towerCollider);
-
-  for (const cx of [-1, 1]) for (const cz of [-1, 1]) {
-    const col = new THREE.Mesh(new THREE.BoxGeometry(0.32, towerH, 0.32), prisonAccent);
-    col.position.set(tc.x + cx * 1.55, towerH / 2, tc.z + cz * 1.55);
-    col.castShadow = true;
-    scene.add(col);
-  }
-
-  const midBand = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.2, 3.6), prisonWallDark);
-  midBand.position.set(tc.x, towerH * 0.5, tc.z);
-  scene.add(midBand);
-
-  const platform = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.35, 5.2), prisonWallDark);
-  platform.position.set(tc.x, towerH + 0.18, tc.z);
-  platform.castShadow = true;
-  scene.add(platform);
-
-  for (const side of [-1, 1]) {
-    const railX = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.5, 0.15), prisonMetal);
-    railX.position.set(tc.x, towerH + 0.6, tc.z + side * 2.55);
-    scene.add(railX);
-    const railZ = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.5, 5.4), prisonMetal);
-    railZ.position.set(tc.x + side * 2.55, towerH + 0.6, tc.z);
-    scene.add(railZ);
-  }
-
-  const ghH = 2.4;
-  const ghW = 4.8;
-  const wt = 0.22;
-  const ghY = towerH + 0.35 + ghH / 2;
-
-  const backWall = new THREE.Mesh(new THREE.BoxGeometry(ghW, ghH, wt), prisonWallMat);
-  backWall.position.set(tc.x, ghY, tc.z - fZ * (ghW / 2 - wt));
-  scene.add(backWall);
-
-  for (const side of [-1, 1]) {
-    const pillar = new THREE.Mesh(new THREE.BoxGeometry(1.1, ghH, wt), prisonWallMat);
-    pillar.position.set(tc.x + side * 1.85, ghY, tc.z + fZ * (ghW / 2 - wt));
-    scene.add(pillar);
-  }
-  const header = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.25, wt), prisonWallDark);
-  header.position.set(tc.x, towerH + 0.35 + ghH - 0.3, tc.z + fZ * (ghW / 2 - wt));
-  scene.add(header);
-  const sill = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.2, wt + 0.1), prisonWallDark);
-  sill.position.set(tc.x, towerH + 0.35 + ghH * 0.35, tc.z + fZ * (ghW / 2 - wt));
-  scene.add(sill);
-  for (let wb = -1; wb <= 1; wb++) {
-    const wbar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, ghH * 0.52, 5), prisonMetal);
-    wbar.position.set(tc.x + wb * 0.65, towerH + 0.35 + ghH * 0.6, tc.z + fZ * (ghW / 2 - wt) + fZ * 0.05);
-    scene.add(wbar);
-  }
-
-  for (const side of [-1, 1]) {
-    const sideWall = new THREE.Mesh(new THREE.BoxGeometry(wt, ghH, ghW), prisonWallMat);
-    sideWall.position.set(tc.x + side * (ghW / 2 - wt), ghY, tc.z);
-    scene.add(sideWall);
-    const swSill = new THREE.Mesh(new THREE.BoxGeometry(wt + 0.1, 0.15, 1.4), prisonWallDark);
-    swSill.position.set(tc.x + side * (ghW / 2 - wt), towerH + 0.35 + ghH * 0.38, tc.z);
-    scene.add(swSill);
-  }
-
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.28, 5.5), prisonCap);
-  roof.position.set(tc.x, towerH + 0.35 + ghH + 0.14, tc.z);
-  roof.castShadow = true;
-  scene.add(roof);
-  const roofLip = new THREE.Mesh(new THREE.BoxGeometry(5.7, 0.1, 5.7), prisonMetal);
-  roofLip.position.set(tc.x, towerH + 0.35 + ghH + 0.0, tc.z);
-  scene.add(roofLip);
-
-  const lightBase = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.3, 8), prisonMetal);
-  lightBase.position.set(tc.x, towerH + 0.35 + ghH + 0.43, tc.z);
-  scene.add(lightBase);
-  const lightDome = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-    new THREE.MeshLambertMaterial({ color: 0xddddaa, emissive: 0x888844, emissiveIntensity: 0.8 })
-  );
-  lightDome.position.set(tc.x, towerH + 0.35 + ghH + 0.58, tc.z);
-  scene.add(lightDome);
-});
-
-
-// Flood lights
+// ── Ground plane ──
 {
-  const floodMat = new THREE.MeshLambertMaterial({ color: 0x999966, emissive: 0x555533, emissiveIntensity: 0.7 });
-  const floodPositions = [
-    { x: prison.x, z: prison.z - pw/2 - 0.1, ry: 0 },
-    { x: prison.x, z: prison.z + pw/2 + 0.1, ry: Math.PI },
-    { x: prison.x - pw/2 - 0.1, z: prison.z, ry: -Math.PI/2 },
-  ];
-  floodPositions.forEach(({ x, z, ry }) => {
-    const flood = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.3), floodMat);
-    flood.position.set(x, pwh * 0.75, z);
-    flood.rotation.y = ry;
-    scene.add(flood);
-  });
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(ARENA, ARENA), _groundMat);
+  g.rotation.x = -Math.PI / 2;
+  g.receiveShadow = true;
+  scene.add(g);
 }
 
-// ═══════════════════════════════════════════════════════════
-// PERIMETER BILLBOARDS — one per outer wall, highway-style
-// `half` and `ct` are defined in 03_terrain.js (same global scope)
-// ═══════════════════════════════════════════════════════════
+// ── Solid box helper — a visible box that blocks BOTH movement and bullets.
+// Pushed to `collidables` (physics sweep) and `targets` (shot raycast), the
+// same contract the prison walls use. updateMatrixWorld(true) so the physics
+// Box3.setFromObject() and the raycaster both see a correct world transform. ──
+function addCityBox(w, h, d, x, z, mat) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, h / 2, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  m.updateMatrixWorld(true);
+  scene.add(m);
+  collidables.push(m);
+  targets.push(m);
+  return m;
+}
+
+// ── Perimeter walls — ring at ±60, unjumpable (jump apex ≈ 1.6u) ──
 {
-  const WALL_TOP   = CONFIG.cliffHeight + 4 - 3;  // = 36 (top of outer cliff walls)
-  const BB_W       = 30.75;  // face width (+25%)
-  const BB_H       = 13.31;  // face height (+10%)
-  const POLE_H     = 16.1;   // pole height above wall top
-  const POLE_GAP   = 22.0;   // pole spacing (matched to wider board)
-
-  const poleMat  = new THREE.MeshLambertMaterial({ color: 0x3a3830 });
-  const beamMat  = new THREE.MeshLambertMaterial({ color: 0x2e2c28 });
-  const sideMat  = new THREE.MeshLambertMaterial({ color: 0x4a4844 });  // back / sides
-
-  // ── Billboard canvas helper ──
-  function _drawBBCanvas(canvas, text, bgColor, fgColor, fontBase) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, 1024, 512);
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, 1024, 512);
-    ctx.fillStyle = fgColor;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    let size = fontBase;
-    ctx.font = `bold ${size}px "EB Garamond", Georgia, serif`;
-    while (ctx.measureText(text).width > 921) {
-      size -= 4;
-      ctx.font = `bold ${size}px "EB Garamond", Georgia, serif`;
-    }
-    ctx.fillText(text, 512, 256);
-  }
-
-  const _adCanvas  = document.createElement('canvas'); _adCanvas.width  = 1024; _adCanvas.height = 512;
-  const _depCanvas = document.createElement('canvas'); _depCanvas.width = 1024; _depCanvas.height = 512;
-  _drawBBCanvas(_adCanvas,  'YOUR AD HERE', '#e8e4d8', '#1a1a1a', 130);
-  _drawBBCanvas(_depCanvas, 'DEPORTED',     '#141008', '#e2c87e', 154);
-
-  const _adTex  = new THREE.CanvasTexture(_adCanvas);
-  const _depTex = new THREE.CanvasTexture(_depCanvas);
-  const faceMat = new THREE.MeshLambertMaterial({ map: _adTex });
-  const depMat  = new THREE.MeshLambertMaterial({ map: _depTex });
-
-  // Redraw with EB Garamond once the web font is loaded
-  document.fonts.load('bold 128px "EB Garamond"').then(() => {
-    _drawBBCanvas(_adCanvas,  'YOUR AD HERE', '#e8e4d8', '#1a1a1a', 108);
-    _drawBBCanvas(_depCanvas, 'DEPORTED',     '#141008', '#e2c87e', 128);
-    _adTex.needsUpdate  = true;
-    _depTex.needsUpdate = true;
-  });
-
-  function _spawnBillboard(bx, bz, ry, mat) {
-    const g = new THREE.Group();
-    g.position.set(bx, WALL_TOP, bz);
-    g.rotation.y = ry;
-
-    // Two steel poles (slightly tapered at base)
-    for (const sx of [-1, 1]) {
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.27, 0.34, POLE_H, 8),
-        poleMat
-      );
-      pole.position.set(sx * POLE_GAP / 2, POLE_H / 2, 0);
-      g.add(pole);
-    }
-
-    // Horizontal cross-bars between the poles
-    for (const frac of [0.3, 0.65]) {
-      const xbar = new THREE.Mesh(
-        new THREE.BoxGeometry(POLE_GAP - 0.4, 0.22, 0.22),
-        beamMat
-      );
-      xbar.position.set(0, POLE_H * frac, 0);
-      g.add(xbar);
-    }
-
-    // Top I-beam spanning the full board width
-    const topBeam = new THREE.Mesh(
-      new THREE.BoxGeometry(BB_W + 1, 0.42, 0.42),
-      beamMat
-    );
-    topBeam.position.set(0, POLE_H + 0.21, 0);
-    g.add(topBeam);
-
-    // Billboard back panel
-    const back = new THREE.Mesh(
-      new THREE.BoxGeometry(BB_W, BB_H, 0.22),
-      sideMat
-    );
-    back.position.set(0, POLE_H + BB_H / 2 + 0.42, 0);
-    g.add(back);
-
-    // Billboard face (facing local +Z = inward toward map)
-    const face = new THREE.Mesh(
-      new THREE.BoxGeometry(BB_W, BB_H, 0.10),
-      mat || faceMat
-    );
-    face.position.set(0, POLE_H + BB_H / 2 + 0.42, 0.16);
-    g.add(face);
-
-    scene.add(g);
-  }
-
-  const wo = half + ct / 2;  // wall centre offset from map origin (= 131.5)
-  _spawnBillboard(  0,  -wo,   0,            depMat  );  // North — DEPORTED
-  _spawnBillboard(  0,   wo,   Math.PI,      faceMat );  // South — YOUR AD HERE
-  _spawnBillboard(  wo,   0,  -Math.PI / 2,  depMat  );  // East  — DEPORTED
-  _spawnBillboard( -wo,   0,   Math.PI / 2,  faceMat );  // West  — YOUR AD HERE
+  const H = 12, T = 2, span = ARENA + T;
+  addCityBox(span, H, T, 0, -half - T / 2, _wallMat); // north
+  addCityBox(span, H, T, 0,  half + T / 2, _wallMat); // south
+  addCityBox(T, H, ARENA, -half - T / 2, 0, _wallMat); // west
+  addCityBox(T, H, ARENA,  half + T / 2, 0, _wallMat); // east
 }
 
-// ═══════════════════════════════════════════════════════════
-// JUNGLE — Trees and Bushes
-// ═══════════════════════════════════════════════════════════
-
-// Depot temple exclusion — matches positions in 07_loot.js
-const _depotClearR2 = 20 * 20; // covers outermost step diagonal (~17.8u) with buffer
-const _depotPos = [
-  [half - 16,  half - 16],
-  [half - 16, -(half - 16)],
-  [-(half - 16), -(half - 16)],
-];
-function _nearDepot(x, z) {
-  for (const [dx, dz] of _depotPos) {
-    const ddx = x - dx, ddz = z - dz;
-    if (ddx * ddx + ddz * ddz < _depotClearR2) return true;
-  }
-  return false;
+// ── Buildings ──
+// Corners (±24, ±38) @ 22×15, height 11 — also double as spawn cover.
+for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+  addCityBox(22, 11, 15, sx * 24, sz * 38, _bldgMat);
 }
-
-// Stone cover wall positions — exclusion so nothing spawns inside them
-const _wallPositions = [
-  // Inner 16 — radius ~33–81
-  [  28,   18], [ -32,  -22], [  48,  -38],
-  [ -52,   42], [   4,   52], [   2,  -58],
-  [  62,   12], [ -66,  -14], [  38,   62],
-  [ -42,  -68], [ -60,   48], [  58,  -48],
-  [  22,  -72], [ -26,   74], [  78,  -22],
-  [  44,   36],
-  // Outer 10 — radius ~114, tight against the perimeter wall, every 36°
-  [ 114,    0], [  92,   67], [  35,  108],
-  [ -35,  108], [ -92,   67], [-114,    0],
-  [ -92,  -67], [ -35, -108], [  35, -108],
-  [  92,  -67],
-  // Extra 3 — mid-range fill
-  [  72,   42], [ -46,  -58], [  26,  -44],
-];
-const _wallClearR2 = 3.5 * 3.5;
-function _nearWall(x, z) {
-  for (const [wx, wz] of _wallPositions) {
-    const dx = x - wx, dz = z - wz;
-    if (dx * dx + dz * dz < _wallClearR2) return true;
-  }
-  return false;
-}
-
-function canPlaceAt(x, z) {
-  if (getVolcanoHeight(x, z) > 1) return false;
-  if (Math.abs(x - prison.x) < pw / 2 + 10 && Math.abs(z - prison.z) < pw / 2 + 10) return false;
-  if (Math.abs(x) > half - 12 || Math.abs(z) > half - 12) return false;
-  if (isInStream(x, z)) return false;
-  if (_nearDepot(x, z)) return false;
-  if (_nearWall(x, z)) return false;
-  return true;
-}
-// Looser version for ground cover — allows placement right up to the wall base
-function canPlaceGround(x, z) {
-  if (getVolcanoHeight(x, z) > 1) return false;
-  if (Math.abs(x - prison.x) < pw / 2 + 3 && Math.abs(z - prison.z) < pw / 2 + 3) return false;
-  if (Math.abs(x) > half - 2 || Math.abs(z) > half - 2) return false;
-  if (isInCanalWater(x, z)) return false;
-  if (_nearDepot(x, z)) return false;
-  if (_nearWall(x, z)) return false;
-  return true;
-}
-
-// Proximity guard — populated as objects are placed, checked by each new object
-const _placedObjList = [];
-function _tooClose(x, z, r) {
-  for (const p of _placedObjList) {
-    const dx = x - p.x, dz = z - p.z;
-    if (dx*dx + dz*dz < (r + p.r) * (r + p.r)) return true;
-  }
-  return false;
-}
-
-// Shared invisible collider material — meshes using this are NOT added to the scene.
-// Instead, updateMatrixWorld(true) is called after positioning so that Box3.setFromObject()
-// and Raycaster both get a correct world transform without issuing any draw calls.
-const invisibleColliderMat = new THREE.MeshBasicMaterial({
-  transparent: true,
-  opacity: 0,
-  depthWrite: false,
-  colorWrite: false
-});
-
-// ── Procedural textures — created once, shared across all instances ──
-function _makeBarkTex() {
-  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
-  const ctx = c.getContext('2d');
-  // Warm mid-brown base
-  ctx.fillStyle = '#7a3e18'; ctx.fillRect(0, 0, 128, 256);
-  // Dark vertical streaks (main bark character)
-  for (let i = 0; i < 14; i++) {
-    const sx = Math.random() * 128;
-    const sw = 1.2 + Math.random() * 5.5;
-    const g = ctx.createLinearGradient(sx - sw, 0, sx + sw, 0);
-    g.addColorStop(0, 'rgba(16,5,1,0)');
-    g.addColorStop(0.5, `rgba(16,5,1,${0.55 + Math.random() * 0.35})`);
-    g.addColorStop(1, 'rgba(16,5,1,0)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 256);
-  }
-  // Light highlight streaks between dark ones
-  for (let i = 0; i < 6; i++) {
-    const sx = Math.random() * 128;
-    const g = ctx.createLinearGradient(sx - 2, 0, sx + 2, 0);
-    g.addColorStop(0, 'rgba(200,110,45,0)');
-    g.addColorStop(0.5, `rgba(200,110,45,${0.18 + Math.random() * 0.18})`);
-    g.addColorStop(1, 'rgba(200,110,45,0)');
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 256);
-  }
-  // Horizontal grain/crack lines
-  let y = 0;
-  while (y < 256) {
-    y += 5 + Math.random() * 18;
-    ctx.strokeStyle = `rgba(12,4,0,${0.08 + Math.random() * 0.22})`;
-    ctx.lineWidth = Math.random() < 0.4 ? 1.2 : 0.6;
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.bezierCurveTo(40, y + (Math.random()-0.5)*4, 88, y + (Math.random()-0.5)*4, 128, y + (Math.random()-0.5)*3);
-    ctx.stroke();
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(2, 4);
-  return t;
-}
-
-function _makeArborvitaeTex() {
-  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
-  const ctx = c.getContext('2d');
-  // Medium green base — bright enough to show texture after instance color ×0.7-1.0
-  ctx.fillStyle = '#3a9018'; ctx.fillRect(0, 0, 128, 256);
-  // Subtle horizontal branch layers — hint of depth, not obvious stripes
-  let by = 0;
-  while (by < 256) {
-    const bh = 10 + Math.random() * 9;
-    // Soft light at top
-    ctx.fillStyle = `rgba(85,200,35,${0.14 + Math.random() * 0.10})`;
-    ctx.fillRect(0, by, 128, bh * 0.35);
-    // Soft shadow below
-    ctx.fillStyle = `rgba(5,22,2,${0.18 + Math.random() * 0.12})`;
-    ctx.fillRect(0, by + bh * 0.35, 128, bh * 0.65);
-    by += bh;
-  }
-  // Arc scales — light suggestion of needles
-  for (let i = 0; i < 55; i++) {
-    const ax = Math.random() * 128, ay = Math.random() * 256;
-    const ar = 3 + Math.random() * 6;
-    ctx.strokeStyle = `rgba(3,14,1,${0.18 + Math.random() * 0.18})`;
-    ctx.lineWidth = 0.6 + Math.random() * 0.8;
-    ctx.beginPath(); ctx.arc(ax, ay, ar, 0, Math.PI); ctx.stroke();
-  }
-  // Light needle tips
-  for (let i = 0; i < 40; i++) {
-    const ax = Math.random() * 128, ay = Math.random() * 256;
-    ctx.fillStyle = `rgba(100,220,45,${0.14 + Math.random() * 0.14})`;
-    ctx.fillRect(ax, ay, 1.2, 2 + Math.random() * 4);
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(3, 5);
-  return t;
-}
-
-function _makeCrateTex() {
-  const c = document.createElement('canvas'); c.width = c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#3a1a08'; ctx.fillRect(0, 0, 256, 256);
-  for (let p = 0; p < 4; p++) {
-    const px = p * 64;
-    ctx.fillStyle = p % 2 === 0 ? 'rgba(220,130,60,0.07)' : 'rgba(0,0,0,0.09)';
-    ctx.fillRect(px + 2, 0, 60, 256);
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(px, 0, 2, 256);
-  }
-  for (let i = 0; i < 35; i++) {
-    const y = Math.random() * 256;
-    ctx.strokeStyle = `rgba(0,0,0,${0.04 + Math.random() * 0.09})`;
-    ctx.lineWidth = 0.5 + Math.random() * 0.6;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(256, y + (Math.random()-0.5)*5); ctx.stroke();
-  }
-  ctx.strokeStyle = 'rgba(12,5,1,0.82)'; ctx.lineWidth = 13; ctx.lineCap = 'square';
-  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(256,256); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(256,0); ctx.lineTo(0,256); ctx.stroke();
-  ctx.strokeStyle = 'rgba(180,100,40,0.20)'; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(256,256); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(256,0); ctx.lineTo(0,256); ctx.stroke();
-  ctx.strokeStyle = 'rgba(10,4,1,0.88)'; ctx.lineWidth = 18; ctx.lineCap = 'square';
-  ctx.strokeRect(9, 9, 238, 238);
-  ctx.strokeStyle = 'rgba(160,90,35,0.22)'; ctx.lineWidth = 6;
-  ctx.strokeRect(9, 9, 238, 238);
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
-}
-
-const _barkTex      = _makeBarkTex();
-const _arborTex     = _makeArborvitaeTex();
-const _crateTex     = _makeCrateTex();
-
-// ── Willow + Palm Trees — 5 draw calls, improved geometry ──
-// Willow: trunk + dense layered canopy/droops (2 calls)
-// Palm:   trunk + 12 outer + 6 inner fronds in one geo (2 calls)
-// + 1 for ferns below
-{
-  const treePlacements = [];
-  const treeGridSize = 18;
-  for (let gx = -half + 15; gx < half - 15; gx += treeGridSize) {
-    for (let gz = -half + 15; gz < half - 15; gz += treeGridSize) {
-      const x = gx + (seededRand() - 0.5) * treeGridSize * 0.7;
-      const z = gz + (seededRand() - 0.5) * treeGridSize * 0.7;
-      if (canPlaceAt(x, z) && !_tooClose(x, z, 2.5)) { treePlacements.push({ x, z }); _placedObjList.push({ x, z, r: 2.5 }); }
-    }
-  }
-  const oakPlaces = [], palmPlaces = [];
-  treePlacements.forEach(p => (seededRand() < 0.5 ? oakPlaces : palmPlaces).push(p));
-
-  const _tDummy = new THREE.Object3D();
-  const _tCol   = new THREE.Color();
-
-  // ── 4 overlapping faceted lobes per tree — low-poly polygon-art canopy ──
-  // No texture: flat-shaded facets catch the sun at different angles, and a baked
-  // vertical light gradient (bright crown → shaded underside) does the rest.
-  // Bright cartoon greens
-  const _oakGreenPalette = [
-    [0.38, 0.68, 0.22],  // bright medium green
-    [0.42, 0.72, 0.26],  // vivid green
-    [0.36, 0.64, 0.20],  // slightly darker
-    [0.44, 0.70, 0.28],  // yellow-green
-    [0.34, 0.62, 0.19],  // forest green
-    [0.40, 0.66, 0.23],  // neutral bright
-  ];
-
-  // Jittered icosahedron lobe. Displacement is hashed from vertex position so the
-  // duplicated corners of the non-indexed geometry move together (no face tearing),
-  // and computeVertexNormals on non-indexed geo yields per-face normals = facets.
-  function _facetedLobeGeo(seed) {
-    const g = new THREE.IcosahedronGeometry(1, 1);
-    const p = g.getAttribute('position');
-    const colors = new Float32Array(p.count * 3);
-    const v = new THREE.Vector3();
-    for (let i = 0; i < p.count; i++) {
-      v.fromBufferAttribute(p, i);
-      const n = Math.sin(v.x * 12.9898 + v.y * 78.233 + v.z * 37.719 + seed) * 43758.5453;
-      v.multiplyScalar(0.84 + (n - Math.floor(n)) * 0.32);
-      p.setXYZ(i, v.x, v.y, v.z);
-      // Vertical light ramp — multiplies the per-instance green. Kept neutral and
-      // capped near 1 so direct sun doesn't bleach the crowns yellow-white.
-      const t = Math.min(1, Math.max(0, (v.y + 1.16) / 2.32));
-      const br = 0.56 + t * 0.28;  // top capped at 0.84 — up-facing facets in full sun blow out otherwise
-      colors[i*3] = br * 0.96; colors[i*3+1] = br; colors[i*3+2] = br * 0.94;
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    g.computeVertexNormals();
-    return g;
-  }
-  const _lobeMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-
-  const oakTrunkInst   = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.20, 0.62, 1, 10), new THREE.MeshLambertMaterial({map:_barkTex}), oakPlaces.length);
-  const oakCanopyInst  = new THREE.InstancedMesh(_facetedLobeGeo(1.7), _lobeMat, oakPlaces.length);
-  const oakCanopy2Inst = new THREE.InstancedMesh(_facetedLobeGeo(4.2), _lobeMat, oakPlaces.length);
-  const oakCanopy3Inst = new THREE.InstancedMesh(_facetedLobeGeo(7.9), _lobeMat, oakPlaces.length);
-  const oakCanopy4Inst = new THREE.InstancedMesh(_facetedLobeGeo(11.3), _lobeMat, oakPlaces.length);
-  oakTrunkInst.castShadow = true;
-  oakCanopyInst.castShadow = true; oakCanopy2Inst.castShadow = false; oakCanopy3Inst.castShadow = false; oakCanopy4Inst.castShadow = false;
-
-  oakPlaces.forEach(({ x, z }, i) => {
-    const h = getTerrainHeight(x, z);
-    const canopyR = 3.5 + seededRand() * 3.5;
-    // Big canopies get proportionally taller trunks so large oaks don't squat
-    // like boulders (also keeps sightlines clearer at head height).
-    const trunkH = Math.max(2.5 + seededRand() * 7.0, canopyR * 1.35 + 1.0);
-    const trunkR = 0.36 + seededRand() * 0.32;
-    // Per-tree base angle for lobe arrangement
-    const offAngle = seededRand() * 6.28;
-    // Lobes spread outward significantly so bumps protrude above main sphere
-    const offDist  = canopyR * 0.52;
-    const baseY = h + trunkH + canopyR * 0.50;
-
-    _tDummy.position.set(x, h + trunkH / 2, z);
-    _tDummy.scale.set(trunkR / 0.33, trunkH, trunkR / 0.33);
-    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
-    _tDummy.updateMatrix(); oakTrunkInst.setMatrixAt(i, _tDummy.matrix);
-
-    // Main center sphere — slightly squashed for wide full shape
-    _tDummy.position.set(x, baseY, z);
-    _tDummy.scale.set(canopyR, canopyR * 0.85, canopyR);
-    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
-    _tDummy.updateMatrix(); oakCanopyInst.setMatrixAt(i, _tDummy.matrix);
-
-    // Lobe 1 — left-forward, raised so top protrudes above main
-    const ox1 = Math.sin(offAngle) * offDist, oz1 = Math.cos(offAngle) * offDist;
-    _tDummy.position.set(x + ox1, baseY + canopyR * 0.28, z + oz1);
-    _tDummy.scale.set(canopyR * 0.78, canopyR * 0.78, canopyR * 0.78);
-    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
-    _tDummy.updateMatrix(); oakCanopy2Inst.setMatrixAt(i, _tDummy.matrix);
-
-    // Lobe 2 — right-back, raised
-    const ox2 = Math.sin(offAngle + 2.20) * offDist, oz2 = Math.cos(offAngle + 2.20) * offDist;
-    _tDummy.position.set(x + ox2, baseY + canopyR * 0.22, z + oz2);
-    _tDummy.scale.set(canopyR * 0.75, canopyR * 0.75, canopyR * 0.75);
-    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
-    _tDummy.updateMatrix(); oakCanopy3Inst.setMatrixAt(i, _tDummy.matrix);
-
-    // Lobe 3 — right-forward, raised slightly less
-    const ox3 = Math.sin(offAngle + 4.10) * offDist, oz3 = Math.cos(offAngle + 4.10) * offDist;
-    _tDummy.position.set(x + ox3, baseY + canopyR * 0.18, z + oz3);
-    _tDummy.scale.set(canopyR * 0.72, canopyR * 0.72, canopyR * 0.72);
-    _tDummy.rotation.set(0, seededRand() * 6.28, 0);
-    _tDummy.updateMatrix(); oakCanopy4Inst.setMatrixAt(i, _tDummy.matrix);
-
-    const hv = Math.sin(x*127.3+z*311.7)*0.5+0.5;
-    _tCol.setRGB(0.45+hv*0.18, 0.30+hv*0.14, 0.16+hv*0.10); oakTrunkInst.setColorAt(i, _tCol);
-    const gp = _oakGreenPalette[Math.floor((Math.sin(x*53.7+z*89.3)*0.5+0.5) * _oakGreenPalette.length) % _oakGreenPalette.length];
-    _tCol.setRGB(gp[0], gp[1], gp[2]);
-    oakCanopyInst.setColorAt(i, _tCol); oakCanopy2Inst.setColorAt(i, _tCol); oakCanopy3Inst.setColorAt(i, _tCol); oakCanopy4Inst.setColorAt(i, _tCol);
-
-    const trunkCol = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.2, trunkH, trunkR*2.2), invisibleColliderMat);
-    trunkCol.position.set(x, h+trunkH/2, z); trunkCol.updateMatrixWorld(true); collidables.push(trunkCol);
-    const trunkHit = new THREE.Mesh(new THREE.BoxGeometry(trunkR*1.8, trunkH, trunkR*1.8), invisibleColliderMat);
-    trunkHit.position.set(x, h+trunkH/2, z); trunkHit.updateMatrixWorld(true); targets.push(trunkHit);
-    const canopyHit = new THREE.Mesh(new THREE.BoxGeometry(canopyR*2.0, canopyR*1.0, canopyR*2.0), invisibleColliderMat);
-    canopyHit.position.set(x, baseY, z); canopyHit.updateMatrixWorld(true);
-    targets.push(canopyHit); collidables.push(canopyHit);
-  });
-
-  // ── Palm frond geometry: 8 outer fronds + 3 small upright top fronds ──
-  // Profile sections [reach, height, half-width] — longer arch, tip droops below the
-  // crown, and alternating wide/narrow half-widths give a serrated leaf silhouette.
-  const _frondProfile = [[0,0,0.045],[0.28,0.40,0.22],[0.52,0.50,0.13],[0.78,0.38,0.20],[1.02,0.08,0.07],[1.20,-0.28,0.02]];
-  const palmFrondGeo = (() => {
-    const pos = [], col = [], idx = [];
-    // 8 main outer fronds — arch out and droop
-    const frondS = _frondProfile;
-    for (let i = 0; i < 8; i++) {
-      const ba=i/8*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
-      const base=pos.length/3;
-      frondS.forEach(([d,h,hw],si) => {
-        const t=si/(frondS.length-1);
-        pos.push(sa*d-pa*hw,h,ca*d+pca*hw, sa*d+pa*hw,h,ca*d-pca*hw);
-        const r=0.08+t*0.22, g=0.32+t*0.44, b=0.04+t*0.10;
-        col.push(r,g,b, r,g,b);
-      });
-      for (let s=0;s<frondS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
-    }
-    // 3 small upright top fronds — short, nearly vertical, break up flat top
-    const topS = [[0,0.025,0.038],[0.15,0.40,0.088],[0.275,0.725,0.050],[0.35,0.90,0.025]];
-    for (let i = 0; i < 3; i++) {
-      const ba=(i/3*Math.PI*2)+Math.PI/6, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
-      const base=pos.length/3;
-      topS.forEach(([d,h,hw],si) => {
-        const t=si/(topS.length-1);
-        pos.push(sa*d-pa*hw,h,ca*d+pca*hw, sa*d+pa*hw,h,ca*d-pca*hw);
-        const r=0.10+t*0.18, g=0.38+t*0.38, b=0.05+t*0.09;
-        col.push(r,g,b, r,g,b);
-      });
-      for (let s=0;s<topS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
-    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
-    g.setIndex(idx); g.computeVertexNormals(); return g;
-  })();
-
-  // Midrib vein overlay — same paths as palmFrondGeo but very narrow (exoskeleton effect)
-  const palmVeinGeo = (() => {
-    const pos = [], col = [], idx = [];
-    const vw = 0.010;
-    const dark = [0.03, 0.18, 0.02];
-    const frondS = _frondProfile;
-    for (let i = 0; i < 8; i++) {
-      const ba=i/8*Math.PI*2, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
-      const base=pos.length/3;
-      frondS.forEach(([d,h]) => {
-        pos.push(sa*d-pa*vw,h,ca*d+pca*vw, sa*d+pa*vw,h,ca*d-pca*vw);
-        col.push(...dark,...dark);
-      });
-      for (let s=0;s<frondS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
-    }
-    const topS = [[0,0.025,0.038],[0.15,0.40,0.088],[0.275,0.725,0.050],[0.35,0.90,0.025]];
-    for (let i = 0; i < 3; i++) {
-      const ba=(i/3*Math.PI*2)+Math.PI/6, sa=Math.sin(ba), ca=Math.cos(ba), pa=Math.cos(ba), pca=-Math.sin(ba);
-      const base=pos.length/3;
-      topS.forEach(([d,h]) => {
-        pos.push(sa*d-pa*vw,h,ca*d+pca*vw, sa*d+pa*vw,h,ca*d-pca*vw);
-        col.push(...dark,...dark);
-      });
-      for (let s=0;s<topS.length-1;s++){const b=base+s*2;idx.push(b,b+1,b+2,b+1,b+3,b+2);}
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
-    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
-    g.setIndex(idx); g.computeVertexNormals(); return g;
-  })();
-
-  const palmTrunkInst = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.13,0.30,1,8), new THREE.MeshLambertMaterial({map:_barkTex}), palmPlaces.length);
-  const palmFrondInst = new THREE.InstancedMesh(palmFrondGeo, new THREE.MeshLambertMaterial({vertexColors:true, side:THREE.DoubleSide}), palmPlaces.length);
-  const palmVeinInst  = new THREE.InstancedMesh(palmVeinGeo,  new THREE.MeshLambertMaterial({vertexColors:true, side:THREE.DoubleSide, polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1}), palmPlaces.length);
-  palmTrunkInst.castShadow = true; palmFrondInst.castShadow = true; palmVeinInst.castShadow = false;
-
-  palmPlaces.forEach(({ x, z }, i) => {
-    const h = getTerrainHeight(x, z);
-    const trunkH = 7.5 + seededRand() * 5.5;
-    const trunkR = 0.24 + seededRand() * 0.16;
-    const frondR = 4.5 + seededRand() * 2.8;
-    const lean   = (seededRand()-0.5) * 0.12;
-    _tDummy.position.set(x, h+trunkH/2, z);
-    _tDummy.scale.set(trunkR/0.215, trunkH, trunkR/0.215);
-    _tDummy.rotation.set(lean, seededRand()*6.28, lean*0.5);
-    _tDummy.updateMatrix(); palmTrunkInst.setMatrixAt(i, _tDummy.matrix);
-    _tDummy.position.set(x+Math.sin(lean)*trunkH*0.3, h+trunkH, z);
-    _tDummy.scale.set(frondR, frondR*0.55, frondR);
-    _tDummy.rotation.set(0, seededRand()*6.28, 0);
-    _tDummy.updateMatrix(); palmFrondInst.setMatrixAt(i, _tDummy.matrix); palmVeinInst.setMatrixAt(i, _tDummy.matrix);
-    const hv = Math.sin(x*89.1+z*203.4)*0.5+0.5;
-    _tCol.setRGB(0.48+hv*0.26, 0.40+hv*0.20, 0.28+hv*0.16); palmTrunkInst.setColorAt(i, _tCol);
-    _tCol.setRGB(0.68+hv*0.20, 0.80+hv*0.14, 0.50+hv*0.18); palmFrondInst.setColorAt(i, _tCol);
-    _tCol.setRGB(1, 1, 1); palmVeinInst.setColorAt(i, _tCol);
-    const trunkCol = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.9,trunkH,trunkR*2.9), invisibleColliderMat);
-    trunkCol.position.set(x, h+trunkH/2, z); trunkCol.updateMatrixWorld(true); collidables.push(trunkCol);
-    const trunkHit = new THREE.Mesh(new THREE.BoxGeometry(trunkR*2.5,trunkH,trunkR*2.5), invisibleColliderMat);
-    trunkHit.position.set(x, h+trunkH/2, z); trunkHit.updateMatrixWorld(true); targets.push(trunkHit);
-    const frondHit = new THREE.Mesh(new THREE.BoxGeometry(frondR*1.1,frondR*0.45,frondR*1.1), invisibleColliderMat);
-    frondHit.position.set(x, h+trunkH+frondR*0.1, z); frondHit.updateMatrixWorld(true);
-    targets.push(frondHit); collidables.push(frondHit);
-  });
-
-  [oakTrunkInst,oakCanopyInst,oakCanopy2Inst,oakCanopy3Inst,oakCanopy4Inst,palmTrunkInst,palmFrondInst,palmVeinInst].forEach(m => {
-    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true; scene.add(m);
-  });
-}
-
-// ── Instanced Ferns (replaces bushes) — 1 draw call ──
-{
-  const fernPlacements = [];
-  const fernGrid = 9.5;
-  for (let gx = -half+20; gx < half-20; gx += fernGrid) {
-    for (let gz = -half+20; gz < half-20; gz += fernGrid) {
-      const x = gx + (seededRand()-0.5)*fernGrid*0.8 + fernGrid/2;
-      const z = gz + (seededRand()-0.5)*fernGrid*0.8 + fernGrid/2;
-      if (canPlaceAt(x, z)) fernPlacements.push({ x, z });
-    }
-  }
-  // 7-frond fern: each frond arches up then droops at tip
-  const fernGeo = (() => {
-    const pos = [], col = [], idx = [];
-    for (let i = 0; i < 7; i++) {
-      const ba = i / 7 * Math.PI * 2;
-      const sa = Math.sin(ba), ca = Math.cos(ba);
-      const pa = Math.cos(ba), pca = -Math.sin(ba);
-      const segs = [ [0.02,0.02,0.05], [0.35,0.30,0.22], [0.70,0.38,0.15], [1.00,0.14,0.04] ];
-      const base = pos.length / 3;
-      segs.forEach(([d, h, hw], si) => {
-        const t = si / (segs.length - 1);
-        pos.push(sa*d-pa*hw, h, ca*d+pca*hw,  sa*d+pa*hw, h, ca*d-pca*hw);
-        col.push(0.08+t*0.18, 0.35+t*0.32, 0.03+t*0.12,
-                 0.08+t*0.18, 0.35+t*0.32, 0.03+t*0.12);
-      });
-      for (let s = 0; s < segs.length-1; s++) {
-        const b = base + s*2; idx.push(b,b+1,b+2, b+1,b+3,b+2);
-      }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
-    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
-    g.setIndex(idx); g.computeVertexNormals(); return g;
-  })();
-
-  // Midrib vein overlay for ferns
-  const fernVeinGeo = (() => {
-    const pos = [], col = [], idx = [];
-    const vw = 0.010;
-    for (let i = 0; i < 7; i++) {
-      const ba = i / 7 * Math.PI * 2;
-      const sa = Math.sin(ba), ca = Math.cos(ba), pa = Math.cos(ba), pca = -Math.sin(ba);
-      const segs = [ [0.02,0.02], [0.35,0.30], [0.70,0.38], [1.00,0.14] ];
-      const base = pos.length / 3;
-      segs.forEach(([d, h], si) => {
-        const t = si / (segs.length - 1);
-        const r = 0.02+t*0.05, g = 0.10+t*0.12, b = 0.01+t*0.03;
-        pos.push(sa*d-pa*vw, h, ca*d+pca*vw,  sa*d+pa*vw, h, ca*d-pca*vw);
-        col.push(r,g,b, r,g,b);
-      });
-      for (let s = 0; s < segs.length-1; s++) {
-        const b = base + s*2; idx.push(b,b+1,b+2, b+1,b+3,b+2);
-      }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
-    g.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(col), 3));
-    g.setIndex(idx); g.computeVertexNormals(); return g;
-  })();
-
-  const fernMat     = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
-  const fernVeinMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-  const fernInst     = new THREE.InstancedMesh(fernGeo,     fernMat,     fernPlacements.length);
-  const fernVeinInst = new THREE.InstancedMesh(fernVeinGeo, fernVeinMat, fernPlacements.length);
-  fernInst.castShadow = false; fernVeinInst.castShadow = false;
-  const _fDummy = new THREE.Object3D(), _fCol = new THREE.Color();
-  fernPlacements.forEach(({ x, z }, i) => {
-    const h = getTerrainHeight(x, z);
-    const s = 1.063 + seededRand() * 1.488;
-    _fDummy.position.set(x, h, z);
-    _fDummy.scale.set(s, s, s);
-    _fDummy.rotation.set(0, seededRand()*6.28, 0);
-    _fDummy.updateMatrix();
-    fernInst.setMatrixAt(i, _fDummy.matrix);
-    fernVeinInst.setMatrixAt(i, _fDummy.matrix);
-    const hv = Math.sin(x*53.1+z*97.3)*0.5+0.5;
-    _fCol.setRGB(0.36+hv*0.12, 0.50+hv*0.14, 0.24+hv*0.10);
-    fernInst.setColorAt(i, _fCol);
-    _fCol.setRGB(1, 1, 1); fernVeinInst.setColorAt(i, _fCol);
-  });
-  fernInst.instanceMatrix.needsUpdate     = true;
-  fernInst.instanceColor.needsUpdate      = true;
-  fernVeinInst.instanceMatrix.needsUpdate = true;
-  fernVeinInst.instanceColor.needsUpdate  = true;
-  scene.add(fernInst);
-  scene.add(fernVeinInst);
-}
-
-// ── Instanced Rocks ──
-const rockColors = [0x8a8278, 0x7a7068, 0x9a9088, 0x6a6258, 0x8a8070, 0x5a5248, 0xa09888, 0x706860];
-{
-  const rockPlacements = [];
-  const rockGridSize = 21;
-  for (let gx = -half + 25; gx < half - 25; gx += rockGridSize) {
-    for (let gz = -half + 25; gz < half - 25; gz += rockGridSize) {
-      const x = gx + (seededRand() - 0.5) * rockGridSize * 0.6;
-      const z = gz + (seededRand() - 0.5) * rockGridSize * 0.6;
-      if (canPlaceAt(x, z) && !_tooClose(x, z, 1.5)) { rockPlacements.push({ x, z }); _placedObjList.push({ x, z, r: 1.5 }); }
-    }
-  }
-
-  const crateInst = new THREE.InstancedMesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshLambertMaterial({ map: _crateTex, color: 0xffdbaf }),
-    rockPlacements.length
-  );
-  crateInst.castShadow = true;
-  const dummy = new THREE.Object3D();
-
-  rockPlacements.forEach(({ x, z }, i) => {
-    const h  = getTerrainHeight(x, z);
-    const sz = 1.4 + seededRand() * 1.2;
-    const yRot = seededRand() * 6.28;
-    dummy.position.set(x, h + sz * 0.5, z);
-    dummy.scale.set(sz, sz, sz);
-    dummy.rotation.set(0, yRot, 0);
-    dummy.updateMatrix();
-    crateInst.setMatrixAt(i, dummy.matrix);
-    const collider = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
-    collider.position.set(x, h + sz * 0.5, z);
-    collider.rotation.y = yRot;
-    collider.updateMatrixWorld(true);
-    collidables.push(collider);
-    const crateHit = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
-    crateHit.position.set(x, h + sz * 0.5, z);
-    crateHit.rotation.y = yRot;
-    crateHit.updateMatrixWorld(true);
-    targets.push(crateHit);
-  });
-  crateInst.instanceMatrix.needsUpdate = true;
-  scene.add(crateInst);
-}
-
-// ── Volcano crates — 10 fixed positions on the slope ──
-{
-  const volcR = CONFIG.volcanoRadius;
-  const volcCratePositions = [
-    { r: 0.52, a: 0.00 }, { r: 0.62, a: 0.63 }, { r: 0.45, a: 1.26 },
-    { r: 0.58, a: 1.88 }, { r: 0.40, a: 2.51 }, { r: 0.55, a: 3.14 },
-    { r: 0.48, a: 3.77 }, { r: 0.60, a: 4.40 }, { r: 0.42, a: 5.03 },
-    { r: 0.50, a: 5.65 },
-  ];
-  volcCratePositions.forEach(({ r, a }, idx) => {
-    const x = Math.cos(a) * volcR * r;
-    const z = Math.sin(a) * volcR * r;
-    const h = getTerrainHeight(x, z);
-    const sz = 1.4 + (idx % 3) * 0.4;
-    const yRot = a + 0.4;
-    const crate = new THREE.Mesh(
-      new THREE.BoxGeometry(sz, sz, sz),
-      new THREE.MeshLambertMaterial({ map: _crateTex, color: 0xffdbaf })
-    );
-    crate.position.set(x, h + sz * 0.5, z);
-    crate.rotation.y = yRot;
-    crate.castShadow = true;
-    scene.add(crate);
-    const collider = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
-    collider.position.set(x, h + sz * 0.5, z);
-    collider.rotation.y = yRot;
-    collider.updateMatrixWorld(true);
-    collidables.push(collider);
-    const hit = new THREE.Mesh(new THREE.BoxGeometry(sz, sz, sz), invisibleColliderMat);
-    hit.position.set(x, h + sz * 0.5, z);
-    hit.rotation.y = yRot;
-    hit.updateMatrixWorld(true);
-    targets.push(hit);
-  });
-}
-
-// ── Instanced Marble Pillars with Ivy ──
-{
-  const pillarPlacements = [];
-  const pillarGrid = 42;
-  for (let gx = -half + 18; gx < half - 18; gx += pillarGrid) {
-    for (let gz = -half + 18; gz < half - 18; gz += pillarGrid) {
-      const x = gx + (seededRand() - 0.5) * pillarGrid * 0.7;
-      const z = gz + (seededRand() - 0.5) * pillarGrid * 0.7;
-      if (canPlaceAt(x, z) && !_tooClose(x, z, 1.5)) { pillarPlacements.push({ x, z }); _placedObjList.push({ x, z, r: 1.5 }); }
-    }
-  }
-
-  const stoneMat    = new THREE.MeshLambertMaterial({ color: 0xBCB8B0 }); // match ammo shed
-  const grooveMat   = new THREE.MeshLambertMaterial({ color: 0xA6A29C }); // slightly darker — groove shadow
-  const shaftGeo    = new THREE.CylinderGeometry(0.52, 0.63, 1, 8);
-  const baseGeo     = new THREE.BoxGeometry(1.61, 0.37, 1.61);
-  const capitalGeo  = new THREE.BoxGeometry(1.78, 0.32, 1.78);
-  const ringGeo     = new THREE.CylinderGeometry(0.68, 0.68, 0.10, 12); // horizontal band ring
-  const echinusGeo  = new THREE.CylinderGeometry(0.91, 0.56, 0.24, 12); // flared neck under capital
-  const n = pillarPlacements.length;
-  const shaftInst   = new THREE.InstancedMesh(shaftGeo,   stoneMat,  n);
-  const baseInst    = new THREE.InstancedMesh(baseGeo,    stoneMat,  n);
-  const capitalInst = new THREE.InstancedMesh(capitalGeo, stoneMat,  n);
-  const ringAInst   = new THREE.InstancedMesh(ringGeo,    grooveMat, n);
-  const ringBInst   = new THREE.InstancedMesh(ringGeo,    grooveMat, n);
-  const echinusInst = new THREE.InstancedMesh(echinusGeo, stoneMat,  n);
-
-  const _pDummy = new THREE.Object3D(), _pCol = new THREE.Color();
-  pillarPlacements.forEach(({ x, z }, i) => {
-    const h = getTerrainHeight(x, z);
-    const pillarH = 5.52 + seededRand() * 2.53;
-    const shaftH  = pillarH - 0.28 - 0.24;
-    const yRot = seededRand() * 6.28;
-    const hv = Math.sin(x*73.1+z*137.9)*0.5+0.5;
-
-    _pDummy.position.set(x, h+0.14, z);
-    _pDummy.scale.set(1,1,1); _pDummy.rotation.set(0,yRot,0);
-    _pDummy.updateMatrix(); baseInst.setMatrixAt(i, _pDummy.matrix);
-
-    _pDummy.position.set(x, h+0.28+shaftH/2, z);
-    _pDummy.scale.set(1,shaftH,1); _pDummy.rotation.set(0,yRot,0);
-    _pDummy.updateMatrix(); shaftInst.setMatrixAt(i, _pDummy.matrix);
-
-    _pDummy.position.set(x, h+pillarH-0.12, z);
-    _pDummy.scale.set(1,1,1); _pDummy.rotation.set(0,yRot,0);
-    _pDummy.updateMatrix(); capitalInst.setMatrixAt(i, _pDummy.matrix);
-
-    // Ring bands at 30% and 68% of shaft height
-    _pDummy.position.set(x, h+0.28+shaftH*0.30, z);
-    _pDummy.scale.set(1,1,1); _pDummy.rotation.set(0,0,0);
-    _pDummy.updateMatrix(); ringAInst.setMatrixAt(i, _pDummy.matrix);
-    _pDummy.position.set(x, h+0.28+shaftH*0.68, z);
-    _pDummy.updateMatrix(); ringBInst.setMatrixAt(i, _pDummy.matrix);
-    // Echinus — flared neck bridging shaft top to capital
-    _pDummy.position.set(x, h+0.28+shaftH+0.12, z);
-    _pDummy.updateMatrix(); echinusInst.setMatrixAt(i, _pDummy.matrix);
-
-    _pCol.setRGB(0.84+hv*0.08, 0.80+hv*0.06, 0.70+hv*0.08);
-    baseInst.setColorAt(i,_pCol); shaftInst.setColorAt(i,_pCol); capitalInst.setColorAt(i,_pCol);
-    echinusInst.setColorAt(i,_pCol);
-    _pCol.setRGB((0.84+hv*0.08)*0.88, (0.80+hv*0.06)*0.88, (0.70+hv*0.08)*0.88);
-    ringAInst.setColorAt(i,_pCol); ringBInst.setColorAt(i,_pCol);
-
-    const col2 = new THREE.Mesh(new THREE.BoxGeometry(1.30,pillarH,1.30), invisibleColliderMat);
-    col2.position.set(x, h+pillarH/2, z); col2.updateMatrixWorld(true); collidables.push(col2);
-    const hit = new THREE.Mesh(new THREE.BoxGeometry(1.26,pillarH,1.26), invisibleColliderMat);
-    hit.position.set(x, h+pillarH/2, z); hit.updateMatrixWorld(true); targets.push(hit);
-  });
-
-  [shaftInst, baseInst, capitalInst, ringAInst, ringBInst, echinusInst].forEach(m => {
-    m.instanceMatrix.needsUpdate = true; m.instanceColor.needsUpdate = true;
-    m.castShadow = true; scene.add(m);
-  });
-}
-
-// Volcano LOS/bullet blocker
-const bulletBlockers = [];
-
-const vBase = new THREE.Mesh(
-  new THREE.CylinderGeometry(CONFIG.volcanoRadius * 1.05, CONFIG.volcanoRadius * 1.05, CONFIG.volcanoHeight * 0.55, 16),
-  invisibleColliderMat
-);
-vBase.position.set(0, CONFIG.volcanoHeight * 0.275, 0);
-
-const vMid = new THREE.Mesh(
-  new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.65, CONFIG.volcanoRadius * 1.0, CONFIG.volcanoHeight * 0.45, 16),
-  invisibleColliderMat
-);
-vMid.position.set(0, CONFIG.volcanoHeight * 0.60, 0);
-
-const vTop = new THREE.Mesh(
-  new THREE.CylinderGeometry(CONFIG.volcanoRadius * 0.22, CONFIG.volcanoRadius * 0.60, CONFIG.volcanoHeight * 0.35, 12),
-  invisibleColliderMat
-);
-vTop.position.set(0, CONFIG.volcanoHeight * 0.875, 0);
-
-for (let i = 0; i < 25; i++) {
-  const angle = seededRand() * Math.PI * 2;
-  const r = 10 + seededRand() * (CONFIG.volcanoRadius - 14);
-  const x = Math.cos(angle) * r, z = Math.sin(angle) * r;
-  const h = Math.min(getTerrainHeight(x,z), getTerrainHeight(x-0.8,z), getTerrainHeight(x+0.8,z), getTerrainHeight(x,z-0.8), getTerrainHeight(x,z+0.8));
-  const sz = 1.2 + seededRand() * 1.4;
-  const yRot = seededRand() * 6.28;
-
-  // Compute terrain normal by sampling neighbours — tilts crate to match slope
-  const step = 0.8;
-  const hL = getTerrainHeight(x - step, z);
-  const hR = getTerrainHeight(x + step, z);
-  const hD = getTerrainHeight(x, z - step);
-  const hU = getTerrainHeight(x, z + step);
-  const slopeX = Math.atan2(hR - hL, step * 2);
-  const slopeZ = Math.atan2(hU - hD, step * 2);
-
-  const crate = new THREE.Mesh(
-    new THREE.BoxGeometry(sz, sz, sz),
-    new THREE.MeshLambertMaterial({ map: _crateTex, color: 0xffdbaf })
-  );
-  crate.position.set(x, h + sz * 0.5, z);
-  crate.rotation.set(0, yRot, 0);
-  crate.castShadow = true;
-  scene.add(crate);
-
-  // Bullet hitbox — tilted to match visual
-  const crateHit = new THREE.Mesh(
-    new THREE.BoxGeometry(sz, sz, sz),
-    invisibleColliderMat
-  );
-  crateHit.position.set(x, h + sz * 0.5, z);
-  crateHit.rotation.set(0, yRot, 0);
-  crateHit.updateMatrixWorld(true);
-  targets.push(crateHit);
-
-  // Use visible crate mesh as player collider — invisible colliders can have BB issues
-  collidables.push(crate);
-}
-
-// ── Dirt patch data — precomputed so grass loop can avoid them ──
-const _dirtPatches = [];
-{
-  const dpGrid = 20;
-  for (let gx = -half; gx < half; gx += dpGrid) {
-    for (let gz = -half; gz < half; gz += dpGrid) {
-      const x = gx + (seededRand() - 0.5) * dpGrid * 1.2;
-      const z = gz + (seededRand() - 0.5) * dpGrid * 1.2;
-      if (!canPlaceGround(x, z)) continue;
-      const r = (2.5 + seededRand() * 4.0) * 1.25;
-      _dirtPatches.push({ x, z, r });
-    }
-  }
-}
-
-// ── Instanced Grass Tufts — 5-blade tapered fan, 1 draw call ──
-// Each instance is a cluster of 5 blades fanning outward from a shared base,
-// matching the reference: wide tapered blades, dark base → bright tip, outward lean.
-{
-  // ── Build tuft geometry (5 tapered blades, baked into one BufferGeometry) ──
-  // Blade config: [azimuth_deg, lean_deg] — azimuth spreads blades, lean tilts them out
-  const bladeDefs = [
-    [  0,  12],   // center — nearly upright
-    [ 38,  30],   // inner left
-    [-38,  30],   // inner right
-    [ 68,  48],   // outer left
-    [-68,  48],   // outer right
-  ];
-  const bH  = 0.218;  // blade length
-  const bBW = 0.026;  // base half-width
-  const bTW = 0.005;  // tip half-width
-  const BASE_COL = [0.06, 0.26, 0.04];   // very dark green at soil
-  const TIP_COL  = [0.40, 0.88, 0.20];   // bright lime-green at tip
-
-  const vCount = bladeDefs.length * 4;   // 4 verts per blade
-  const positions = new Float32Array(vCount * 3);
-  const colors    = new Float32Array(vCount * 3);
-  const indices   = [];
-
-  bladeDefs.forEach(([azDeg, leanDeg], bi) => {
-    const az   = azDeg   * Math.PI / 180;
-    const lean = leanDeg * Math.PI / 180;
-    const vi   = bi * 4;
-
-    // Lean direction unit vector (XZ plane)
-    const lx = Math.sin(az), lz = Math.cos(az);
-    // Perpendicular (for blade width)
-    const px = Math.cos(az), pz = -Math.sin(az);
-    // Tip world offset
-    const tx = Math.sin(lean) * lx * bH;
-    const ty = Math.cos(lean) * bH;
-    const tz = Math.sin(lean) * lz * bH;
-
-    // v0 base-left, v1 base-right, v2 tip-left, v3 tip-right
-    const vd = [
-      [-bBW * px, 0,  -bBW * pz],
-      [ bBW * px, 0,   bBW * pz],
-      [tx - bTW * px, ty, tz - bTW * pz],
-      [tx + bTW * px, ty, tz + bTW * pz],
-    ];
-    vd.forEach(([vx, vy, vz], k) => {
-      const pi = (vi + k) * 3;
-      positions[pi] = vx; positions[pi+1] = vy; positions[pi+2] = vz;
-      const isBase = k < 2;
-      const ci = (vi + k) * 3;
-      colors[ci]   = isBase ? BASE_COL[0] : TIP_COL[0];
-      colors[ci+1] = isBase ? BASE_COL[1] : TIP_COL[1];
-      colors[ci+2] = isBase ? BASE_COL[2] : TIP_COL[2];
-    });
-    indices.push(vi, vi+1, vi+2,  vi+1, vi+3, vi+2);
-  });
-
-  const grassGeo = new THREE.BufferGeometry();
-  grassGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  grassGeo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
-  grassGeo.setIndex(indices);
-  const grassMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-
-  // ── Place tufts on a jittered grid ──
-  const grassPlacements = [];
-  const grassGrid = 0.55;
-  for (let gx = -half; gx < half; gx += grassGrid) {
-    for (let gz = -half; gz < half; gz += grassGrid) {
-      const x = gx + (seededRand() - 0.5) * grassGrid * 0.9;
-      const z = gz + (seededRand() - 0.5) * grassGrid * 0.9;
-      if (!canPlaceGround(x, z)) continue;
-      let inDirt = false;
-      for (const p of _dirtPatches) {
-        const dx = x - p.x, dz = z - p.z;
-        if (dx*dx + dz*dz < p.r * p.r * 0.52) { inDirt = true; break; }
-      }
-      if (inDirt) continue;
-      grassPlacements.push({ x, z });
-    }
-  }
-
-  const grassInst = new THREE.InstancedMesh(grassGeo, grassMat, grassPlacements.length);
-
-  // Palette: mostly rich greens with slight variation
-  const grassPalette = [
-    [0.55, 0.92, 0.28],  // bright fresh green
-    [0.38, 0.72, 0.18],  // mid green
-    [0.28, 0.58, 0.12],  // dark forest green
-    [0.48, 0.85, 0.22],  // vivid green
-    [0.32, 0.65, 0.15],  // cool dark
-  ];
-
-  const _gDummy = new THREE.Object3D();
-  const _gCol   = new THREE.Color();
-  grassPlacements.forEach(({ x, z }, i) => {
-    const h = getTerrainHeight(x, z);
-    const s = 0.65 + seededRand() * 0.80;  // size variation: small to large tufts
-    _gDummy.position.set(x, h, z);
-    _gDummy.scale.set(s, s * (0.8 + seededRand() * 0.45), s);
-    _gDummy.rotation.set(0, seededRand() * 6.28, 0);  // random azimuth only — lean baked in
-    _gDummy.updateMatrix();
-    grassInst.setMatrixAt(i, _gDummy.matrix);
-    // Smooth spatial color — nearby tufts cluster in similar hue
-    const fi = Math.abs(Math.sin(x * 0.28 + z * 0.41) * 0.6 + Math.cos(x * 1.5 - z * 1.1) * 0.4);
-    const [r, g, b] = grassPalette[Math.floor(fi * grassPalette.length) % grassPalette.length];
-    _gCol.setRGB(r, g, b);
-    grassInst.setColorAt(i, _gCol);
-  });
-  grassInst.instanceMatrix.needsUpdate = true;
-  grassInst.instanceColor.needsUpdate  = true;
-  scene.add(grassInst);
-}
-
-// ── Instanced Dirt Patches — smooth organic blobs, no grass inside ──
-{
-  // Large central gradient + small perimeter bumps → soft organic edge, no hard outline
-  const dc = document.createElement('canvas'); dc.width = dc.height = 256;
-  const dctx = dc.getContext('2d');
-  const g0 = dctx.createRadialGradient(128, 128, 0, 128, 128, 118);
-  g0.addColorStop(0,    'rgba(255,255,255,1.0)');
-  g0.addColorStop(0.55, 'rgba(255,255,255,0.92)');
-  g0.addColorStop(0.78, 'rgba(255,255,255,0.45)');
-  g0.addColorStop(0.92, 'rgba(255,255,255,0.10)');
-  g0.addColorStop(1.0,  'rgba(255,255,255,0)');
-  dctx.fillStyle = g0; dctx.fillRect(0, 0, 256, 256);
-  [ [88,52,30], [168,60,24], [196,140,28], [155,205,22], [72,178,26], [50,115,20], [130,40,18] ]
-    .forEach(([bx, by, br]) => {
-      const g = dctx.createRadialGradient(bx, by, 0, bx, by, br);
-      g.addColorStop(0,   'rgba(255,255,255,0.45)');
-      g.addColorStop(0.6, 'rgba(255,255,255,0.15)');
-      g.addColorStop(1,   'rgba(255,255,255,0)');
-      dctx.fillStyle = g; dctx.fillRect(0, 0, 256, 256);
-    });
-  const dirtTex = new THREE.CanvasTexture(dc);
-
-  const dirtGeo = new THREE.PlaneGeometry(1, 1);
-  const dirtMat = new THREE.MeshBasicMaterial({
-    map: dirtTex, transparent: true, depthWrite: false,
-    side: THREE.DoubleSide, color: 0xffffff
-  });
-  const dirtInst = new THREE.InstancedMesh(dirtGeo, dirtMat, _dirtPatches.length);
-  dirtInst.castShadow = false;
-  dirtInst.renderOrder = 1;
-
-  const dirtPalette = [
-    [0.34, 0.21, 0.09],
-    [0.44, 0.29, 0.12],
-    [0.38, 0.23, 0.08],
-    [0.29, 0.18, 0.07],
-    [0.50, 0.34, 0.16],
-  ];
-
-  const _ddDummy = new THREE.Object3D();
-  const _ddCol = new THREE.Color();
-  _dirtPatches.forEach(({ x, z, r }, i) => {
-    const h = getTerrainHeight(x, z);
-    const diameter = r * 2.0;
-    const aspect = 0.7 + seededRand() * 0.6;
-    _ddDummy.position.set(x, h + 0.015, z);
-    _ddDummy.scale.set(diameter, diameter * aspect, diameter);
-    _ddDummy.rotation.set(-Math.PI / 2, 0, seededRand() * Math.PI * 2);
-    _ddDummy.updateMatrix();
-    dirtInst.setMatrixAt(i, _ddDummy.matrix);
-    const fi = Math.abs(Math.sin(x * 113.7 + z * 197.3) * 0.5 + Math.cos(x * 71.1 - z * 153.9) * 0.5);
-    const [rv, g, b] = dirtPalette[Math.floor(fi * dirtPalette.length) % dirtPalette.length];
-    _ddCol.setRGB(rv, g, b);
-    dirtInst.setColorAt(i, _ddCol);
-  });
-  dirtInst.instanceMatrix.needsUpdate = true;
-  dirtInst.instanceColor.needsUpdate = true;
-  scene.add(dirtInst);
-}
-
-// ═══════════════════════════════════════════════════════════
-
-// ── Roman stone cover walls — 15 scattered waist-high barriers ──
-{
-  const wallMat   = new THREE.MeshBasicMaterial({ color: 0xC8C4BB });
-  const pillarMat = new THREE.MeshBasicMaterial({ color: 0xBEBAB2 });
-
-  const wl = 3.5, wh = 1.29, wt = 0.55; // wh = 1.12 * 1.15
-  const pw = 0.46, ph = wh + 0.20;
-
-  const walls = _wallPositions.map(([wx, wz], i) => {
-    const facings = ['EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','NS','EW','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW','NS','EW','EW','NS','EW'];
-    return [wx, wz, facings[i]];
-  });
-
-  for (const [wx, wz, facing] of walls) {
-    // Skip canPlaceAt — it excludes _nearWall positions. Use direct checks instead.
-    if (getVolcanoHeight(wx, wz) > 1) continue;
-    if (Math.abs(wx) > half - 12 || Math.abs(wz) > half - 12) continue;
-    const isEW = facing === 'EW';
-    const h = getTerrainHeight(wx, wz);
-
-    const wallGeo = isEW
-      ? new THREE.BoxGeometry(wl, wh, wt)
-      : new THREE.BoxGeometry(wt, wh, wl);
-    const wall = new THREE.Mesh(wallGeo, wallMat);
-    wall.position.set(wx, h + wh / 2, wz);
-    scene.add(wall);
-    collidables.push(wall);
-
-    for (const gy of [0.35, 0.72]) {
-      const lineGeo = isEW
-        ? new THREE.BoxGeometry(wl + 0.02, 0.04, wt + 0.02)
-        : new THREE.BoxGeometry(wt + 0.02, 0.04, wl + 0.02);
-      const line = new THREE.Mesh(lineGeo, pillarMat);
-      line.position.set(wx, h + gy, wz);
-      scene.add(line);
-    }
-
-    for (const s of [-1, 1]) {
-      const ex = isEW ? wx + s * (wl / 2 + pw / 2) : wx;
-      const ez = isEW ? wz : wz + s * (wl / 2 + pw / 2);
-      const eh = getTerrainHeight(ex, ez);
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(pw, ph, pw), pillarMat);
-      pillar.position.set(ex, eh + ph / 2, ez);
-      scene.add(pillar);
-      collidables.push(pillar);
-    }
-  }
-}
-
-// Canal-top grass removed — keep brick surfaces clean
-if (false) {
-  const CANAL_TOP_Y = 0.847;  // matches terrain.js canalH
-  const INNER_EDGE  = 83.75;  // CANAL_R(85) - canalOuter(1.25)
-  const OUTER_EDGE  = 86.25;  // CANAL_R(85) + canalOuter(1.25)
-  const SPACING     = 1.1;
-
-  // Ground grass palette — same as the grassPalette above so blades match
-  const cgPalette = [
-    new THREE.Color(0.55, 0.92, 0.28),
-    new THREE.Color(0.38, 0.72, 0.18),
-    new THREE.Color(0.28, 0.58, 0.12),
-    new THREE.Color(0.48, 0.85, 0.22),
-    new THREE.Color(0.32, 0.65, 0.14),
-  ];
-
-  // Same blade geometry as ground grass (BLADES=3, same bH/bBW/bTW)
-  const BLADES = 3, bH = 0.38, bBW = 0.052, bTW = 0.016;
-  const _cp = new Float32Array(BLADES*4*3), _cc = new Float32Array(BLADES*4*3), _ci = [];
-  // White vertex colors — instance color provides the actual hue variation
-  for (let b = 0; b < BLADES; b++) {
-    const vi = b*4, ang = (b/BLADES)*Math.PI;
-    const px = Math.cos(ang), pz = Math.sin(ang);
-    const lean = 0.18 + (b/BLADES)*0.12;
-    const tx = Math.sin(lean)*px*bH, ty = Math.cos(lean)*bH, tz = Math.sin(lean)*pz*bH;
-    [[-bBW*px,0,-bBW*pz],[bBW*px,0,bBW*pz],[tx-bTW*px,ty,tz-bTW*pz],[tx+bTW*px,ty,tz+bTW*pz]]
-      .forEach(([vx,vy,vz],k) => {
-        const pi=(vi+k)*3, isBase=k<2;
-        _cp[pi]=vx; _cp[pi+1]=vy; _cp[pi+2]=vz;
-        // base half-brightness so instanceColor controls the final shade
-        _cc[pi]=isBase?0.35:0.85; _cc[pi+1]=isBase?0.35:0.85; _cc[pi+2]=isBase?0.35:0.85;
-      });
-    _ci.push(vi,vi+1,vi+2, vi+1,vi+3,vi+2);
-  }
-  const cgGeo = new THREE.BufferGeometry();
-  cgGeo.setAttribute('position', new THREE.BufferAttribute(_cp, 3));
-  cgGeo.setAttribute('color',    new THREE.BufferAttribute(_cc, 3));
-  cgGeo.setIndex(_ci);
-  const cgMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
-
-  // Both inner and outer edges, all 4 sides
-  const cgPos = [];
-  const hlen = INNER_EDGE - 0.1;
-  for (let t = -hlen; t <= hlen; t += SPACING) {
-    for (const edge of [INNER_EDGE, OUTER_EDGE]) {
-      cgPos.push([ t,     CANAL_TOP_Y, -edge ]);  // south
-      cgPos.push([ t,     CANAL_TOP_Y,  edge ]);  // north
-      cgPos.push([ edge,  CANAL_TOP_Y,  t    ]);  // east
-      cgPos.push([-edge,  CANAL_TOP_Y,  t    ]);  // west
-    }
-  }
-
-  const cgInst = new THREE.InstancedMesh(cgGeo, cgMat, cgPos.length);
-  cgInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cgPos.length*3), 3);
-  const _cgD = new THREE.Object3D(), _cgC = new THREE.Color();
-  cgPos.forEach(([px, py, pz], i) => {
-    _cgD.position.set(px, py, pz);
-    _cgD.rotation.y = (i * 2.399) % (Math.PI * 2);  // golden-angle spread
-    const sc = 0.82 + (Math.abs(Math.sin(i*7.3)) * 0.35);
-    _cgD.scale.set(sc, sc * (0.9 + Math.abs(Math.sin(i*3.1))*0.2), sc);
-    _cgD.updateMatrix();
-    cgInst.setMatrixAt(i, _cgD.matrix);
-    _cgC.copy(cgPalette[i % cgPalette.length]);
-    cgInst.setColorAt(i, _cgC);
-  });
-  cgInst.instanceMatrix.needsUpdate = true;
-  cgInst.instanceColor.needsUpdate  = true;
-  scene.add(cgInst);
-}
-
-// ── Decorative low bushes — 20 scattered, visual cover only, no colliders ──
-{
-  const bushColors = [0x3a7a1a, 0x2d6614, 0x4a8c20, 0x336018, 0x528c24];
-  const rng = (() => { let s = 9371; return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; }; })();
-
-  // One shared material for every bush (was a fresh MeshLambertMaterial per blob —
-  // 350 materials / 350 draw calls). Per-blob tint now rides in vertex colors.
-  const _bushMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const _bushDummy = new THREE.Object3D();
-  // Merge a bush's 5 blobs into one geometry → 1 mesh + 1 draw call per bush.
-  function _mergeBush(blobs, darkColor, baseColor) {
-    let total = 0;
-    const parts = [];
-    blobs.forEach(({ r, y, x, z }, i) => {
-      const g = new THREE.SphereGeometry(r, 6, 5).toNonIndexed();
-      _bushDummy.position.set(x, y, z);
-      _bushDummy.rotation.set(0, 0, 0);
-      _bushDummy.scale.set(1, 1, 1);
-      _bushDummy.updateMatrix();
-      g.applyMatrix4(_bushDummy.matrix); // bake blob offset into the verts
-      total += g.attributes.position.count;
-      parts.push({ g, c: new THREE.Color(i < 2 ? darkColor : baseColor) });
-    });
-    const pos = new Float32Array(total * 3);
-    const nor = new Float32Array(total * 3);
-    const col = new Float32Array(total * 3);
-    let off = 0;
-    for (const { g, c } of parts) {
-      const n = g.attributes.position.count;
-      pos.set(g.attributes.position.array, off * 3);
-      nor.set(g.attributes.normal.array, off * 3);
-      for (let k = 0; k < n; k++) { col[(off + k) * 3] = c.r; col[(off + k) * 3 + 1] = c.g; col[(off + k) * 3 + 2] = c.b; }
-      off += n;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute('normal',   new THREE.BufferAttribute(nor, 3));
-    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
-    return geo;
-  }
-
-  const bushPositions = [];
-  let attempts = 0;
-  while (bushPositions.length < 35 && attempts++ < 2000) {
-    const angle = rng() * Math.PI * 2;
-    const r = 25 + rng() * 80; // spread across map, avoid center
-    const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
-    if (!canPlaceAt(bx, bz)) continue;
-    if (isInCanalWater(bx, bz)) continue;
-    if (_tooClose(bx, bz, 12)) continue;
-    bushPositions.push([bx, bz]);
-    _placedObjList.push({ x: bx, z: bz, r: 10 });
-  }
-
-  for (const [bx, bz] of bushPositions) {
-    const bh = getTerrainHeight(bx, bz);
-    const group = new THREE.Group();
-    group.position.set(bx, bh, bz);
-    group.rotation.y = rng() * Math.PI * 2;
-
-    const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
-    const darkColor = (baseColor & 0xFEFEFE) >> 1; // 50% darker
-    const scale = (0.9 + rng() * 0.7) * 0.655; // size variety
-
-    // Layered blob structure: wide base, narrower mid, small top
-    const blobs = [
-      { r: 1.10 * scale, y: 0.55 * scale, x:  0,              z:  0 },
-      { r: 0.85 * scale, y: 0.90 * scale, x:  0.5 * scale,    z:  0.2 * scale },
-      { r: 0.80 * scale, y: 0.85 * scale, x: -0.4 * scale,    z: -0.3 * scale },
-      { r: 0.65 * scale, y: 1.20 * scale, x:  0.15 * scale,   z:  0.1 * scale },
-      { r: 0.45 * scale, y: 1.50 * scale, x: -0.1 * scale,    z: -0.1 * scale },
-    ];
-
-    // One merged, vertex-colored mesh per bush (no castShadow — a ground-level
-    // blob shadow is invisible under the bush itself).
-    group.add(new THREE.Mesh(_mergeBush(blobs, darkColor, baseColor), _bushMat));
-
-    scene.add(group);
-    // Collision proxy — same footprint as the bush cluster
-    const _bCol = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0 * scale, 1.4 * scale, 2.0 * scale),
-      new THREE.MeshBasicMaterial()
-    );
-    _bCol.position.set(bx, bh + 0.7 * scale, bz);
-    _bCol.updateMatrixWorld(true);
-    collidables.push(_bCol);
-  }
-
-  // ── 20 additional outer-ring bushes — beyond the canal (r = 88-115) ──
-  const outerBushPositions = [];
-  let outerAttempts = 0;
-  while (outerBushPositions.length < 35 && outerAttempts++ < 2000) {
-    const angle = rng() * Math.PI * 2;
-    const r = 88 + rng() * 27; // outside the canal (canal at r=85), up to near cliff
-    const bx = Math.cos(angle) * r, bz = Math.sin(angle) * r;
-    if (!canPlaceAt(bx, bz)) continue;
-    if (isInCanalWater(bx, bz)) continue;
-    if (_tooClose(bx, bz, 10)) continue;
-    outerBushPositions.push([bx, bz]);
-    _placedObjList.push({ x: bx, z: bz, r: 8 });
-  }
-
-  for (const [bx, bz] of outerBushPositions) {
-    const bh = getTerrainHeight(bx, bz);
-    const group = new THREE.Group();
-    group.position.set(bx, bh, bz);
-    group.rotation.y = rng() * Math.PI * 2;
-    const baseColor = bushColors[Math.floor(rng() * bushColors.length)];
-    const darkColor = (baseColor & 0xFEFEFE) >> 1;
-    const scale = (0.9 + rng() * 0.7) * 0.655;
-    const blobs = [
-      { r: 1.10 * scale, y: 0.55 * scale, x:  0,            z:  0 },
-      { r: 0.85 * scale, y: 0.90 * scale, x:  0.5 * scale,  z:  0.2 * scale },
-      { r: 0.80 * scale, y: 0.85 * scale, x: -0.4 * scale,  z: -0.3 * scale },
-      { r: 0.65 * scale, y: 1.20 * scale, x:  0.15 * scale, z:  0.1 * scale },
-      { r: 0.45 * scale, y: 1.50 * scale, x: -0.1 * scale,  z: -0.1 * scale },
-    ];
-    group.add(new THREE.Mesh(_mergeBush(blobs, darkColor, baseColor), _bushMat));
-    scene.add(group);
-    const _bCol2 = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0 * scale, 1.4 * scale, 2.0 * scale),
-      new THREE.MeshBasicMaterial()
-    );
-    _bCol2.position.set(bx, bh + 0.7 * scale, bz);
-    _bCol2.updateMatrixWorld(true);
-    collidables.push(_bCol2);
-  }
+// Side buildings (±52, 0) @ 10×28 — form the N–S flank alleys.
+addCityBox(10, 11, 28, -52, 0, _sideMat);
+addCityBox(10, 11, 28,  52, 0, _sideMat);
+
+// ── Monument (0,0) @ 8×8×10 — kills the straight S1↔S2 spawn sightline ──
+addCityBox(8, 10, 8, 0, 0, _monMat);
+
+// ── Crates — full-block cover (block bullets + movement), ~1.6u tall ──
+// (0, ±18), (±26, 0), (±12, ∓8) — 180°-symmetric advance cover.
+for (const [cx, cz] of [[0, -18], [0, 18], [-26, 0], [26, 0], [-12, 8], [12, -8]]) {
+  addCityBox(3, 1.6, 3, cx, cz, _crateMat);
 }
 // BOTS — AI with shooting, prison spawn, ammo seeking
 // Rendering: GLTF SkinnedMesh clones with AnimationMixer
@@ -2602,7 +511,10 @@ if (false) {
 const BOT_NAMES = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India','Juliet',
   'Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo','Sierra','Tango'];
 
-const BOT_COUNT = 10;
+// Duel mode is player-vs-player only — no bots. The AI/character code below
+// stays intact (the character rig loader is also used for remote players);
+// spawnBots() simply loops zero times. Flip mode to 'br' to bring bots back.
+const BOT_COUNT = CONFIG.mode === 'duel' ? 0 : 10;
 
 // ── GLTF character system ──
 // Each animation is a separate GLB (mesh + animation from same export = matching bind pose).
@@ -3931,7 +1843,10 @@ const crateStrip  = new THREE.MeshPhongMaterial({ color: 0x999999, shininess: 55
 const crateCorner = new THREE.MeshPhongMaterial({ color: 0x666666, shininess: 65 });
 const depotCrates = [];
 
-depotCorners.forEach(({ x, z }) => {
+// Ammo depots are BR only — duel is fixed-loadout, no pickups. Declarations
+// above (windowPanes/obbCollidables/obbFloors/depotCrates) stay defined (empty)
+// so physics + shot raycast still resolve them.
+if (CONFIG.mode === 'br') depotCorners.forEach(({ x, z }) => {
   const h = getTerrainHeight(x, z);
   const rotY = Math.atan2(-x, -z);
   const cosR = Math.cos(rotY), sinR = Math.sin(rotY);
@@ -4157,8 +2072,8 @@ depotCorners.forEach(({ x, z }) => {
   group.updateMatrixWorld(true);
 });
 
-// ── Outer-ring scattered loot — 10 crates beyond the canal ──
-{
+// ── Outer-ring scattered loot — 10 crates beyond the canal (BR only) ──
+if (CONFIG.mode === 'br') {
   const outerLoot = [
     [ 104,  34, 'ammo_m4'],
     [  65,  89, 'armor'],
@@ -4449,7 +2364,9 @@ function buildCollisionCache() {
   collidableCache.length = 0;
   for (const obj of collidables) {
     obj.updateMatrixWorld(true); // force world matrix before BB compute
-    const isDynamic = (obj === gateDoorL || obj === gateDoorR);
+    // Gate doors are the only moving collidables, and they're island-only
+    // (removed in the city build) — short-circuit before referencing them.
+    const isDynamic = CONFIG.world === 'island' && (obj === gateDoorL || obj === gateDoorR);
     const bb = new THREE.Box3().setFromObject(obj);
     collidableCache.push({ bb, dynamic: isDynamic, obj });
   }
@@ -4809,8 +2726,8 @@ function _physStep(fixedDt, inputDir, speed) {
     }
   }
 
-  // World bounds
-  const bound = CONFIG.islandSize * 0.5 - 1;
+  // World bounds — track the active map (island 253 / city 120) via `half`.
+  const bound = half - 1;
   phys.pos.x = Math.max(-bound, Math.min(bound, phys.pos.x));
   phys.pos.z = Math.max(-bound, Math.min(bound, phys.pos.z));
 
@@ -5814,12 +3731,16 @@ function updateHUD() {
 // ═══════════════════════════════════════════════════════════
 const mCtx = document.getElementById('minimap-canvas').getContext('2d');
 function drawMinimap() {
-  const w = 150, h = 150, scale = w / CONFIG.islandSize, cx = w / 2, cy = h / 2;
+  // Scale to the actual map size (island 253 / city 120) via `half`.
+  const w = 150, h = 150, mapSize = half * 2, scale = w / mapSize, cx = w / 2, cy = h / 2;
   mCtx.fillStyle = '#0a6699'; mCtx.fillRect(0, 0, w, h);
-  const iSize = CONFIG.islandSize * scale;
-  mCtx.fillStyle = '#3a5a2a';
+  const iSize = mapSize * scale;
+  mCtx.fillStyle = (CONFIG.world === 'city') ? '#33363c' : '#3a5a2a';
   mCtx.fillRect(cx - iSize / 2, cy - iSize / 2, iSize, iSize);
 
+  // Island-only minimap features — volcano / canal / flood / prison all live
+  // in the removed island world files. City draws just the arena + player.
+  if (CONFIG.world === 'island') {
   // Volcano
   mCtx.beginPath();
   mCtx.arc(cx, cy, CONFIG.volcanoRadius * scale, 0, Math.PI * 2);
@@ -5857,6 +3778,7 @@ function drawMinimap() {
   // Prison
   mCtx.fillStyle = '#808080';
   mCtx.fillRect(cx + prison.x * scale - pw * scale / 2, cy + prison.z * scale - pw * scale / 2, pw * scale, pw * scale);
+  }
 
   // Bots (alive = red dots)
   bots.forEach(b => {
@@ -6555,12 +4477,16 @@ function update() {
       state.phase = 'playing';
       window._killCamBot = null;
       cdEl.classList.remove('show');
-      state.gateOpening = true;
-      SFX.gate_creak();
-      const idx1 = collidables.indexOf(gateDoorL);
-      if (idx1 >= 0) collidables.splice(idx1, 1);
-      const idx2 = collidables.indexOf(gateDoorR);
-      if (idx2 >= 0) collidables.splice(idx2, 1);
+      // Prison gate swing is island-only (gateDoorL/R live in the island world
+      // file, which the city build removes). Duel has no gate.
+      if (CONFIG.world === 'island') {
+        state.gateOpening = true;
+        SFX.gate_creak();
+        const idx1 = collidables.indexOf(gateDoorL);
+        if (idx1 >= 0) collidables.splice(idx1, 1);
+        const idx2 = collidables.indexOf(gateDoorR);
+        if (idx2 >= 0) collidables.splice(idx2, 1);
+      }
     }
   }
 
@@ -6584,8 +4510,10 @@ function update() {
     startKillCam();
   }
 
-  // Check victory — you win when no bots AND no remote players are left standing
-  if (state.phase === 'playing' && !state.playerDead) {
+  // Check victory — you win when no bots AND no remote players are left standing.
+  // BR only: in duel, winning is "first to 2 kills" (handled separately), so the
+  // last-alive check must NOT fire (with 0 bots it would win instantly).
+  if (CONFIG.mode === 'br' && state.phase === 'playing' && !state.playerDead) {
     let anyAlive = false;
     for (const b of bots) { if (b.alive) { anyAlive = true; break; } }
     if (!anyAlive) {
@@ -6964,9 +4892,9 @@ function update() {
   for (const id in state.remotePlayers) if (!state.remotePlayers[id].dead) aliveCount++;
   document.getElementById('alive-val').textContent = aliveCount;
 
-  // Volcano eruption
+  // Volcano eruption — BR storm only (references island `water`/plume objects)
   const eruptionTime = state.waterRiseStart - 15;
-  if (state.matchTime >= eruptionTime && !state.erupted) {
+  if (CONFIG.mode === 'br' && state.matchTime >= eruptionTime && !state.erupted) {
     state.erupted = true;
     state.eruptionStartTime = state.matchTime;
     // Reset plume — evenly stagger so no wave gap on startup
@@ -7071,7 +4999,7 @@ function update() {
     state.shakeOffset.set(0, 0, 0);
   }
 
-  if (state.matchTime >= state.waterRiseStart) {
+  if (CONFIG.mode === 'br' && state.matchTime >= state.waterRiseStart) {
     if (!state.waterRising) {
       state.waterRising = true;
       water.visible = true;
@@ -7182,23 +5110,30 @@ function update() {
     loot.rotation.y += renderDt * 1.5;
   }
 
-  // Smoke
-  smokeInst.visible = !state.erupted;
-  ashMesh.visible = !state.erupted;
-  if (!state.erupted) _plumeGroup.visible = false;
-  for (const s of smokeParticles) {
-    const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
-    const spread = 1 + riseT * 0.07;
-    _smokeDummy.position.set(
-      s.ox * spread + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 1.5,
-      CONFIG.volcanoHeight + 2 + riseT,
-      s.oz * spread + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 1.5
-    );
-    _smokeDummy.scale.setScalar(s.size * (1 + riseT * 0.035));
-    _smokeDummy.updateMatrix();
-    smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
+  // Smoke — island volcano only (smokeInst lives in the island world file,
+  // which the city build swaps out). ashMesh/_plumeGroup are defined here in
+  // 12_main, so we still force them hidden in the city.
+  if (CONFIG.world === 'island') {
+    smokeInst.visible = !state.erupted;
+    ashMesh.visible = !state.erupted;
+    if (!state.erupted) _plumeGroup.visible = false;
+    for (const s of smokeParticles) {
+      const riseT = ((clock.elapsedTime * s.speed * 5 + s.phase * 15) % 65);
+      const spread = 1 + riseT * 0.07;
+      _smokeDummy.position.set(
+        s.ox * spread + Math.sin(clock.elapsedTime * 0.3 + s.phase) * 1.5,
+        CONFIG.volcanoHeight + 2 + riseT,
+        s.oz * spread + Math.cos(clock.elapsedTime * 0.2 + s.phase) * 1.5
+      );
+      _smokeDummy.scale.setScalar(s.size * (1 + riseT * 0.035));
+      _smokeDummy.updateMatrix();
+      smokeInst.setMatrixAt(s.index, _smokeDummy.matrix);
+    }
+    smokeInst.instanceMatrix.needsUpdate = true;
+  } else {
+    ashMesh.visible = false;
+    _plumeGroup.visible = false;
   }
-  smokeInst.instanceMatrix.needsUpdate = true;
 
   // Water vignette
   if (state.waterRising) {
@@ -7415,10 +5350,13 @@ window.startPvPMatch = function() {
   state.phase = "lobby";
   state.inLobby = true;
   camera.position.set(
-    CONFIG.prisonPos.x + (Math.random() - 0.5) * 8,
+    CONFIG.spawnPos.x + (Math.random() - 0.5) * 8,
     CONFIG.playerHeight,
-    CONFIG.prisonPos.z + (Math.random() - 0.5) * 8
+    CONFIG.spawnPos.z + (Math.random() - 0.5) * 8
   );
+  // Reseed the capsule from the spawn camera — physics drives the camera, so
+  // without this the capsule keeps its old position and the spawn is ignored.
+  if (CONFIG.newPhysics) physInit();
   state.ammo.m4 = 30; state.ammo.pistol = 15;
   state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
   try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
@@ -8076,10 +6014,12 @@ function connectToServer() {
         if (typeof updateHUD === 'function') updateHUD();
         state.velocityY = 0;
         camera.position.set(
-          CONFIG.prisonPos.x + (Math.random() - 0.5) * 10,
+          CONFIG.spawnPos.x + (Math.random() - 0.5) * 10,
           CONFIG.playerHeight,
-          CONFIG.prisonPos.z + (Math.random() - 0.5) * 10
+          CONFIG.spawnPos.z + (Math.random() - 0.5) * 10
         );
+        // Reseed the capsule to the match-start spawn (physics drives the camera).
+        if (CONFIG.newPhysics) physInit();
         { const chatEl = document.getElementById('chat-container');
           if (chatEl) chatEl.style.setProperty('display', 'flex', 'important'); }
         // Players are normally already pointer-locked (ready-up grabs the lock).

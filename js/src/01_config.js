@@ -44,6 +44,19 @@ const CONFIG = {
   // false = legacy AABB system (checkCollisionAndStep) — original behaviour
   newPhysics: true,
 
+  // ── Release profile ──
+  // A "shelf" switch, like newPhysics: the battle-royale island build stays fully
+  // intact and one flag-flip away. Nothing is deleted.
+  //   mode:  'br'     = 20-player battle royale        | 'duel' = 1v1, first-to-2 kills, respawns
+  //   world: 'island' = procedural volcano island      | 'city' = flat 120u plaza arena
+  // `mode` gates bots, the rising-water storm, matchmaking and win condition.
+  // `world` selects the map; the actual geometry is swapped in build.sh (island
+  // world files vs. city world files), so the island source stays untouched.
+  // Baseline = current island BR; flipped to 'duel'/'city' at cutover once the
+  // gates and city geometry are in place.
+  mode: 'duel',
+  world: 'city',
+
   weapons: {
     m4: {
       name: 'M4', magSize: 30, fireRate: 100,
@@ -61,6 +74,11 @@ const CONFIG = {
     }
   }
 };
+
+// Player spawn point, resolved from the active world so the initial camera
+// (02_setup) and the physics seed are correct from load. City duel spawns are
+// refined in 03_city.js (CITY_SPAWNS); this is the bootstrap default.
+CONFIG.spawnPos = (CONFIG.world === 'city') ? { x: 0, z: -50 } : CONFIG.prisonPos;
 
 // ═══════════════════════════════════════════════════════════
 // STATE

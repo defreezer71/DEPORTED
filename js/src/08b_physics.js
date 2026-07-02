@@ -298,8 +298,8 @@ function _physStep(fixedDt, inputDir, speed) {
     }
   }
 
-  // World bounds
-  const bound = CONFIG.islandSize * 0.5 - 1;
+  // World bounds — track the active map (island 253 / city 120) via `half`.
+  const bound = half - 1;
   phys.pos.x = Math.max(-bound, Math.min(bound, phys.pos.x));
   phys.pos.z = Math.max(-bound, Math.min(bound, phys.pos.z));
 
