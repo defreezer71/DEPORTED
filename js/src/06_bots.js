@@ -900,6 +900,12 @@ function spawnBots() {
 
 function updateBots(dt) {
   _drainCharWork(); // ≤1 rig clone/frame: staggered attach + background pre-warm
+  // Per-frame budget for bot line-of-sight raycasts (each is intersectObjects
+  // against ALL collidables). A cluster of bots whose fire cooldowns align would
+  // otherwise fire N scene-wide raycasts on the same frame — the CPU spike behind
+  // the canal/combat drops. Cap it; deferred bots retry next frame (~tens of ms,
+  // imperceptible). This is bot-only — real players run no AI.
+  let losBudget = 4;
   for (const bot of bots) {
     if (!bot.alive) continue;
 
@@ -987,18 +993,27 @@ function updateBots(dt) {
       // wants to fire, so run them only when the cooldown is up — not every frame.
       // With a cluster of bots all engaging at once (the canal chokepoint), this is
       // the difference between ~10 full raycasts PER FRAME and ~10 per second.
-      if (bot.shootCooldown <= 0) {
+      if (bot.shootCooldown <= 0 && losBudget > 0) {
+        losBudget--;
         _aiEye.set(bx, bot.pos.y + 1.7, bz);
         _aiDir.set(dx, camera.position.y - _aiEye.y, dz).normalize();
         _aiRay.set(_aiEye, _aiDir);
         _aiRay.far = distToPlayer;
         const losHits = _aiRay.intersectObjects(collidables, false);
         let volcanoBlocking = false;
-        const stepSize = distToPlayer / 20;
-        for (let s = 1; s < 20; s++) {
-          const t = s * stepSize;
-          const volH = getVolcanoHeight(_aiEye.x + _aiDir.x * t, _aiEye.z + _aiDir.z * t);
-          if (volH > 0.8 && _aiEye.y + _aiDir.y * t < volH - 0.1) { volcanoBlocking = true; break; }
+        // Only run the 20-step volcano sample when the bot→player line actually
+        // passes over the volcano footprint (most fights don't) — cheap 2D
+        // closest-approach-to-center test first.
+        const _segLen2 = dx * dx + dz * dz;
+        const _tc = _segLen2 > 0 ? Math.max(0, Math.min(1, -(bx * dx + bz * dz) / _segLen2)) : 0;
+        const _cx = bx + dx * _tc, _cz = bz + dz * _tc;
+        if (_cx * _cx + _cz * _cz <= CONFIG.volcanoRadius * CONFIG.volcanoRadius) {
+          const stepSize = distToPlayer / 20;
+          for (let s = 1; s < 20; s++) {
+            const t = s * stepSize;
+            const volH = getVolcanoHeight(_aiEye.x + _aiDir.x * t, _aiEye.z + _aiDir.z * t);
+            if (volH > 0.8 && _aiEye.y + _aiDir.y * t < volH - 0.1) { volcanoBlocking = true; break; }
+          }
         }
         if (losHits.length > 0 || volcanoBlocking) {
           // Blocked — retry shortly (not next frame) so an occluded bot near the

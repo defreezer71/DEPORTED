@@ -2238,8 +2238,12 @@ const _dirtPatches = [];
   const grassMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
   // ── Place tufts on a jittered grid ──
+  // grassGrid drives ~90% of the map's triangle budget: at 0.55 the ~180k tufts
+  // (10 tris each) were ~1.8M tris on their own. Doubling the spacing to 1.1
+  // quarters the count (~450k tris). Tune for looks vs frames: 0.8 = lusher,
+  // 1.3 = leaner. (A distance-based cull could restore near-field density later.)
   const grassPlacements = [];
-  const grassGrid = 0.55;
+  const grassGrid = 1.1;
   for (let gx = -half; gx < half; gx += grassGrid) {
     for (let gz = -half; gz < half; gz += grassGrid) {
       const x = gx + (seededRand() - 0.5) * grassGrid * 0.9;
@@ -3498,6 +3502,12 @@ function spawnBots() {
 
 function updateBots(dt) {
   _drainCharWork(); // ≤1 rig clone/frame: staggered attach + background pre-warm
+  // Per-frame budget for bot line-of-sight raycasts (each is intersectObjects
+  // against ALL collidables). A cluster of bots whose fire cooldowns align would
+  // otherwise fire N scene-wide raycasts on the same frame — the CPU spike behind
+  // the canal/combat drops. Cap it; deferred bots retry next frame (~tens of ms,
+  // imperceptible). This is bot-only — real players run no AI.
+  let losBudget = 4;
   for (const bot of bots) {
     if (!bot.alive) continue;
 
@@ -3585,18 +3595,27 @@ function updateBots(dt) {
       // wants to fire, so run them only when the cooldown is up — not every frame.
       // With a cluster of bots all engaging at once (the canal chokepoint), this is
       // the difference between ~10 full raycasts PER FRAME and ~10 per second.
-      if (bot.shootCooldown <= 0) {
+      if (bot.shootCooldown <= 0 && losBudget > 0) {
+        losBudget--;
         _aiEye.set(bx, bot.pos.y + 1.7, bz);
         _aiDir.set(dx, camera.position.y - _aiEye.y, dz).normalize();
         _aiRay.set(_aiEye, _aiDir);
         _aiRay.far = distToPlayer;
         const losHits = _aiRay.intersectObjects(collidables, false);
         let volcanoBlocking = false;
-        const stepSize = distToPlayer / 20;
-        for (let s = 1; s < 20; s++) {
-          const t = s * stepSize;
-          const volH = getVolcanoHeight(_aiEye.x + _aiDir.x * t, _aiEye.z + _aiDir.z * t);
-          if (volH > 0.8 && _aiEye.y + _aiDir.y * t < volH - 0.1) { volcanoBlocking = true; break; }
+        // Only run the 20-step volcano sample when the bot→player line actually
+        // passes over the volcano footprint (most fights don't) — cheap 2D
+        // closest-approach-to-center test first.
+        const _segLen2 = dx * dx + dz * dz;
+        const _tc = _segLen2 > 0 ? Math.max(0, Math.min(1, -(bx * dx + bz * dz) / _segLen2)) : 0;
+        const _cx = bx + dx * _tc, _cz = bz + dz * _tc;
+        if (_cx * _cx + _cz * _cz <= CONFIG.volcanoRadius * CONFIG.volcanoRadius) {
+          const stepSize = distToPlayer / 20;
+          for (let s = 1; s < 20; s++) {
+            const t = s * stepSize;
+            const volH = getVolcanoHeight(_aiEye.x + _aiDir.x * t, _aiEye.z + _aiDir.z * t);
+            if (volH > 0.8 && _aiEye.y + _aiDir.y * t < volH - 0.1) { volcanoBlocking = true; break; }
+          }
         }
         if (losHits.length > 0 || volcanoBlocking) {
           // Blocked — retry shortly (not next frame) so an occluded bot near the
@@ -4157,22 +4176,10 @@ depotCorners.forEach(({ x, z }) => {
   group.updateMatrixWorld(true);
 });
 
-// ── Outer-ring scattered loot — 10 crates beyond the canal ──
-{
-  const outerLoot = [
-    [ 104,  34, 'ammo_m4'],
-    [  65,  89, 'armor'],
-    [   0, 110, 'health'],
-    [ -65,  89, 'ammo_pistol'],
-    [-104,  34, 'ammo_m4'],
-    [-104, -34, 'armor'],
-    [ -65, -89, 'health'],
-    [   0,-110, 'ammo_m4'],
-    [  65, -89, 'ammo_pistol'],
-    [ 104, -34, 'armor'],
-  ];
-  for (const [x, z, type] of outerLoot) spawnLoot(x, z, type);
-}
+// Scattered outer-ring loot removed — all loot now comes from the depot sheds
+// (the 3 Roman-temple depots above) only. spawnLoot() is kept as the floating-
+// pickup factory in case it's wanted later (e.g. bot-death drops); nothing calls
+// it now, so lootItems stays empty and the pickup loops simply no-op.
 // ═══════════════════════════════════════════════════════════
 // WEAPON MODEL
 // ═══════════════════════════════════════════════════════════
@@ -4419,19 +4426,36 @@ function updateMuzzleFlash(dt) {
 // ═══════════════════════════════════════════════════════════
 // BULLET IMPACTS
 // ═══════════════════════════════════════════════════════════
+// ── Impact particle pool ──
+// Old code allocated 4–7 new Mesh + SphereGeometry + MeshBasicMaterial on every
+// bullet hit and scene.remove()+dispose()'d them on expiry — heavy GC + GPU churn
+// during sustained fire (~10 hits/s × 4–7 = 40–70 allocs/s), a top cause of the
+// "frames drop when I shoot" hitching. Now: one shared geometry + material and a
+// fixed ring pool of meshes toggled visible. No per-hit allocation, no add/remove.
+const _IMPACT_POOL = 64;
+const _impactGeo = new THREE.SphereGeometry(0.02, 4, 3);
+const _impactMat = new THREE.MeshBasicMaterial({ color: 0xccbb88 });
 const impactParticles = [];
+let _impactHead = 0;
+for (let i = 0; i < _IMPACT_POOL; i++) {
+  const p = new THREE.Mesh(_impactGeo, _impactMat);
+  p.visible = false;
+  p.userData = { vel: new THREE.Vector3(), life: 0 };
+  scene.add(p);
+  impactParticles.push(p);
+}
+
 function spawnImpact(pos, normal) {
-  for (let i = 0; i < 4 + Math.floor(Math.random() * 4); i++) {
-    const p = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02, 4, 3),
-      new THREE.MeshBasicMaterial({ color: 0xccbb88 })
-    );
+  const count = 4 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < count; i++) {
+    const p = impactParticles[_impactHead];
+    _impactHead = (_impactHead + 1) % _IMPACT_POOL; // ring: oldest recycled if saturated
     p.position.copy(pos);
     const dir = new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2, (Math.random() - 0.5) * 2)
       .add(normal.clone().multiplyScalar(2));
-    p.userData = { vel: dir.multiplyScalar(0.8 + Math.random() * 1.5), life: 0.25 + Math.random() * 0.3 };
-    scene.add(p);
-    impactParticles.push(p);
+    p.userData.vel.copy(dir.multiplyScalar(0.8 + Math.random() * 1.5));
+    p.userData.life = 0.25 + Math.random() * 0.3;
+    p.visible = true;
   }
 }
 
@@ -7323,13 +7347,14 @@ function update() {
   weaponCamera.fov = camera.fov;
   weaponCamera.updateProjectionMatrix();
 
-  // Impact particles
-  for (let i = impactParticles.length - 1; i >= 0; i--) {
+  // Impact particles (pooled — deactivate on expiry; never remove/dispose)
+  for (let i = 0; i < impactParticles.length; i++) {
     const p = impactParticles[i];
+    if (!p.visible) continue;
     p.userData.vel.y -= 9.8 * renderDt;
     p.position.addScaledVector(p.userData.vel, renderDt);
     p.userData.life -= renderDt;
-    if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); impactParticles.splice(i, 1); }
+    if (p.userData.life <= 0) p.visible = false;
   }
 
   // Performance stats — uses the post-main-render snapshot (_mainTris/_mainCalls):

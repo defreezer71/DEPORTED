@@ -1440,13 +1440,14 @@ function update() {
   weaponCamera.fov = camera.fov;
   weaponCamera.updateProjectionMatrix();
 
-  // Impact particles
-  for (let i = impactParticles.length - 1; i >= 0; i--) {
+  // Impact particles (pooled — deactivate on expiry; never remove/dispose)
+  for (let i = 0; i < impactParticles.length; i++) {
     const p = impactParticles[i];
+    if (!p.visible) continue;
     p.userData.vel.y -= 9.8 * renderDt;
     p.position.addScaledVector(p.userData.vel, renderDt);
     p.userData.life -= renderDt;
-    if (p.userData.life <= 0) { scene.remove(p); p.geometry.dispose(); p.material.dispose(); impactParticles.splice(i, 1); }
+    if (p.userData.life <= 0) p.visible = false;
   }
 
   // Performance stats — uses the post-main-render snapshot (_mainTris/_mainCalls):
