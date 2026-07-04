@@ -3,6 +3,36 @@
 Status as of 2026-06-26: **substantially improved.** Handing off to a future model
 (Mythos / Fable 5) — start here instead of re-deriving.
 
+> **NOTE (2026-07-04): the shipping build is now the ARENA, not the island.** All the
+> island numbers below (1.55M tris / 852 calls) are the *old* map, kept for reference.
+> The current `city-duel` build is `03_arena.js`, which is ~30× lighter — see the arena
+> capture directly below.
+
+## Arena (city-duel) captured numbers (2026-07-04) — headless, exact counts
+Captured with the new repeatable harness (`bash tools/perf.sh` → drives the real game
+in headless Chrome, calls `DBG.perfProbe()`, appends to `tools/perf-history.jsonl`).
+Draw-call/triangle/census counts are GPU-independent and exact; frame time is NOT
+measured headless (run the probe in a real tab for ms/fps). Static world only — no
+match joined, so 0 skinned characters (a live 1v1 adds ~2 chars ≈ 1 call + a few k
+tris each).
+
+- **Draw calls: 29 → 81** across a 360° sweep (81 max @150°). **No shadow pass** (arena
+  disables shadows). vs. the island's 62 → **852**: ~**10× fewer**.
+- **Triangles: 42k → 47k** (~0.047M). vs. the island's ~**1.578M**: ~**33× fewer**.
+- **Scene census:** 255 meshes (249 visible), 0 skinned, **23 InstancedMesh**, 0 shadow-
+  casters, 138 geometries, 4 textures, 12 shader programs. (three.js frustum-culls, so
+  only ~81 of the 249 visible meshes draw at once — there's still no *occlusion* culling,
+  but the arena is small enough that it doesn't matter.)
+- **Headroom read:** against the proven-fine island ceiling (852 calls / 1.578M tris ran
+  ~11ms on M1 *with* a shadow pass), the arena has ~10× draw-call and ~30× triangle room,
+  and zero shadow cost. Add repeated detail as `InstancedMesh` (1 call each, like the 10
+  arcade tiers). Re-enabling shadows is affordable here (few casters) if wanted. The
+  unchanged risk is the **when-shot fill cost** (full-screen damage vignette) — that's
+  resolution/post-bound, independent of scene geometry, so arena detail won't worsen it.
+
+**Reproduce anytime:** `bash tools/perf.sh` (rebuilds + captures). `--json` for raw JSON,
+`--no-log` to skip the history append. History accumulates in `tools/perf-history.jsonl`.
+
 ## CRITICAL CONTEXT — the dev's display is 75Hz, not 60Hz
 `requestAnimationFrame` runs at the monitor refresh rate; it is NOT capped at 60.
 On this machine open play now reads **75fps** (HUD `FPS:`). This means:

@@ -436,6 +436,22 @@ window.DBG.perfProbe = function () {
   console.log(`[probe] scene meshes ${meshes} | visible ${visible} | skinned ${skinned} | shadow-casters ${casters} | instanced ${instanced} | geom ${mem.geometries} | tex ${mem.textures}`);
   console.log(`[probe] this view — draw calls total ${withShadow} = main ${mainOnly} + shadow ${withShadow - mainOnly} | tris ${(tris/1000)|0}k`);
   console.log(`[probe] 360° sweep — calls ${minC} (@${minYaw}°) … ${maxC} (@${maxYaw}°) | tris ${(minT/1000)|0}k … ${(maxT/1000)|0}k`);
+  // Return a structured snapshot too, so a headless harness (tools/perf-capture.mjs)
+  // can read the numbers reliably instead of scraping console text. These COUNTS are
+  // GPU-independent and exact even under software rendering; frame *time* is not
+  // captured here (that needs a real on-device GPU).
+  return {
+    ts: new Date().toISOString(),
+    world: (typeof CONFIG !== 'undefined' && CONFIG.world) || null,
+    mode:  (typeof CONFIG !== 'undefined' && CONFIG.mode)  || null,
+    scene: { meshes, visible, skinned, shadowCasters: casters, instanced,
+             geometries: mem.geometries, textures: mem.textures,
+             programs: renderer.info.programs ? renderer.info.programs.length : null },
+    view:  { calls: withShadow, mainCalls: mainOnly, shadowCalls: withShadow - mainOnly, tris },
+    sweep: { minCalls: minC, minCallsYaw: minYaw, maxCalls: maxC, maxCallsYaw: maxYaw,
+             minTris: minT, maxTris: maxT },
+    shadowsEnabled: wasEnabled,
+  };
 };
 
 // ═══════════════════════════════════════════════════════════

@@ -1,0 +1,1 @@
+{"ts":"2026-07-04T17:28:17.945Z","world":"arena","mode":"duel","scene":{"meshes":255,"visible":249,"skinned":0,"shadowCasters":0,"instanced":23,"geometries":138,"textures":4,"programs":12},"view":{"calls":81,"mainCalls":81,"shadowCalls":0,"tris":46996},"sweep":{"minCalls":29,"minCallsYaw":0,"maxCalls":81,"maxCallsYaw":150,"minTris":42382,"maxTris":46996},"shadowsEnabled":false}
