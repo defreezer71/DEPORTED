@@ -645,7 +645,11 @@ function update() {
     // cost happens here instead of dropping frames mid-countdown / early match.
     if (!state.matchStartAt && typeof charLoadComplete === 'function') {
       if (charLoadComplete()) {
-        state.matchStartAt = Date.now() + 10000;
+        // Duel MVP: no countdown ceremony — drop straight into play once the rigs
+        // are loaded. matchStartAt in the past ⇒ countdownTime ≤ 0 on the next
+        // frame, so no number ever renders and the existing <=0 transition (music
+        // stop, phase='playing') runs immediately. BR keeps its 10s countdown.
+        state.matchStartAt = Date.now() + (CONFIG.mode === 'duel' ? -2000 : 10000);
       } else {
         // Loading: drain the clone work fast, but keep the screen blank — the
         // countdown number only appears once everyone's in.
@@ -672,6 +676,14 @@ function update() {
       state.phase = 'playing';
       window._killCamBot = null;
       cdEl.classList.remove('show');
+      if (CONFIG.mode === 'duel') {
+        // Duel loadout guaranteed at match go-live — covers every entry path
+        // (bots / real-players), so the player always spawns able to shoot.
+        state.armor = 100;
+        state.ammo = { m4: CONFIG.weapons.m4.magSize, pistol: CONFIG.weapons.pistol.magSize };
+        state.reserveAmmo = { m4: 90, pistol: 45 };
+        if (typeof updateHUD === 'function') updateHUD();
+      }
       // Prison gate swing is island-only (gateDoorL/R live in the island world
       // file, which the city build removes). Duel has no gate.
       if (CONFIG.world === 'island') {
@@ -1554,6 +1566,7 @@ window.startPvPMatch = function() {
   if (CONFIG.newPhysics) physInit();
   state.ammo.m4 = 30; state.ammo.pistol = 15;
   state.reserveAmmo.m4 = 90; state.reserveAmmo.pistol = 45;
+  if (CONFIG.mode === 'duel') state.armor = 100; // duel: spawn with full armor
   try { connectToServer(); } catch(e) { console.error("connectToServer failed:", e); }
 };
 // ── Player character mesh — visible only during kill-cam POV replay ──
@@ -2203,9 +2216,16 @@ function connectToServer() {
         adjustBotsForPlayerCount(state.lobbyPlayerCount || state.roomPlayerCount || 1);
         // Reset player to clean match start — no warmup gear carries over
         state.hp = 100;
-        state.armor = 0;
-        state.ammo = { m4: 0, pistol: 0 };
-        state.reserveAmmo = { m4: 0, pistol: 0 };
+        if (CONFIG.mode === 'duel') {
+          // Duel: fixed loadout — full mags, generous reserve, full armor.
+          state.armor = 100;
+          state.ammo = { m4: CONFIG.weapons.m4.magSize, pistol: CONFIG.weapons.pistol.magSize };
+          state.reserveAmmo = { m4: 90, pistol: 45 };
+        } else {
+          state.armor = 0;
+          state.ammo = { m4: 0, pistol: 0 };
+          state.reserveAmmo = { m4: 0, pistol: 0 };
+        }
         if (typeof updateHUD === 'function') updateHUD();
         state.velocityY = 0;
         camera.position.set(

@@ -48,14 +48,14 @@ const CONFIG = {
   // A "shelf" switch, like newPhysics: the battle-royale island build stays fully
   // intact and one flag-flip away. Nothing is deleted.
   //   mode:  'br'     = 20-player battle royale        | 'duel' = 1v1, first-to-2 kills, respawns
-  //   world: 'island' = procedural volcano island      | 'city' = flat 120u plaza arena
+  //   world: 'island' = procedural volcano island      | 'arena' = Roman coliseum 1v1 MVP  ('city' = old flat plaza, shelved)
   // `mode` gates bots, the rising-water storm, matchmaking and win condition.
   // `world` selects the map; the actual geometry is swapped in build.sh (island
   // world files vs. city world files), so the island source stays untouched.
   // Baseline = current island BR; flipped to 'duel'/'city' at cutover once the
   // gates and city geometry are in place.
   mode: 'duel',
-  world: 'city',
+  world: 'arena',
 
   weapons: {
     m4: {
@@ -75,10 +75,66 @@ const CONFIG = {
   }
 };
 
+// ── Arena MVP (Roman coliseum, 1v1) — blockout parameters ──
+// Source: docs/ARENA_BUILD_PARAMS.md. Consumed by js/src/03_arena.js to build the
+// gray-box. Meters; origin (0,0) = center; +x east / +z south; 180° rotational
+// symmetry (a point's partner = negate BOTH x and z). All values are tunables —
+// adjust after the first walkthrough.
+CONFIG.arena = {
+  // Playable floor — 36m wide (x) × 56m long (z). Bowl walls enforce the real bound.
+  bounds: { minX: -18, maxX: 18, minZ: -28, maxZ: 28 },
+  floorColor: 0x33353a,   // dark grey arena floor (no green)
+
+  // Podium wall — the field/stands barrier (breached only by the two tunnels).
+  // 7m: unjumpable (jump apex ≈ 1.6m) and blocks all field-level shots, so it is
+  // gameplay-equivalent to the old 18m wall; the decorative tiered stands rise
+  // behind it (see the coliseum skin in 03_arena.js) to sell the height.
+  wallHeight: 7,
+  wallColor: 0xDCD3BC,    // warm marble podium (less blown-out in sun)
+  tierColorDark: 0xA99B7C,
+
+  // Central high ground — a circular stepped dais topped by the Atlas statue
+  // (built in 03_arena.js). height drives the step count; MUST break the
+  // spawn-to-spawn sightline. color = dais marble.
+  monument: { x: 0, z: 0, sizeX: 11, sizeZ: 9, height: 2.0, color: 0xC9C2B0 },
+
+  // Spawns sit at the very BACK of the tunnels, facing arena center (facing = +z/−z).
+  spawns: [
+    { id: 'A', x: 0, z: -42.5, facing:  1 },
+    { id: 'B', x: 0, z:  42.5, facing: -1 },
+  ],
+
+  // Enclosed tunnels (ceiling + black walls) breaching the N/S walls; length 16
+  // = a long dark walk-in, height 6 = a taller/grander corridor.
+  tunnel: { width: 6, length: 16, height: 6, color: 0x0a0a0c },
+
+  // Cover objects — each has its 180°-rotational partner (negate x AND z).
+  //   container 6×2.6×2.5m → full standing cover | crate 1.5³m → crouch cover.
+  cover: [
+    { id: 'pocketAL', type: 'container', x:  -8.1, z: -17, rotationY: 90 },
+    { id: 'pocketAR', type: 'container', x:   8.1, z: -17, rotationY: 90 },
+    { id: 'pocketBL', type: 'container', x:  -8.1, z:  17, rotationY: 90 },
+    { id: 'pocketBR', type: 'container', x:   8.1, z:  17, rotationY: 90 },
+    { id: 'laneWN',   type: 'container', x: -12, z:  -9, rotationY:  0 },
+    { id: 'laneWS',   type: 'container', x: -12, z:   9, rotationY:  0 },
+    { id: 'laneEN',   type: 'container', x:  12, z:  -9, rotationY:  0 },
+    { id: 'laneES',   type: 'container', x:  12, z:   9, rotationY:  0 },
+    { id: 'crateN',   type: 'crate',     x:-3.5, z:  -8, rotationY:  0 },
+    { id: 'crateS',   type: 'crate',     x: 3.5, z:   8, rotationY:  0 },
+  ],
+  containerSize: { x: 6.9, y: 3.0, z: 2.9 },   // +15% (more cover)
+  crateSize:     { x: 1.5, y: 1.5, z: 1.5 },
+  containerColor: 0x27578A,   // rustic navy
+  crateColor:     0x7A6038,   // darker weathered wood
+};
+
 // Player spawn point, resolved from the active world so the initial camera
-// (02_setup) and the physics seed are correct from load. City duel spawns are
-// refined in 03_city.js (CITY_SPAWNS); this is the bootstrap default.
-CONFIG.spawnPos = (CONFIG.world === 'city') ? { x: 0, z: -50 } : CONFIG.prisonPos;
+// (02_setup) and the physics seed are correct from load. Arena duel spawns come
+// from CONFIG.arena.spawns (A = north tunnel mouth); this is the bootstrap default.
+CONFIG.spawnPos =
+    CONFIG.world === 'arena' ? { x: CONFIG.arena.spawns[0].x, z: CONFIG.arena.spawns[0].z }
+  : CONFIG.world === 'city'  ? { x: 0, z: -50 }
+  :                            CONFIG.prisonPos;
 
 // ═══════════════════════════════════════════════════════════
 // STATE

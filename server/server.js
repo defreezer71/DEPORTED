@@ -220,13 +220,15 @@ wss.on('connection', ws => {
       myRoom = code;
       if (!rooms[code]) makeRoom(code, isAuto);
       const room = rooms[code];
-      // Spawn at the city duel spawn — must match the client's CONFIG.spawnPos
-      // (city A = 0,-50) or movement validation starts from a desynced position.
+      // Spawn at the arena duel spawn A — must match the client's CONFIG.spawnPos
+      // (arena A = 0,-42.5, very back of the tunnel) or movement validation starts
+      // from a desynced position. Jitter kept small so the spawn stays clear of the
+      // tunnel back wall.
       // TODO(duel): assign spawn A/B by join order for the two-player match.
-      const a = Math.random()*Math.PI*2, r = Math.random()*8;
+      const a = Math.random()*Math.PI*2, r = Math.random()*1.0;
       room.players[myId] = {
         id: myId, name: msg.name || ('P_'+myId.slice(-4)), ws,
-        x: 0+Math.cos(a)*r, y: 0, z: -50+Math.sin(a)*r,
+        x: 0+Math.cos(a)*r, y: 0, z: -42.5+Math.sin(a)*r,
         hp: 100, armor: 0, dead: false, pistol: false, shooting: false, lastSeen: Date.now()
       };
       // Start 3-min fill timer when first player joins a waiting room

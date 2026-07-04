@@ -15,7 +15,11 @@ const pickupPrompt = document.getElementById('pickup-prompt');
 // ── Canonical look state — yaw and pitch are the source of truth.
 //    physicsStep reads these and sets camera.quaternion each tick.
 //    Never mutate camera.quaternion directly from mouse input.
-state.yaw   = 0;
+// Arena duel: face the bootstrap spawn toward the arena center. yaw 0 looks down
+// −z, so a spawn whose `facing` is +z needs yaw π. Island/BR keep 0.
+state.yaw   = (CONFIG.world === 'arena' && CONFIG.arena)
+  ? ((CONFIG.arena.spawns[0].facing > 0) ? Math.PI : 0)
+  : 0;
 state.shakeOffset = new THREE.Vector3();
 state.physicsTime = 0;
 state.pitch = 0;
