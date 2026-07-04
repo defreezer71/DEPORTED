@@ -83,7 +83,21 @@ const CONFIG = {
 CONFIG.arena = {
   // Playable floor — 36m wide (x) × 56m long (z). Bowl walls enforce the real bound.
   bounds: { minX: -18, maxX: 18, minZ: -28, maxZ: 28 },
-  floorColor: 0x33353a,   // dark grey arena floor (no green)
+  floorColor: 0x33353a,   // legacy solid floor (superseded by A.floor paving below)
+
+  // Floor paving palette — two-tone large-scale slabs + medallion/track/lane
+  // inlays, merged into ONE vertex-colored buffer (03_arena.js). Kept dark on
+  // purpose: the sun (dir 2.2) + blue hemisphere multiply these up to a readable
+  // mid-grey; lighter values blow out. Muted warm greys only — no near-black/white
+  // and no red/green (those stay reserved for HUD damage/kill language).
+  floor: {
+    slabA:     0x35342f,  // base paving grey (warm, muted)
+    slabB:     0x3e3c34,  // second slab tone — ~15% lighter; low-contrast, no noise
+    medallion: 0x444033,  // center medallion field (framing the dais)
+    inlay:     0x4a4335,  // accent marble inlay — medallion border, track, lane lines
+    groove:    0x2b2a24,  // dark seams — track edge + lane guides
+    slab:      4.6,       // slab size (m): large paving = low visual frequency
+  },
 
   // Podium wall — the field/stands barrier (breached only by the two tunnels).
   // 7m: unjumpable (jump apex ≈ 1.6m) and blocks all field-level shots, so it is

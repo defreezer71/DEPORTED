@@ -83,7 +83,21 @@ const CONFIG = {
 CONFIG.arena = {
   // Playable floor — 36m wide (x) × 56m long (z). Bowl walls enforce the real bound.
   bounds: { minX: -18, maxX: 18, minZ: -28, maxZ: 28 },
-  floorColor: 0x33353a,   // dark grey arena floor (no green)
+  floorColor: 0x33353a,   // legacy solid floor (superseded by A.floor paving below)
+
+  // Floor paving palette — two-tone large-scale slabs + medallion/track/lane
+  // inlays, merged into ONE vertex-colored buffer (03_arena.js). Kept dark on
+  // purpose: the sun (dir 2.2) + blue hemisphere multiply these up to a readable
+  // mid-grey; lighter values blow out. Muted warm greys only — no near-black/white
+  // and no red/green (those stay reserved for HUD damage/kill language).
+  floor: {
+    slabA:     0x35342f,  // base paving grey (warm, muted)
+    slabB:     0x3e3c34,  // second slab tone — ~15% lighter; low-contrast, no noise
+    medallion: 0x444033,  // center medallion field (framing the dais)
+    inlay:     0x4a4335,  // accent marble inlay — medallion border, track, lane lines
+    groove:    0x2b2a24,  // dark seams — track edge + lane guides
+    slab:      4.6,       // slab size (m): large paving = low visual frequency
+  },
 
   // Podium wall — the field/stands barrier (breached only by the two tunnels).
   // 7m: unjumpable (jump apex ≈ 1.6m) and blocks all field-level shots, so it is
@@ -520,7 +534,7 @@ function isInCanalWater(x, z)   { return false; }
 const ARENA_SPAWNS = A.spawns;
 
 // ── Materials (muted palette so player silhouettes read loudest on screen) ──
-const _groundMat    = new THREE.MeshLambertMaterial({ color: A.floorColor });
+// (Floor uses its own vertex-colored merged buffer — see the paving block below.)
 const _wallMat      = new THREE.MeshLambertMaterial({ color: A.wallColor });
 const _tunnelMat    = new THREE.MeshBasicMaterial({ color: A.tunnel.color }); // unlit flat black — enclosed tunnel; no lighting gradient means no dither/banding
 const _monMat       = new THREE.MeshLambertMaterial({ color: A.monument.color });
@@ -558,15 +572,90 @@ function addArenaBox(w, h, d, x, z, mat, rotYdeg = 0, yCenter = h / 2) {
   return m;
 }
 
-// ── Ground plane (green field) — sized to the play area + a small margin. The
-// coliseum skin's stone concourse (below) fills the surround and the tunnels. ──
+// ── Arena floor — two-tone large-scale paving with a center medallion (framing
+// the dais), a perimeter track frame and long-axis lane guides. Everything is
+// merged into ONE vertex-colored BufferGeometry: 1 draw call, a few hundred tris,
+// zero textures. Design brief (docs): big low-contrast slabs give strafe motion-
+// parallax WITHOUT the high-frequency checkerboard noise that hurts target
+// acquisition; medallion/track/lanes are positional callouts. Flat quads a few mm
+// apart in y (base < overlays) dodge z-fighting. Purely decorative — not pushed to
+// collidables/targets; the physics floor stays flat at y=0. The coliseum skin's
+// dark stone concourse (below) fills the tunnels + everything past the bounds. ──
 {
-  const b = A.bounds;
-  const g = new THREE.Mesh(
-    new THREE.PlaneGeometry((b.maxX - b.minX) + 6, (b.maxZ - b.minZ) + 6), _groundMat);
-  g.rotation.x = -Math.PI / 2;
-  g.position.y = 0.01;
-  scene.add(g);
+  const b = A.bounds, F = A.floor;
+  const pos = [], col = [];
+  const hex = (h) => [ (h >> 16 & 255) / 255, (h >> 8 & 255) / 255, (h & 255) / 255 ];
+  const cSlabA = hex(F.slabA), cSlabB = hex(F.slabB);
+  const cMed   = hex(F.medallion), cInlay = hex(F.inlay), cGroove = hex(F.groove);
+
+  // One top-facing XZ quad at height y in a flat color (winding matches the +y
+  // face used elsewhere in this file; normals are forced up so lighting is right).
+  function quad(x0, z0, x1, z1, y, c) {
+    const v = [ [x0, z1], [x1, z1], [x1, z0],  [x0, z1], [x1, z0], [x0, z0] ];
+    for (const [px, pz] of v) { pos.push(px, y, pz); col.push(c[0], c[1], c[2]); }
+  }
+  // Concentric ring band (annulus) between radii ri..ro as `seg` quads.
+  function ring(ri, ro, y, c, seg = 72) {
+    for (let i = 0; i < seg; i++) {
+      const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+      const P = (r, a) => [Math.cos(a) * r, Math.sin(a) * r];
+      const [ix0, iz0] = P(ri, a0), [ix1, iz1] = P(ri, a1);
+      const [ox0, oz0] = P(ro, a0), [ox1, oz1] = P(ro, a1);
+      for (const [px, pz] of [[ix0,iz0],[ox0,oz0],[ox1,oz1], [ix0,iz0],[ox1,oz1],[ix1,iz1]])
+        { pos.push(px, y, pz); col.push(c[0], c[1], c[2]); }
+    }
+  }
+  // Rectangular border frame (4 strips) of thickness t, inset `ins` from bounds.
+  function frame(ins, t, y, c) {
+    const x0 = b.minX + ins, x1 = b.maxX - ins, z0 = b.minZ + ins, z1 = b.maxZ - ins;
+    quad(x0, z0, x1, z0 + t, y, c);       // north edge
+    quad(x0, z1 - t, x1, z1, y, c);       // south edge
+    quad(x0, z0, x0 + t, z1, y, c);       // west edge
+    quad(x1 - t, z0, x1, z1, y, c);       // east edge
+  }
+
+  // ── Layer 1: two-tone slabs (running-bond ashlar; tone persists in runs so
+  // same-color slabs clump into LARGE shapes rather than salt-and-pepper). ──
+  const S = F.slab, yBase = 0.012;
+  let seed = 0x9e3779b1 >>> 0;            // deterministic per-load layout
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  let row = 0;
+  for (let z = b.minZ; z < b.maxZ - 1e-3; z += S, row++) {
+    const z1 = Math.min(z + S, b.maxZ);
+    const off = (row & 1) ? -S / 2 : 0;   // running bond: half-slab row offset
+    let tone = rnd() < 0.5 ? cSlabA : cSlabB;
+    for (let x = b.minX + off; x < b.maxX - 1e-3; x += S) {
+      const x0 = Math.max(x, b.minX), x1 = Math.min(x + S, b.maxX);
+      if (x1 - x0 < 0.05) continue;
+      if (rnd() < 0.4) tone = (tone === cSlabA) ? cSlabB : cSlabA;  // occasional flip
+      quad(x0, z, x1, z1, yBase, tone);
+    }
+  }
+
+  // ── Layer 2 (overlays, +y so they win the depth test over the slabs) ──
+  // Center medallion: a broad ring hugging the dais base (r 7.8), with an inlay
+  // border and a dark seam separating it from the field — the mid-control marker.
+  ring(7.9, 8.25, 0.020, cGroove);        // inner seam against the dais
+  ring(8.25, 10.4, 0.018, cMed);          // medallion field
+  ring(10.4, 10.8, 0.022, cInlay);        // outer inlay border
+  ring(10.8, 11.1, 0.020, cGroove);       // outer seam
+
+  // Perimeter track frame — the coliseum's field boundary, inset from the walls.
+  frame(1.4, 0.35, 0.020, cInlay);        // bright boundary line
+  frame(1.75, 0.18, 0.022, cGroove);      // thin groove just inside it
+
+  // Long-axis lane guides — two thin lines down the flank routes (x ≈ ±11.5),
+  // reading toward the objective; they duck under the lane containers at z ≈ ±9.
+  for (const lx of [-11.5, 11.5]) quad(lx - 0.14, b.minZ + 2, lx + 0.14, b.maxZ - 2, 0.018, cInlay);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
+  const N = pos.length / 3, norm = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) norm[i * 3 + 1] = 1;   // all faces point straight up
+  geo.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+  const floor = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(floor);
 }
 
 // ── Bowl walls — ring the playable bounds at A.wallHeight (unjumpable), breached
@@ -619,66 +708,107 @@ function addArenaBox(w, h, d, x, z, mat, rotYdeg = 0, yCenter = h / 2) {
 // straight spawn-to-spawn sightline; both are collidable (movement + bullets). ──
 {
   const m = A.monument;
-  // Dais cylinder → collidables + targets. NOT scaled by the statue group below,
-  // so the step risers stay ≤ physics STEP_HEIGHT (0.45) and remain climbable.
-  const addCyl = (r, h, yc, mat, seg = 24) => {
-    const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), mat);
-    c.position.set(m.x, yc, m.z);
+
+  // Merge many transformed geometries into ONE flat-shaded BufferGeometry (bake
+  // each part's matrix, drop the index → per-face normals = the arena's faceted
+  // look). Lets the whole dais + the whole statue each render in a single call.
+  function mergeGeos(geos) {
+    let n = 0;
+    const nis = geos.map(g => { const ni = g.index ? g.toNonIndexed() : g; n += ni.attributes.position.count; return ni; });
+    const pos = new Float32Array(n * 3);
+    let o = 0;
+    for (const ni of nis) { const a = ni.attributes.position.array; pos.set(a, o); o += a.length; }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    out.computeVertexNormals();
+    return out;
+  }
+  // Invisible box collider at a world AABB → blocks movement + bullets, 0 draw
+  // calls (Box3.setFromObject and the bullet raycast both ignore .visible).
+  function addCollider(w, h, d, x, y, z) {
+    const c = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), _monMat);
+    c.visible = false; c.position.set(m.x + x, y, m.z + z);
     c.updateMatrixWorld(true);
     scene.add(c); collidables.push(c); targets.push(c);
-    return c;
-  };
-  // Concentric ziggurat steps: wide+short base → narrow summit; climbable from any
-  // direction. +15% wider than before (more cover).
-  const STEPS = Math.ceil(m.height / 0.4);            // 5 (riser 0.40) for height 2.0
+  }
+
+  // ── Dais — concentric ziggurat steps (wide+short base → narrow summit),
+  // climbable from any side. DOUBLED to 10 steps (riser 0.20, half of before) at
+  // the SAME radii/circumference. Visuals merge into one marble mesh; each step
+  // gets an invisible box collider so the physics still steps up the small risers. ──
+  const marble = [];
+  const STEPS = Math.max(2, Math.round(m.height / 0.2));   // 10 (riser 0.20) for height 2.0
   const rBottom = 7.8, rTop = 3.3;
   for (let k = 0; k < STEPS; k++) {
     const top = (k + 1) * (m.height / STEPS);
     const r   = rBottom + (rTop - rBottom) * (k / (STEPS - 1));
-    addCyl(r, top, top / 2, _monMat);
+    const g = new THREE.CylinderGeometry(r, r, top, 24); g.translate(m.x, top / 2, m.z);
+    marble.push(g);
+    addCollider(2 * r, top, 2 * r, 0, top / 2, 0);         // AABB == the drum's box (climb riser 0.20)
   }
 
-  // ── ATLAS — humanoid bronze titan built into a GROUP so the whole statue
-  // (visible figure + collidable core + pedestal) scales +15% in one shot. The
-  // group sits at the summit; parts are positioned relative to it (feet at y=0). ──
-  const yTop = m.height;                              // 2.0 (summit)
+  // ── ATLAS — a bronze titan hoisting the celestial globe. Rebuilt as an
+  // anatomical figure: tapered "bone" cylinders strung between joints (organic
+  // limbs, a waist-pinched torso, both arms raised to the globe overhead) + a
+  // faceted head. All bronze parts MERGE into ONE mesh (1 draw call); a single
+  // invisible core collider + the pedestal keep the sightline broken / shots
+  // blocked. Built directly in world space (no group), feet on the pedestal top. ──
   const _bronze = new THREE.MeshLambertMaterial({ color: 0x7a5c34, emissive: 0x1c1408 });
-  const atlas = new THREE.Group();
-  atlas.position.set(m.x, yTop, m.z);
-  scene.add(atlas);
-  const addPart = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, collide = false) => {
-    const o = new THREE.Mesh(geo, mat);
-    o.position.set(x, y, z); o.rotation.set(rx, ry, rz);
-    atlas.add(o);
-    if (collide) { collidables.push(o); targets.push(o); }
-    return o;
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const bronze = [];
+  // Tapered cylinder between two joints (r0 at p0, r1 at p1).
+  const bone = (p0, p1, r0, r1, seg = 8) => {
+    const dir = new THREE.Vector3().subVectors(p1, p0), len = dir.length() || 1e-4;
+    const g = new THREE.CylinderGeometry(r1, r0, len, seg);
+    const q = new THREE.Quaternion().setFromUnitVectors(V(0, 1, 0), dir.clone().normalize());
+    g.applyMatrix4(new THREE.Matrix4().compose(
+      new THREE.Vector3().addVectors(p0, p1).multiplyScalar(0.5), q, V(1, 1, 1)));
+    return g;
   };
-  const bx = (w, h, d) => new THREE.BoxGeometry(w, h, d);
-  addPart(new THREE.CylinderGeometry(1.6, 1.8, 1.5, 22), _monMat, 0, 0.75, 0, 0, 0, 0, true); // pedestal y0→1.5
-  const f = 1.5;                                      // feet at the pedestal top
-  addPart(new THREE.CylinderGeometry(0.55, 0.62, 3.6, 12), _bronze, 0, f + 1.8, 0, 0, 0, 0, true); // collidable torso core
-  addPart(bx(0.60, 3.0, 0.75), _bronze, -0.52, f + 1.5,  0.05, 0, 0,  0.03);  // left leg
-  addPart(bx(0.58, 2.9, 0.72), _bronze,  0.55, f + 1.45, -0.05, 0, 0, -0.05); // right leg
-  addPart(bx(1.4, 0.8, 0.85), _bronze, 0, f + 3.0, 0);                        // pelvis
-  addPart(bx(1.15, 1.0, 0.8), _bronze, 0, f + 3.8, 0);                        // waist
-  addPart(bx(1.7, 1.5, 1.0), _bronze, 0, f + 4.9, 0);                         // chest
-  addPart(bx(2.4, 0.8, 1.05), _bronze, 0, f + 5.8, 0);                        // shoulders
-  addPart(bx(0.42, 0.5, 0.42), _bronze, 0, f + 6.25, 0);                      // neck
-  addPart(new THREE.IcosahedronGeometry(0.52, 0), _bronze, 0, f + 6.75, 0.05); // head
-  for (const s of [-1, 1]) {
-    addPart(bx(0.44, 1.7, 0.44), _bronze, s * 1.15, f + 6.35, 0, 0, 0, s *  0.6); // upper arm
-    addPart(bx(0.40, 1.6, 0.40), _bronze, s * 1.55, f + 7.6,  0, 0, 0, s * -0.5); // forearm
+  const blob = (r, x, y, z, sy = 1) => { const g = new THREE.IcosahedronGeometry(r, 0); if (sy !== 1) g.scale(1, sy, 1); g.translate(m.x + x, y, m.z + z); return g; };
+  const box  = (w, h, d, x, y, z) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(m.x + x, y, m.z + z); return g; };
+  const at   = (p) => new THREE.Vector3(m.x + p.x, p.y, m.z + p.z);   // shift a local joint to world x/z
+
+  const pedH = 1.7, F = m.height + pedH;              // summit (m.height) → feet at F
+  marble.push((() => { const g = new THREE.CylinderGeometry(1.55, 1.85, pedH, 22); g.translate(m.x, m.height + pedH / 2, m.z); return g; })());
+
+  for (const s of [-1, 1]) {                          // legs + feet
+    const hip = at(V(s * 0.42, F + 2.85, 0)), knee = at(V(s * 0.40, F + 1.45, 0.06)), ankle = at(V(s * 0.42, F + 0.18, 0));
+    bronze.push(bone(hip, knee, 0.34, 0.24));         // thigh
+    bronze.push(bone(knee, ankle, 0.24, 0.13));       // shin
+    bronze.push(box(0.34, 0.20, 0.62, s * 0.42, F + 0.10, 0.16));  // foot
   }
-  // Tilted armillary sphere — open bronze rings + polar axis.
+  bronze.push(box(0.98, 0.62, 0.64, 0, F + 3.0, 0));                 // pelvis / hips
+  bronze.push(bone(at(V(0, F + 3.15, 0)), at(V(0, F + 4.05, 0)), 0.46, 0.40)); // waist (pinch)
+  bronze.push(bone(at(V(0, F + 4.05, 0)), at(V(0, F + 5.15, 0)), 0.42, 0.58)); // chest (broaden)
+  bronze.push(bone(at(V(-0.72, F + 5.2, 0)), at(V(0.72, F + 5.2, 0)), 0.26, 0.26)); // clavicle bar
+  for (const s of [-1, 1]) bronze.push(blob(0.30, s * 0.72, F + 5.2, 0));          // deltoids
+  bronze.push(bone(at(V(0, F + 5.05, 0)), at(V(0, F + 5.7, 0.03)), 0.20, 0.17));   // neck
+  bronze.push(blob(0.44, 0, F + 6.1, 0.05, 1.08));                                 // head
+  for (const s of [-1, 1]) {                          // arms raised to the globe
+    const sh = at(V(s * 0.72, F + 5.2, 0)), el = at(V(s * 0.92, F + 6.25, 0.08)), wr = at(V(s * 0.34, F + 7.65, 0.05));
+    bronze.push(bone(sh, el, 0.22, 0.17));            // upper arm
+    bronze.push(bone(el, wr, 0.17, 0.12));            // forearm
+    bronze.push(blob(0.17, s * 0.34, F + 7.7, 0.05)); // hand
+  }
+  // Tilted armillary sphere held overhead — open bronze rings + polar axis.
   {
-    const sy = f + 9.0, R = 2.0, TILT = 0.42;
-    const ringGeo = new THREE.TorusGeometry(R, 0.09, 8, 44);
-    for (const [rx, ry] of [[Math.PI / 2, 0], [Math.PI / 2, 0.6], [0, 0], [0, Math.PI / 3], [0, (2 * Math.PI) / 3]])
-      addPart(ringGeo, _bronze, 0, sy, 0, rx, ry, TILT);
-    addPart(new THREE.CylinderGeometry(0.08, 0.08, R * 2.5, 8), _bronze, 0, sy, 0, 0, 0, TILT);
+    const sy = F + 8.5, R = 1.4, TILT = 0.4;
+    const ringAngles = [[Math.PI / 2, 0], [Math.PI / 2, 0.6], [0, 0], [0, Math.PI / 3], [0, (2 * Math.PI) / 3]];
+    for (const [rx, ry] of ringAngles) {
+      const g = new THREE.TorusGeometry(R, 0.075, 6, 22);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, ry, TILT, 'XYZ')));
+      g.translate(m.x, sy, m.z); bronze.push(g);
+    }
+    const axis = new THREE.CylinderGeometry(0.07, 0.07, R * 2.4, 6);
+    axis.applyMatrix4(new THREE.Matrix4().makeRotationZ(TILT)); axis.translate(m.x, sy, m.z);
+    bronze.push(axis);
   }
-  atlas.scale.setScalar(1.15);                       // +15% larger
-  atlas.updateMatrixWorld(true);                     // collidable core/pedestal AABBs pick up the scale
+
+  scene.add(new THREE.Mesh(mergeGeos(marble), _monMat));   // dais + pedestal — 1 draw call
+  scene.add(new THREE.Mesh(mergeGeos(bronze), _bronze));   // whole figure + globe — 1 draw call
+  addCollider(3.4, pedH, 3.4, 0, m.height + pedH / 2, 0);  // pedestal core (blocks the summit)
+  addCollider(1.3, 6.0, 1.0, 0, F + 3.0, 0);               // body core (breaks the standing sightline)
 }
 
 // ── Cover — containers (full standing cover) + crates (crouch cover). Each entry
@@ -898,25 +1028,33 @@ for (const c of A.cover) {
   // InstancedMeshes so all four columns cost only a handful of draw calls. Columns
   // sit on the FIELD side of the podium (clear of the podium + tunnel planes → no
   // z-fight, and no stray pillar poking into the tunnel). ──
+  const SWAG_W = 384, SWAG_H = 170;                 // texture px; drives the mesh aspect
   function swagTex() {
-    // American bunting: a blue star rail with red/white/blue radial-gore fans
-    // hanging below it. Transparent elsewhere so it reads as scalloped drapes.
-    const c = document.createElement('canvas'); c.width = 320; c.height = 80;
+    // American bunting VALANCE: a blue star rail with DEEP red/white/blue gore-fans
+    // draping below it. The fans are drawn as semicircles then vertically stretched
+    // (scale) into long elliptical drops, so the bunting hangs low over the tunnel
+    // mouth. Transparent below the drape so it reads as scalloped cloth.
+    const railH = 22, drop = 122;
+    const c = document.createElement('canvas'); c.width = SWAG_W; c.height = SWAG_H;
     const x = c.getContext('2d');
-    x.clearRect(0, 0, 320, 80);
-    x.fillStyle = '#1a2a6c'; x.fillRect(0, 0, 320, 16);                   // star rail
+    x.clearRect(0, 0, SWAG_W, SWAG_H);
+    x.fillStyle = '#1a2a6c'; x.fillRect(0, 0, SWAG_W, railH);             // star rail
     x.fillStyle = '#fff';
-    for (let i = 0; i < 20; i++) { x.beginPath(); x.arc(8 + i * 16, 8, 2.2, 0, Math.PI * 2); x.fill(); }
-    const fans = 5, fw = 320 / fans, R = 44, gores = 7;
+    for (let i = 0; i < 24; i++) { x.beginPath(); x.arc(8 + i * 16, railH / 2, 2.4, 0, Math.PI * 2); x.fill(); }
+    const fans = 6, fw = SWAG_W / fans, R = fw / 2, gores = 6;
     const cols = ['#b22234', '#ffffff', '#1a2a6c'];
+    x.save();
+    x.translate(0, railH);
+    x.scale(1, drop / R);                            // stretch each semicircle into a deep drape
     for (let f = 0; f < fans; f++) {
       const cx = f * fw + fw / 2;
       for (let g = 0; g < gores; g++) {
         x.fillStyle = cols[g % 3];
-        x.beginPath(); x.moveTo(cx, 16);
-        x.arc(cx, 16, R, Math.PI * (g / gores), Math.PI * ((g + 1) / gores)); x.closePath(); x.fill();
+        x.beginPath(); x.moveTo(cx, 0);
+        x.arc(cx, 0, R, Math.PI * (g / gores), Math.PI * ((g + 1) / gores)); x.closePath(); x.fill();
       }
     }
+    x.restore();
     return new THREE.CanvasTexture(c);
   }
   {
@@ -950,15 +1088,28 @@ for (const c of A.cover) {
     });
     [plinthInst, baseInst, shaftInst, echInst, abacusInst, voluteInst].forEach(m => { m.instanceMatrix.needsUpdate = true; scene.add(m); });
 
+    // The columns above are decorative InstancedMeshes — give each pillar an
+    // INVISIBLE box collider so players can't walk through it (and it stops shots
+    // like every other solid). Box faces sit tangent to the shaft (side = 2·SR);
+    // Box3.setFromObject (physics) and the bullet raycast both ignore .visible.
+    const colH = baseTop + COL_H + 1;
+    for (const c of cols) {
+      const col = new THREE.Mesh(new THREE.BoxGeometry(SR * 2, colH, SR * 2), _gateMat);
+      col.visible = false;
+      col.position.set(c.x, colH / 2, c.z);
+      col.updateMatrixWorld(true);
+      scene.add(col); collidables.push(col); targets.push(col);
+    }
+
     // Grand entablature beam, hanging swag, and a black tympanum filling the gap
     // between the tunnel top and the beam — so the TOP of the black opening is
     // hidden and the entrance reads as a tall, bottomless dark portal.
     const swagMat = new THREE.MeshBasicMaterial({ map: swagTex(), side: THREE.DoubleSide, transparent: true, depthWrite: false });
-    const beamY = baseTop + COL_H + 2.0, beamH = 2.6, beamBot = beamY - beamH / 2;
+    const beamY = baseTop + COL_H + 2.0, beamH = 2.6, beamD = 2.5, beamBot = beamY - beamH / 2;
     for (const zEnd of [A.bounds.minZ, A.bounds.maxZ]) {
       const toCenter = -Math.sign(zEnd);
       const cz = zEnd + toCenter * 1.8;
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(2 * CX + 3.4, beamH, 2.5), _gateMat);
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(2 * CX + 3.4, beamH, beamD), _gateMat);
       beam.position.set(0, beamY, cz);
       scene.add(beam);
       const tymH = beamBot - A.tunnel.height;
@@ -969,9 +1120,14 @@ for (const c of A.cover) {
       }
       // Large American bunting draped over the entrance — placed in FRONT of the
       // columns (and well ahead of the black tympanum, which was hiding it) so it
-      // always reads, drooping toward the mouth.
-      const swag = new THREE.Mesh(new THREE.PlaneGeometry(2 * CX + 2, 4.0), swagMat);
-      swag.position.set(0, A.tunnel.height + 1.5, zEnd + toCenter * 2.8);
+      // always reads. Wide enough to span the tunnel top and tall enough that the
+      // scalloped fans drape over the TOP HALF of the (tunnel.height-tall) mouth.
+      const swagW = 2 * CX + 3, swagH = swagW * (SWAG_H / SWAG_W);   // keep texture aspect
+      const swag = new THREE.Mesh(new THREE.PlaneGeometry(swagW, swagH), swagMat);
+      // Sits FLUSH against the beam's front face (cz + half-depth toward the field,
+      // + a hair) so it never clips into the box; top rail level with the beam top
+      // so it drapes down over the beam like a normally-hung banner.
+      swag.position.set(0, (beamY + beamH / 2) - swagH / 2, cz + toCenter * (beamD / 2 + 0.12));
       swag.rotation.y = toCenter > 0 ? 0 : Math.PI;
       swag.renderOrder = 2;
       scene.add(swag);
