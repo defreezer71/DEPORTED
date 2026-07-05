@@ -710,11 +710,17 @@ function update() {
 
   // Check player death
   if (state.phase === 'playing' && state.hp <= 0 && !state.playerDead) {
-    state.playerDead = true;
-    state.phase = 'gameover';
-    state.killCamVictimPos = camera.position.clone();
-    if (document.pointerLockElement) document.exitPointerLock();
-    startKillCam();
+    if (CONFIG.mode === 'duel') {
+      // Duel: no elimination/kill-cam — go down, then the server respawns us at
+      // our home end. Keep pointer lock so play resumes seamlessly.
+      onDuelDeath();
+    } else {
+      state.playerDead = true;
+      state.phase = 'gameover';
+      state.killCamVictimPos = camera.position.clone();
+      if (document.pointerLockElement) document.exitPointerLock();
+      startKillCam();
+    }
   }
 
   // Check victory — you win when no bots AND no remote players are left standing.
@@ -2162,6 +2168,11 @@ function connectToServer() {
         state.myId = msg.id;
         state.roomCode = msg.roomCode;
         state.fillEndsAt = msg.fillEndsAt || null;
+        // Duel: remember the end (A/B) the server assigned us — the match-start
+        // and respawn teleports seed the camera here so we don't desync.
+        if (msg.spawn) state.mySpawn = msg.spawn;
+        if (msg.winKills)  state.duelWinKills  = msg.winKills;
+        if (msg.respawnMs) state.duelRespawnMs = msg.respawnMs;
         showRoomCode(msg.roomCode);
         if (msg.phase === 'waiting') {
           state.inLobby = true;
@@ -2210,10 +2221,12 @@ function connectToServer() {
         })();
         state.inLobby = false;
         hideLobbyScreen();
-        // Fill the PvP match with bots to 21 combatants — without this, bots.length
-        // is 0 in PvP and the victory check fires instantly ("REPATRIATED!" at 0:03)
-        if (typeof spawnBots === 'function' && bots.length === 0) spawnBots();
-        adjustBotsForPlayerCount(state.lobbyPlayerCount || state.roomPlayerCount || 1);
+        // Duel is strictly human 1v1 — no bots. (BR fills to 21 with bots so its
+        // last-alive victory check doesn't fire instantly at 0 opponents.)
+        if (CONFIG.mode !== 'duel') {
+          if (typeof spawnBots === 'function' && bots.length === 0) spawnBots();
+          adjustBotsForPlayerCount(state.lobbyPlayerCount || state.roomPlayerCount || 1);
+        }
         // Reset player to clean match start — no warmup gear carries over
         state.hp = 100;
         if (CONFIG.mode === 'duel') {
@@ -2227,11 +2240,22 @@ function connectToServer() {
           state.reserveAmmo = { m4: 0, pistol: 0 };
         }
         if (typeof updateHUD === 'function') updateHUD();
+        // Fresh duel scoreboard at the top of every match.
+        if (CONFIG.mode === 'duel') {
+          state.duelScore = {};
+          state.playerDead = false;
+          hideRespawnOverlay();
+          updateDuelHUD();
+        }
         state.velocityY = 0;
+        // Duel: spawn at the server-assigned end (A/B). Small jitter only — the
+        // tunnels are 6u wide, so a wide spread would clip the walls.
+        const _startSpawn = (CONFIG.mode === 'duel' && state.mySpawn) ? state.mySpawn : CONFIG.spawnPos;
+        const _startJit = (CONFIG.mode === 'duel') ? 2 : 10;
         camera.position.set(
-          CONFIG.spawnPos.x + (Math.random() - 0.5) * 10,
+          _startSpawn.x + (Math.random() - 0.5) * _startJit,
           CONFIG.playerHeight,
-          CONFIG.spawnPos.z + (Math.random() - 0.5) * 10
+          _startSpawn.z + (Math.random() - 0.5) * _startJit
         );
         // Reseed the capsule to the match-start spawn (physics drives the camera).
         if (CONFIG.newPhysics) physInit();
@@ -2252,7 +2276,13 @@ function connectToServer() {
       case 'events':
         for (const evt of msg.events) {
           if (evt.type === 'hit') applyHitEvent(evt);
+          else if (evt.type === 'kill') applyKillEvent(evt);
+          else if (evt.type === 'respawn') applyRespawnEvent(evt);
         }
+        break;
+
+      case 'duelOver':
+        showDuelOver(msg);
         break;
 
       case 'existingPlayers':
@@ -2284,6 +2314,142 @@ function connectToServer() {
   state.ws.onerror = (err) => {
     console.error('WS error', err);
   };
+}
+
+// ── DUEL: scoreboard, respawn flow, win screen ─────────────────────────────
+// All UI here is injected at runtime (self-contained overlays appended to
+// <body>) so it needs no markup in index.html. Guarded by CONFIG.mode==='duel'.
+
+// Lazily create (once) an absolutely-positioned overlay element by id.
+function _duelEl(id, css) {
+  let el = document.getElementById(id);
+  if (!el) { el = document.createElement('div'); el.id = id; el.style.cssText = css; document.body.appendChild(el); }
+  return el;
+}
+
+function updateDuelHUD() {
+  if (CONFIG.mode !== 'duel') return;
+  const el = _duelEl('duelScore',
+    'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:500;' +
+    'font-family:monospace;font-weight:900;font-size:26px;letter-spacing:2px;' +
+    'text-shadow:0 2px 6px #000;pointer-events:none;white-space:nowrap;');
+  const score = state.duelScore || {};
+  const my = score[state.myId] || 0;
+  let opp = 0;
+  for (const id in score) if (id !== state.myId) opp = Math.max(opp, score[id]);
+  el.innerHTML =
+    '<span style="color:#7CFC00">' + my + '</span>' +
+    '<span style="opacity:.5;font-size:15px;margin:0 12px;vertical-align:middle">FIRST TO ' + (state.duelWinKills || 2) + '</span>' +
+    '<span style="color:#ff5a5a">' + opp + '</span>';
+  el.style.display = 'block';
+}
+
+function showRespawnOverlay(seconds) {
+  const el = _duelEl('respawnOverlay',
+    'position:fixed;top:0;left:0;width:100%;height:100%;z-index:800;' +
+    'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+    'background:rgba(70,0,0,0.45);font-family:monospace;pointer-events:none;');
+  el.innerHTML =
+    '<div style="color:#ff5a5a;font-size:52px;font-weight:900;letter-spacing:6px;text-shadow:0 0 30px #900">DOWNED</div>' +
+    '<div id="respawnCount" style="color:#fff;font-size:22px;margin-top:16px">Respawning in ' + seconds + '…</div>';
+  el.style.display = 'flex';
+  clearInterval(state._respawnInterval);
+  let remain = seconds;
+  state._respawnInterval = setInterval(function() {
+    remain -= 1;
+    const c = document.getElementById('respawnCount');
+    if (c) c.textContent = remain > 0 ? ('Respawning in ' + remain + '…') : 'Respawning…';
+    if (remain <= 0) clearInterval(state._respawnInterval);
+  }, 1000);
+}
+
+function hideRespawnOverlay() {
+  clearInterval(state._respawnInterval);
+  const el = document.getElementById('respawnOverlay');
+  if (el) el.style.display = 'none';
+}
+
+// Local player went down — the server will send a 'respawn' event shortly.
+function onDuelDeath() {
+  state.playerDead = true;
+  state.phase = 'dead';
+  state.velocityY = 0;
+  showRespawnOverlay(Math.ceil((state.duelRespawnMs || 3000) / 1000));
+}
+
+// Server respawned us — reset loadout and teleport to our home end (x/z come
+// from the server so both sides agree on the position).
+function onDuelRespawn(x, z) {
+  state.playerDead = false;
+  state.phase = 'playing';
+  state.hp = 100;
+  state.armor = 100;
+  state.ammo = { m4: CONFIG.weapons.m4.magSize, pistol: CONFIG.weapons.pistol.magSize };
+  state.reserveAmmo = { m4: 90, pistol: 45 };
+  state.velocityY = 0;
+  const sx = (typeof x === 'number') ? x : (state.mySpawn ? state.mySpawn.x : CONFIG.spawnPos.x);
+  const sz = (typeof z === 'number') ? z : (state.mySpawn ? state.mySpawn.z : CONFIG.spawnPos.z);
+  camera.position.set(sx, CONFIG.playerHeight, sz);
+  if (CONFIG.newPhysics) physInit();
+  hideRespawnOverlay();
+  if (typeof updateHUD === 'function') updateHUD();
+  updateDuelHUD();
+}
+
+function addKillFeed(text, good) {
+  const el = _duelEl('killFeed',
+    'position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:500;' +
+    'font-family:monospace;font-size:18px;font-weight:700;text-shadow:0 2px 5px #000;' +
+    'pointer-events:none;text-align:center;transition:opacity .4s;');
+  el.style.color = good ? '#7CFC00' : '#ff7a7a';
+  el.textContent = text;
+  el.style.opacity = '1';
+  clearTimeout(state._killFeedTO);
+  state._killFeedTO = setTimeout(function() { el.style.opacity = '0'; }, 2200);
+}
+
+// A 'kill' event: update the scoreboard and show a brief feed line.
+function applyKillEvent(evt) {
+  if (CONFIG.mode !== 'duel') return;
+  state.duelScore = state.duelScore || {};
+  if (evt.shooterKills !== undefined) state.duelScore[evt.shooter] = evt.shooterKills;
+  if (evt.victim !== undefined && evt.victimKills !== undefined) state.duelScore[evt.victim] = evt.victimKills;
+  updateDuelHUD();
+  if (evt.shooter === state.myId) addKillFeed('✓ You eliminated your opponent', true);
+  else if (evt.victim === state.myId) addKillFeed('✗ You were eliminated', false);
+}
+
+// A 'respawn' event: for us, reset+teleport; the opponent's visibility is driven
+// by the per-tick snapshot dead flag, so just clear our cached death state.
+function applyRespawnEvent(evt) {
+  if (evt.id === state.myId) { onDuelRespawn(evt.x, evt.z); return; }
+  const rp = (state.remotePlayers || {})[evt.id];
+  if (rp) { rp.dead = false; rp.hp = evt.hp || 100; if (rp.mesh) rp.mesh.visible = true; }
+}
+
+function showDuelOver(msg) {
+  const won = msg.winner === state.myId;
+  hideRespawnOverlay();
+  state.phase = 'gameover';
+  if (document.pointerLockElement) document.exitPointerLock();
+  const el = _duelEl('duelOver',
+    'position:fixed;top:0;left:0;width:100%;height:100%;z-index:1000;' +
+    'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+    'background:rgba(0,0,0,0.88);font-family:monospace;');
+  const my = (msg.scores && msg.scores[state.myId]) || 0;
+  let opp = 0;
+  for (const id in (msg.scores || {})) if (id !== state.myId) opp = Math.max(opp, msg.scores[id]);
+  el.innerHTML =
+    '<div style="color:' + (won ? '#ffd700' : '#ff5a5a') + ';font-size:72px;font-weight:900;' +
+      'letter-spacing:8px;text-shadow:0 0 40px ' + (won ? '#ffd700' : '#900') + '">' +
+      (won ? 'VICTORY' : 'DEFEAT') + '</div>' +
+    '<div style="color:#fff;font-size:30px;margin-top:8px">' + my + ' — ' + opp + '</div>' +
+    '<button id="duelAgainBtn" style="margin-top:34px;padding:14px 40px;font-family:monospace;' +
+      'font-size:20px;font-weight:800;letter-spacing:2px;cursor:pointer;background:#ffd700;' +
+      'color:#111;border:none;border-radius:6px">PLAY AGAIN</button>';
+  el.style.display = 'flex';
+  const btn = document.getElementById('duelAgainBtn');
+  if (btn) btn.onclick = function() { location.reload(); };
 }
 
 // ── Send binary input packet to server ──

@@ -3,6 +3,30 @@ const wss = new WebSocket.Server({ port: process.env.PORT || 8081 });
 
 const rooms = {};
 
+// ── Duel config ───────────────────────────────────────────────────────────
+// The shipping build is the Arena 1v1 duel. To bring the island Battle Royale
+// back later, flip DUEL to false — the room-capacity, spawn and win-condition
+// branches below fall back to the legacy 20-player behaviour, and the island
+// prison spawn is restored. (Client side is swapped in build.sh via $WORLD.)
+const DUEL = true;
+const DUEL_CAP = 2;          // players per duel room (1v1)
+const DUEL_WIN_KILLS = 2;    // first to this many kills wins
+const DUEL_RESPAWN_MS = 3000; // delay before a downed player respawns
+// Must mirror the client's CONFIG.arena.spawns (A = north tunnel, B = south).
+const DUEL_SPAWNS = [
+  { id: 'A', x: 0, z: -42.5, facing:  1 },
+  { id: 'B', x: 0, z:  42.5, facing: -1 },
+];
+// Legacy island BR spawn (must match client CONFIG.prisonPos when DUEL=false).
+const BR_SPAWN = { x: -105, z: 105 };
+
+// First free spawn slot in a duel room (0=A, 1=B), by which slots are taken.
+function freeDuelSlot(room) {
+  const taken = new Set(Object.values(room.players).map(p => p.slot));
+  for (let i = 0; i < DUEL_SPAWNS.length; i++) if (!taken.has(i)) return i;
+  return null; // room full
+}
+
 function generateCode() {
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code;
@@ -12,15 +36,17 @@ function generateCode() {
 }
 
 function findAutoRoom() {
+  const cap = DUEL ? DUEL_CAP : 20;
   for (const [code, room] of Object.entries(rooms)) {
-    if (room.isAuto && Object.keys(room.players).length < 20) return code;
+    if (room.isAuto && Object.keys(room.players).length < cap) return code;
   }
   return null;
 }
 
 function findPvpRoom() {
+  const cap = DUEL ? DUEL_CAP : 21;
   for (const [code, room] of Object.entries(rooms)) {
-    if (!room.isAuto && room.phase === 'waiting' && Object.keys(room.players).length < 21) return code;
+    if (!room.isAuto && room.phase === 'waiting' && Object.keys(room.players).length < cap) return code;
   }
   return null;
 }
@@ -46,7 +72,11 @@ function svNow() { return Date.now() % 0x100000000; }
 // — otherwise a single missed teleport wedges the player forever.
 function tryMove(room, player, x, y, z) {
   const now = svNow();
-  if (room.phase === 'playing') {
+  // Respawn/teleport grace — the server just relocated this player to their
+  // spawn, so accept whatever the client sends for a moment while it catches up
+  // (otherwise the client's respawn teleport reads as a speed violation).
+  const inGrace = player.moveGraceUntil && now < player.moveGraceUntil;
+  if (room.phase === 'playing' && !inGrace) {
     const dt = Math.min(500, now - (player.lastMoveAt || now));
     const maxDist = Math.max(2, 0.05 * dt); // 50 u/s budget
     const dx = x - player.x, dz = z - player.z;
@@ -162,6 +192,16 @@ function startRoomMatch(code) {
   const room = rooms[code];
   if (!room || room.phase !== 'waiting') return;
   room.phase = 'countdown';
+  // Reset every combatant to a clean match state at their home spawn. Grace
+  // spans the countdown so the client's own start-of-match teleport is accepted.
+  for (const p of Object.values(room.players)) {
+    const sp = p.spawn || (DUEL ? DUEL_SPAWNS[p.slot || 0] : BR_SPAWN);
+    const a = Math.random() * Math.PI * 2, r = Math.random() * 1.0;
+    p.x = sp.x + Math.cos(a) * r; p.y = 0; p.z = sp.z + Math.sin(a) * r;
+    p.hp = 100; p.armor = DUEL ? 100 : 0; p.kills = 0; p.dead = false;
+    p.lastMoveAt = svNow(); p.tpStrikes = 0; p.hist = [];
+    p.moveGraceUntil = svNow() + 6000;
+  }
   const startAt = Date.now() + 2500;
   broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt });
   setTimeout(() => { if (rooms[code]) rooms[code].phase = 'playing'; }, 5000);
@@ -176,6 +216,49 @@ function checkMajority(code) {
     startRoomMatch(code);
     console.log('[room ' + code + '] startMatch triggered (players: ' + total + ')');
   }
+}
+
+// ── Duel scoring / respawn / win ───────────────────────────────────────────
+// Called from the shoot handler when a hit drops the target to 0 HP.
+function handleKill(room, shooter, victim, headshot) {
+  victim.dead = true;
+  victim.hp = 0;
+  if (!DUEL) return; // BR: elimination is permanent — no scoring/respawn loop
+  shooter.kills = (shooter.kills || 0) + 1;
+  room.events.push({ type: 'kill', shooter: shooter.id, victim: victim.id,
+    shooterKills: shooter.kills, victimKills: victim.kills || 0, headshot: !!headshot });
+  console.log('[room ' + room.code + '] ' + shooter.id + ' killed ' + victim.id +
+    ' (' + shooter.kills + '/' + DUEL_WIN_KILLS + ')');
+  if (shooter.kills >= DUEL_WIN_KILLS) endDuel(room, shooter, victim);
+  else scheduleRespawn(room, victim);
+}
+
+function scheduleRespawn(room, victim) {
+  const code = room.code;
+  victim.respawnAt = Date.now() + DUEL_RESPAWN_MS;
+  setTimeout(() => {
+    const r = rooms[code];
+    if (!r || r.phase !== 'playing') return;   // room gone or match ended
+    const p = r.players[victim.id];
+    if (!p) return;                             // player left
+    const sp = p.spawn || DUEL_SPAWNS[p.slot || 0];
+    const a = Math.random() * Math.PI * 2, rr = Math.random() * 1.0;
+    p.x = sp.x + Math.cos(a) * rr; p.y = 0; p.z = sp.z + Math.sin(a) * rr;
+    p.hp = 100; p.armor = 100; p.dead = false; p.respawnAt = 0;
+    // Reset the movement-validation baseline + open a grace window so the
+    // client's respawn teleport back to spawn isn't flagged as speed-hacking.
+    p.lastMoveAt = svNow(); p.tpStrikes = 0; p.hist = [];
+    p.moveGraceUntil = svNow() + 1500;
+    r.events.push({ type: 'respawn', id: p.id, x: p.x, z: p.z, hp: p.hp, armor: p.armor });
+  }, DUEL_RESPAWN_MS);
+}
+
+function endDuel(room, winner, loser) {
+  room.phase = 'ended';
+  const scores = {};
+  for (const p of Object.values(room.players)) scores[p.id] = p.kills || 0;
+  broadcastToRoom(room.code, { type: 'duelOver', winner: winner.id, loser: loser.id, scores });
+  console.log('[room ' + room.code + '] duel over — winner ' + winner.id);
 }
 
 wss.on('connection', ws => {
@@ -220,16 +303,21 @@ wss.on('connection', ws => {
       myRoom = code;
       if (!rooms[code]) makeRoom(code, isAuto);
       const room = rooms[code];
-      // Spawn at the arena duel spawn A — must match the client's CONFIG.spawnPos
-      // (arena A = 0,-42.5, very back of the tunnel) or movement validation starts
-      // from a desynced position. Jitter kept small so the spawn stays clear of the
-      // tunnel back wall.
-      // TODO(duel): assign spawn A/B by join order for the two-player match.
+      // Assign the spawn end. Duel: first joiner → A (north tunnel), second → B
+      // (south) — this end is the player's home for the whole match (respawns
+      // return here). The x/z MUST match the client's resolved spawn or movement
+      // validation starts from a desynced position. Jitter kept small so the
+      // spawn stays clear of the tunnel back wall.
+      let slot = DUEL ? freeDuelSlot(room) : null;
+      if (slot === null) slot = 0; // race fallback (room filled mid-join)
+      const spawn = DUEL ? DUEL_SPAWNS[slot] : BR_SPAWN;
       const a = Math.random()*Math.PI*2, r = Math.random()*1.0;
       room.players[myId] = {
         id: myId, name: msg.name || ('P_'+myId.slice(-4)), ws,
-        x: 0+Math.cos(a)*r, y: 0, z: -42.5+Math.sin(a)*r,
-        hp: 100, armor: 0, dead: false, pistol: false, shooting: false, lastSeen: Date.now()
+        slot, spawn,
+        x: spawn.x+Math.cos(a)*r, y: 0, z: spawn.z+Math.sin(a)*r,
+        hp: 100, armor: DUEL ? 100 : 0, kills: 0, dead: false,
+        pistol: false, shooting: false, lastSeen: Date.now()
       };
       // Start 3-min fill timer when first player joins a waiting room
       if (room.phase === 'waiting' && !room.fillTimer && Object.keys(room.players).length === 1) {
@@ -242,7 +330,9 @@ wss.on('connection', ws => {
         }, 3 * 60 * 1000);
         console.log('[room ' + code + '] fill timer started');
       }
-      ws.send(JSON.stringify({ type:'joined', id:myId, roomCode:code, phase:room.phase, isAuto, fillEndsAt: room.fillEndsAt || null }));
+      ws.send(JSON.stringify({ type:'joined', id:myId, roomCode:code, phase:room.phase, isAuto,
+        fillEndsAt: room.fillEndsAt || null, spawn: room.players[myId].spawn, duel: DUEL,
+        winKills: DUEL_WIN_KILLS, respawnMs: DUEL_RESPAWN_MS }));
       broadcastLobbyState(code);
       console.log('[room ' + code + '] ' + myId + ' joined, phase=' + room.phase);
       return;
@@ -269,6 +359,7 @@ wss.on('connection', ws => {
 
     if (msg.type === 'shoot') {
       if (player.dead) return;
+      if (DUEL && room.phase !== 'playing') return; // no pre-/post-match kills
       const t = room.players[msg.targetId];
       if (!t || t.dead) return;
 
@@ -298,9 +389,10 @@ wss.on('connection', ws => {
       let dmg = Math.min(Number(msg.damage)||0, 200);
       if (t.armor > 0) { const abs = Math.min(t.armor, dmg*0.5); t.armor -= abs; dmg -= abs; }
       t.hp = Math.max(0, t.hp - dmg);
-      if (t.hp <= 0) t.dead = true;
+      const lethal = t.hp <= 0;
       room.events.push({ type:'hit', target:msg.targetId, shooter:myId, damage:dmg,
-        hp:t.hp, armor:t.armor, dead:t.dead, headshot:!!msg.headshot });
+        hp:t.hp, armor:t.armor, dead:lethal, headshot:!!msg.headshot });
+      if (lethal) handleKill(room, player, t, msg.headshot);
     }
       if (msg.type === 'chat') {
         const raw = (typeof msg.text === 'string') ? msg.text.trim().slice(0, 120) : '';

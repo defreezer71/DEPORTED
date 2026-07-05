@@ -28,11 +28,14 @@ function findRemotePlayerByPart(obj) {
 
 // Called by 12_main.js when a hit event arrives in a world snapshot
 function applyHitEvent(evt) {
-  // We are the target — apply damage to our own HP
+  // We are the target — apply the server-authoritative HP/armor. Fields are
+  // hp/armor/dead; the old targetHp/targetArmor names never matched what the
+  // server sends, so armor silently desynced — which matters in duel where
+  // everyone spawns with armor=100.
   if (evt.target === state.myId) {
-    if (evt.targetHp !== undefined)    state.hp    = evt.targetHp;
+    if (evt.hp !== undefined)    state.hp    = evt.hp;
     else state.hp = Math.max(0, state.hp - evt.damage);
-    if (evt.targetArmor !== undefined) state.armor = evt.targetArmor;
+    if (evt.armor !== undefined) state.armor = evt.armor;
     if (state.hp <= 0 && evt.shooter) {
       state.killCamShooterId = evt.shooter;
       state.killCamBotIndex = -1;
@@ -43,9 +46,9 @@ function applyHitEvent(evt) {
   // Remote player is the target
   const rp = (state.remotePlayers || {})[evt.target];
   if (!rp) return;
-  if (evt.targetHp !== undefined) rp.hp = evt.targetHp;
+  if (evt.hp !== undefined) rp.hp = evt.hp;
   else rp.hp = Math.max(0, (rp.hp !== undefined ? rp.hp : 100) - evt.damage);
-  if (evt.targetDead || rp.hp <= 0) {
+  if (evt.dead || rp.hp <= 0) {
     rp.dead = true;
     if (rp.mesh) rp.mesh.visible = false;
   }

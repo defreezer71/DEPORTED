@@ -118,9 +118,10 @@ CONFIG.arena = {
     { id: 'B', x: 0, z:  42.5, facing: -1 },
   ],
 
-  // Enclosed tunnels (ceiling + black walls) breaching the N/S walls; length 16
-  // = a long dark walk-in, height 6 = a taller/grander corridor.
-  tunnel: { width: 6, length: 16, height: 6, color: 0x0a0a0c },
+  // Enclosed tunnels (ceiling + black walls) breaching the N/S walls; length 18.4
+  // (+15%) = a longer, darker walk-in so the spawn reads as a shadowed corridor with
+  // the bright arena framed ahead; height 6 = a taller/grander corridor.
+  tunnel: { width: 6, length: 18.4, height: 6, color: 0x0a0a0c },
 
   // Cover objects — each has its 180°-rotational partner (negate x AND z).
   //   container 6×2.6×2.5m → full standing cover | crate 1.5³m → crouch cover.
@@ -129,12 +130,30 @@ CONFIG.arena = {
     { id: 'pocketAR', type: 'container', x:   8.1, z: -17, rotationY: 90 },
     { id: 'pocketBL', type: 'container', x:  -8.1, z:  17, rotationY: 90 },
     { id: 'pocketBR', type: 'container', x:   8.1, z:  17, rotationY: 90 },
+    // Step-up crates for all four tunnel-mouth (pocket) containers — one hugging
+    // the INNER (map-center) side of each container at its tunnel-facing back end,
+    // so players exiting a tunnel can hop crate (top 1.5m) → container top (3m;
+    // jump apex ~1.6m). Flush to the inner face (x ±5.9). Two 180° pairs (AR↔BL, AL↔BR).
+    { id: 'stepAR',   type: 'crate',     x:   5.9, z: -20.5 },
+    { id: 'stepAL',   type: 'crate',     x:  -5.9, z: -20.5 },
+    { id: 'stepBR',   type: 'crate',     x:   5.9, z:  20.5 },
+    { id: 'stepBL',   type: 'crate',     x:  -5.9, z:  20.5 },
     { id: 'laneWN',   type: 'container', x: -12, z:  -9, rotationY:  0 },
     { id: 'laneWS',   type: 'container', x: -12, z:   9, rotationY:  0 },
     { id: 'laneEN',   type: 'container', x:  12, z:  -9, rotationY:  0 },
     { id: 'laneES',   type: 'container', x:  12, z:   9, rotationY:  0 },
     { id: 'crateN',   type: 'crate',     x:-3.5, z:  -8, rotationY:  0 },
     { id: 'crateS',   type: 'crate',     x: 3.5, z:   8, rotationY:  0 },
+    // Crate cover flanking the dais (east) + its 180° mirror (west). A 2-high
+    // stack (stack:2) with a single crate flush alongside (−z), plus a single
+    // crate on the stack's OUTER face (+x, further from the dais/stairs) → a
+    // corner-wrapping cluster. Scooted ~2ft further out (x 8 → 8.6).
+    { id: 'LstackE',  type: 'crate',     x:  8.6, z: -3,   stack: 2 },
+    { id: 'LfootE',   type: 'crate',     x:  8.6, z: -4.5 },
+    { id: 'LsideE',   type: 'crate',     x: 10.1, z: -3   },
+    { id: 'LstackW',  type: 'crate',     x: -8.6, z:  3,   stack: 2 },
+    { id: 'LfootW',   type: 'crate',     x: -8.6, z:  4.5 },
+    { id: 'LsideW',   type: 'crate',     x:-10.1, z:  3   },
   ],
   containerSize: { x: 6.9, y: 3.0, z: 2.9 },   // +15% (more cover)
   crateSize:     { x: 1.5, y: 1.5, z: 1.5 },

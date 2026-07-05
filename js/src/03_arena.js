@@ -177,8 +177,12 @@ function buildVaultTunnel(zMouth, zBack, W, H, gapOuter, wallTop, mat) {
 
   const N = prof.length, pos = [], uv = [], col = [], idx = [];
   const warm = (b) => col.push(b, b * 0.98, b * 0.94);  // a hair warm
-  // Baked faux-shading: crown darker than floor, back darker than the bright mouth.
-  const shade = (y, near) => warm((1.0 - 0.42 * (y / H)) * (near ? 1.0 : 0.72));
+  // Baked faux-shading: crown darker than floor, and the back (spawn) end much
+  // darker than the bright mouth so the corridor falls into shadow toward the
+  // player and the arena reads as a lit reveal ahead. Both ends pulled well down
+  // for a dim stone vault — a dark frame around the bright arena reveal (mouth
+  // 0.62, deep back 0.24).
+  const shade = (y, near) => warm((1.0 - 0.42 * (y / H)) * (near ? 0.62 : 0.24));
 
   // ── Arch shell (two rings: mouth, back) ──
   for (let r = 0; r < 2; r++) {
@@ -200,7 +204,7 @@ function buildVaultTunnel(zMouth, zBack, W, H, gapOuter, wallTop, mat) {
   const zCap = zBack + Math.sign(zMouth - zBack) * 0.3, cb = pos.length / 3;
   pos.push(-gapOuter, 0, zCap, gapOuter, 0, zCap, -gapOuter, wallTop, zCap, gapOuter, wallTop, zCap);
   uv.push(-gapOuter / BLK, 0, gapOuter / BLK, 0, -gapOuter / BLK, wallTop / BLK, gapOuter / BLK, wallTop / BLK);
-  for (let k = 0; k < 4; k++) warm(0.5);
+  for (let k = 0; k < 4; k++) warm(0.15);   // dark back wall behind the spawn
   idx.push(cb, cb + 1, cb + 2, cb + 2, cb + 1, cb + 3);
 
   // ── Mouth facade — fills the bowl-wall gap AROUND the arch (side strips + the band
@@ -361,7 +365,14 @@ function buildVaultTunnel(zMouth, zBack, W, H, gapOuter, wallTop, mat) {
     // Movement colliders (invisible) — side walls, ceiling, back cap
     addTunnelCollider(T, t.height, t.length, -(gapHalf + T / 2), zMid);
     addTunnelCollider(T, t.height, t.length,  (gapHalf + T / 2), zMid);
-    addTunnelCollider(t.width + T, t.height, T, 0, zOuter + side * (T / 2));
+    // Back cap: the visible wall sits at zCap (see buildVaultTunnel). Stop the player
+    // ~1u IN FRONT of it (arena-side) with a thick box so the camera can never reach
+    // the wall plane — previously the collider face sat behind the wall, letting you
+    // clip your view through it. Bulk extends away from the arena.
+    const zCap = zOuter - side * 0.3;
+    const capThick = 2;
+    const capInner = zCap - side * 1.0;                       // arena-facing stop plane
+    addTunnelCollider(t.width + T, t.height, capThick, 0, capInner + side * (capThick / 2));
     addTunnelCollider(t.width + T, 0.6, t.length, 0, zMid, t.height + 0.3);
     // Visible barrel-vault skin (1 draw call) — mouth at the wall, cap at the back,
     // facade filling the bowl-wall gap (gapHalf+T) up to the wall top
@@ -503,7 +514,12 @@ for (const c of A.cover) {
   const isContainer = c.type === 'container';
   const sz  = isContainer ? A.containerSize : A.crateSize;
   const mat = isContainer ? _containerMat : _crateMat;
-  addArenaBox(sz.x, sz.y, sz.z, c.x, c.z, mat, c.rotationY || 0);
+  // `stack` (crates) piles N boxes vertically — each box is its own collider +
+  // bullet target, so a 2-high stack reads as full standing cover.
+  const n = c.stack || 1;
+  for (let s = 0; s < n; s++) {
+    addArenaBox(sz.x, sz.y, sz.z, c.x, c.z, mat, c.rotationY || 0, sz.y * (s + 0.5));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -886,10 +902,14 @@ if (_hemi) { _hemi.groundColor.setHex(0x6a5a3e); _hemi.color.setHex(0x3a4a6a); _
 if (window.skyDome && window.skyDome.geometry && window.skyDome.geometry.attributes.color) {
   const sp = window.skyDome.geometry.attributes.position;
   const col = window.skyDome.geometry.attributes.color, sc = col.array;
+  // Tall sunset: the warm→plum→purple gradient is stretched high up the dome (was
+  // mostly spent by y=360) so the colour reads well above the arena wall. Horizon
+  // glow kept as-is — user likes it.
   const stops = [
-    [ 880, 0.05, 0.07, 0.24 ],   // zenith — deep indigo
-    [ 360, 0.16, 0.13, 0.34 ],   // upper dusk
-    [ 120, 0.72, 0.36, 0.34 ],   // warm band
+    [ 880, 0.07, 0.06, 0.22 ],   // zenith — deep indigo
+    [ 820, 0.22, 0.11, 0.34 ],   // high dusk — purple pushed higher again (+15%)
+    [ 503, 0.48, 0.18, 0.33 ],   // dark-red / plum band (mid-high)
+    [ 212, 0.80, 0.34, 0.32 ],   // warm red band
     [   0, 0.98, 0.56, 0.30 ],   // horizon glow
     [-880, 0.60, 0.34, 0.28 ],
   ];

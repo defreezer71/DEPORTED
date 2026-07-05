@@ -118,9 +118,10 @@ CONFIG.arena = {
     { id: 'B', x: 0, z:  42.5, facing: -1 },
   ],
 
-  // Enclosed tunnels (ceiling + black walls) breaching the N/S walls; length 16
-  // = a long dark walk-in, height 6 = a taller/grander corridor.
-  tunnel: { width: 6, length: 16, height: 6, color: 0x0a0a0c },
+  // Enclosed tunnels (ceiling + black walls) breaching the N/S walls; length 18.4
+  // (+15%) = a longer, darker walk-in so the spawn reads as a shadowed corridor with
+  // the bright arena framed ahead; height 6 = a taller/grander corridor.
+  tunnel: { width: 6, length: 18.4, height: 6, color: 0x0a0a0c },
 
   // Cover objects — each has its 180°-rotational partner (negate x AND z).
   //   container 6×2.6×2.5m → full standing cover | crate 1.5³m → crouch cover.
@@ -129,12 +130,30 @@ CONFIG.arena = {
     { id: 'pocketAR', type: 'container', x:   8.1, z: -17, rotationY: 90 },
     { id: 'pocketBL', type: 'container', x:  -8.1, z:  17, rotationY: 90 },
     { id: 'pocketBR', type: 'container', x:   8.1, z:  17, rotationY: 90 },
+    // Step-up crates for all four tunnel-mouth (pocket) containers — one hugging
+    // the INNER (map-center) side of each container at its tunnel-facing back end,
+    // so players exiting a tunnel can hop crate (top 1.5m) → container top (3m;
+    // jump apex ~1.6m). Flush to the inner face (x ±5.9). Two 180° pairs (AR↔BL, AL↔BR).
+    { id: 'stepAR',   type: 'crate',     x:   5.9, z: -20.5 },
+    { id: 'stepAL',   type: 'crate',     x:  -5.9, z: -20.5 },
+    { id: 'stepBR',   type: 'crate',     x:   5.9, z:  20.5 },
+    { id: 'stepBL',   type: 'crate',     x:  -5.9, z:  20.5 },
     { id: 'laneWN',   type: 'container', x: -12, z:  -9, rotationY:  0 },
     { id: 'laneWS',   type: 'container', x: -12, z:   9, rotationY:  0 },
     { id: 'laneEN',   type: 'container', x:  12, z:  -9, rotationY:  0 },
     { id: 'laneES',   type: 'container', x:  12, z:   9, rotationY:  0 },
     { id: 'crateN',   type: 'crate',     x:-3.5, z:  -8, rotationY:  0 },
     { id: 'crateS',   type: 'crate',     x: 3.5, z:   8, rotationY:  0 },
+    // Crate cover flanking the dais (east) + its 180° mirror (west). A 2-high
+    // stack (stack:2) with a single crate flush alongside (−z), plus a single
+    // crate on the stack's OUTER face (+x, further from the dais/stairs) → a
+    // corner-wrapping cluster. Scooted ~2ft further out (x 8 → 8.6).
+    { id: 'LstackE',  type: 'crate',     x:  8.6, z: -3,   stack: 2 },
+    { id: 'LfootE',   type: 'crate',     x:  8.6, z: -4.5 },
+    { id: 'LsideE',   type: 'crate',     x: 10.1, z: -3   },
+    { id: 'LstackW',  type: 'crate',     x: -8.6, z:  3,   stack: 2 },
+    { id: 'LfootW',   type: 'crate',     x: -8.6, z:  4.5 },
+    { id: 'LsideW',   type: 'crate',     x:-10.1, z:  3   },
   ],
   containerSize: { x: 6.9, y: 3.0, z: 2.9 },   // +15% (more cover)
   crateSize:     { x: 1.5, y: 1.5, z: 1.5 },
@@ -676,8 +695,12 @@ function buildVaultTunnel(zMouth, zBack, W, H, gapOuter, wallTop, mat) {
 
   const N = prof.length, pos = [], uv = [], col = [], idx = [];
   const warm = (b) => col.push(b, b * 0.98, b * 0.94);  // a hair warm
-  // Baked faux-shading: crown darker than floor, back darker than the bright mouth.
-  const shade = (y, near) => warm((1.0 - 0.42 * (y / H)) * (near ? 1.0 : 0.72));
+  // Baked faux-shading: crown darker than floor, and the back (spawn) end much
+  // darker than the bright mouth so the corridor falls into shadow toward the
+  // player and the arena reads as a lit reveal ahead. Both ends pulled well down
+  // for a dim stone vault — a dark frame around the bright arena reveal (mouth
+  // 0.62, deep back 0.24).
+  const shade = (y, near) => warm((1.0 - 0.42 * (y / H)) * (near ? 0.62 : 0.24));
 
   // ── Arch shell (two rings: mouth, back) ──
   for (let r = 0; r < 2; r++) {
@@ -699,7 +722,7 @@ function buildVaultTunnel(zMouth, zBack, W, H, gapOuter, wallTop, mat) {
   const zCap = zBack + Math.sign(zMouth - zBack) * 0.3, cb = pos.length / 3;
   pos.push(-gapOuter, 0, zCap, gapOuter, 0, zCap, -gapOuter, wallTop, zCap, gapOuter, wallTop, zCap);
   uv.push(-gapOuter / BLK, 0, gapOuter / BLK, 0, -gapOuter / BLK, wallTop / BLK, gapOuter / BLK, wallTop / BLK);
-  for (let k = 0; k < 4; k++) warm(0.5);
+  for (let k = 0; k < 4; k++) warm(0.15);   // dark back wall behind the spawn
   idx.push(cb, cb + 1, cb + 2, cb + 2, cb + 1, cb + 3);
 
   // ── Mouth facade — fills the bowl-wall gap AROUND the arch (side strips + the band
@@ -860,7 +883,14 @@ function buildVaultTunnel(zMouth, zBack, W, H, gapOuter, wallTop, mat) {
     // Movement colliders (invisible) — side walls, ceiling, back cap
     addTunnelCollider(T, t.height, t.length, -(gapHalf + T / 2), zMid);
     addTunnelCollider(T, t.height, t.length,  (gapHalf + T / 2), zMid);
-    addTunnelCollider(t.width + T, t.height, T, 0, zOuter + side * (T / 2));
+    // Back cap: the visible wall sits at zCap (see buildVaultTunnel). Stop the player
+    // ~1u IN FRONT of it (arena-side) with a thick box so the camera can never reach
+    // the wall plane — previously the collider face sat behind the wall, letting you
+    // clip your view through it. Bulk extends away from the arena.
+    const zCap = zOuter - side * 0.3;
+    const capThick = 2;
+    const capInner = zCap - side * 1.0;                       // arena-facing stop plane
+    addTunnelCollider(t.width + T, t.height, capThick, 0, capInner + side * (capThick / 2));
     addTunnelCollider(t.width + T, 0.6, t.length, 0, zMid, t.height + 0.3);
     // Visible barrel-vault skin (1 draw call) — mouth at the wall, cap at the back,
     // facade filling the bowl-wall gap (gapHalf+T) up to the wall top
@@ -1002,7 +1032,12 @@ for (const c of A.cover) {
   const isContainer = c.type === 'container';
   const sz  = isContainer ? A.containerSize : A.crateSize;
   const mat = isContainer ? _containerMat : _crateMat;
-  addArenaBox(sz.x, sz.y, sz.z, c.x, c.z, mat, c.rotationY || 0);
+  // `stack` (crates) piles N boxes vertically — each box is its own collider +
+  // bullet target, so a 2-high stack reads as full standing cover.
+  const n = c.stack || 1;
+  for (let s = 0; s < n; s++) {
+    addArenaBox(sz.x, sz.y, sz.z, c.x, c.z, mat, c.rotationY || 0, sz.y * (s + 0.5));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1385,10 +1420,14 @@ if (_hemi) { _hemi.groundColor.setHex(0x6a5a3e); _hemi.color.setHex(0x3a4a6a); _
 if (window.skyDome && window.skyDome.geometry && window.skyDome.geometry.attributes.color) {
   const sp = window.skyDome.geometry.attributes.position;
   const col = window.skyDome.geometry.attributes.color, sc = col.array;
+  // Tall sunset: the warm→plum→purple gradient is stretched high up the dome (was
+  // mostly spent by y=360) so the colour reads well above the arena wall. Horizon
+  // glow kept as-is — user likes it.
   const stops = [
-    [ 880, 0.05, 0.07, 0.24 ],   // zenith — deep indigo
-    [ 360, 0.16, 0.13, 0.34 ],   // upper dusk
-    [ 120, 0.72, 0.36, 0.34 ],   // warm band
+    [ 880, 0.07, 0.06, 0.22 ],   // zenith — deep indigo
+    [ 820, 0.22, 0.11, 0.34 ],   // high dusk — purple pushed higher again (+15%)
+    [ 503, 0.48, 0.18, 0.33 ],   // dark-red / plum band (mid-high)
+    [ 212, 0.80, 0.34, 0.32 ],   // warm red band
     [   0, 0.98, 0.56, 0.30 ],   // horizon glow
     [-880, 0.60, 0.34, 0.28 ],
   ];
@@ -4420,11 +4459,14 @@ function findRemotePlayerByPart(obj) {
 
 // Called by 12_main.js when a hit event arrives in a world snapshot
 function applyHitEvent(evt) {
-  // We are the target — apply damage to our own HP
+  // We are the target — apply the server-authoritative HP/armor. Fields are
+  // hp/armor/dead; the old targetHp/targetArmor names never matched what the
+  // server sends, so armor silently desynced — which matters in duel where
+  // everyone spawns with armor=100.
   if (evt.target === state.myId) {
-    if (evt.targetHp !== undefined)    state.hp    = evt.targetHp;
+    if (evt.hp !== undefined)    state.hp    = evt.hp;
     else state.hp = Math.max(0, state.hp - evt.damage);
-    if (evt.targetArmor !== undefined) state.armor = evt.targetArmor;
+    if (evt.armor !== undefined) state.armor = evt.armor;
     if (state.hp <= 0 && evt.shooter) {
       state.killCamShooterId = evt.shooter;
       state.killCamBotIndex = -1;
@@ -4435,9 +4477,9 @@ function applyHitEvent(evt) {
   // Remote player is the target
   const rp = (state.remotePlayers || {})[evt.target];
   if (!rp) return;
-  if (evt.targetHp !== undefined) rp.hp = evt.targetHp;
+  if (evt.hp !== undefined) rp.hp = evt.hp;
   else rp.hp = Math.max(0, (rp.hp !== undefined ? rp.hp : 100) - evt.damage);
-  if (evt.targetDead || rp.hp <= 0) {
+  if (evt.dead || rp.hp <= 0) {
     rp.dead = true;
     if (rp.mesh) rp.mesh.visible = false;
   }
@@ -5514,11 +5556,17 @@ function update() {
 
   // Check player death
   if (state.phase === 'playing' && state.hp <= 0 && !state.playerDead) {
-    state.playerDead = true;
-    state.phase = 'gameover';
-    state.killCamVictimPos = camera.position.clone();
-    if (document.pointerLockElement) document.exitPointerLock();
-    startKillCam();
+    if (CONFIG.mode === 'duel') {
+      // Duel: no elimination/kill-cam — go down, then the server respawns us at
+      // our home end. Keep pointer lock so play resumes seamlessly.
+      onDuelDeath();
+    } else {
+      state.playerDead = true;
+      state.phase = 'gameover';
+      state.killCamVictimPos = camera.position.clone();
+      if (document.pointerLockElement) document.exitPointerLock();
+      startKillCam();
+    }
   }
 
   // Check victory — you win when no bots AND no remote players are left standing.
@@ -6966,6 +7014,11 @@ function connectToServer() {
         state.myId = msg.id;
         state.roomCode = msg.roomCode;
         state.fillEndsAt = msg.fillEndsAt || null;
+        // Duel: remember the end (A/B) the server assigned us — the match-start
+        // and respawn teleports seed the camera here so we don't desync.
+        if (msg.spawn) state.mySpawn = msg.spawn;
+        if (msg.winKills)  state.duelWinKills  = msg.winKills;
+        if (msg.respawnMs) state.duelRespawnMs = msg.respawnMs;
         showRoomCode(msg.roomCode);
         if (msg.phase === 'waiting') {
           state.inLobby = true;
@@ -7014,10 +7067,12 @@ function connectToServer() {
         })();
         state.inLobby = false;
         hideLobbyScreen();
-        // Fill the PvP match with bots to 21 combatants — without this, bots.length
-        // is 0 in PvP and the victory check fires instantly ("REPATRIATED!" at 0:03)
-        if (typeof spawnBots === 'function' && bots.length === 0) spawnBots();
-        adjustBotsForPlayerCount(state.lobbyPlayerCount || state.roomPlayerCount || 1);
+        // Duel is strictly human 1v1 — no bots. (BR fills to 21 with bots so its
+        // last-alive victory check doesn't fire instantly at 0 opponents.)
+        if (CONFIG.mode !== 'duel') {
+          if (typeof spawnBots === 'function' && bots.length === 0) spawnBots();
+          adjustBotsForPlayerCount(state.lobbyPlayerCount || state.roomPlayerCount || 1);
+        }
         // Reset player to clean match start — no warmup gear carries over
         state.hp = 100;
         if (CONFIG.mode === 'duel') {
@@ -7031,11 +7086,22 @@ function connectToServer() {
           state.reserveAmmo = { m4: 0, pistol: 0 };
         }
         if (typeof updateHUD === 'function') updateHUD();
+        // Fresh duel scoreboard at the top of every match.
+        if (CONFIG.mode === 'duel') {
+          state.duelScore = {};
+          state.playerDead = false;
+          hideRespawnOverlay();
+          updateDuelHUD();
+        }
         state.velocityY = 0;
+        // Duel: spawn at the server-assigned end (A/B). Small jitter only — the
+        // tunnels are 6u wide, so a wide spread would clip the walls.
+        const _startSpawn = (CONFIG.mode === 'duel' && state.mySpawn) ? state.mySpawn : CONFIG.spawnPos;
+        const _startJit = (CONFIG.mode === 'duel') ? 2 : 10;
         camera.position.set(
-          CONFIG.spawnPos.x + (Math.random() - 0.5) * 10,
+          _startSpawn.x + (Math.random() - 0.5) * _startJit,
           CONFIG.playerHeight,
-          CONFIG.spawnPos.z + (Math.random() - 0.5) * 10
+          _startSpawn.z + (Math.random() - 0.5) * _startJit
         );
         // Reseed the capsule to the match-start spawn (physics drives the camera).
         if (CONFIG.newPhysics) physInit();
@@ -7056,7 +7122,13 @@ function connectToServer() {
       case 'events':
         for (const evt of msg.events) {
           if (evt.type === 'hit') applyHitEvent(evt);
+          else if (evt.type === 'kill') applyKillEvent(evt);
+          else if (evt.type === 'respawn') applyRespawnEvent(evt);
         }
+        break;
+
+      case 'duelOver':
+        showDuelOver(msg);
         break;
 
       case 'existingPlayers':
@@ -7088,6 +7160,142 @@ function connectToServer() {
   state.ws.onerror = (err) => {
     console.error('WS error', err);
   };
+}
+
+// ── DUEL: scoreboard, respawn flow, win screen ─────────────────────────────
+// All UI here is injected at runtime (self-contained overlays appended to
+// <body>) so it needs no markup in index.html. Guarded by CONFIG.mode==='duel'.
+
+// Lazily create (once) an absolutely-positioned overlay element by id.
+function _duelEl(id, css) {
+  let el = document.getElementById(id);
+  if (!el) { el = document.createElement('div'); el.id = id; el.style.cssText = css; document.body.appendChild(el); }
+  return el;
+}
+
+function updateDuelHUD() {
+  if (CONFIG.mode !== 'duel') return;
+  const el = _duelEl('duelScore',
+    'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:500;' +
+    'font-family:monospace;font-weight:900;font-size:26px;letter-spacing:2px;' +
+    'text-shadow:0 2px 6px #000;pointer-events:none;white-space:nowrap;');
+  const score = state.duelScore || {};
+  const my = score[state.myId] || 0;
+  let opp = 0;
+  for (const id in score) if (id !== state.myId) opp = Math.max(opp, score[id]);
+  el.innerHTML =
+    '<span style="color:#7CFC00">' + my + '</span>' +
+    '<span style="opacity:.5;font-size:15px;margin:0 12px;vertical-align:middle">FIRST TO ' + (state.duelWinKills || 2) + '</span>' +
+    '<span style="color:#ff5a5a">' + opp + '</span>';
+  el.style.display = 'block';
+}
+
+function showRespawnOverlay(seconds) {
+  const el = _duelEl('respawnOverlay',
+    'position:fixed;top:0;left:0;width:100%;height:100%;z-index:800;' +
+    'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+    'background:rgba(70,0,0,0.45);font-family:monospace;pointer-events:none;');
+  el.innerHTML =
+    '<div style="color:#ff5a5a;font-size:52px;font-weight:900;letter-spacing:6px;text-shadow:0 0 30px #900">DOWNED</div>' +
+    '<div id="respawnCount" style="color:#fff;font-size:22px;margin-top:16px">Respawning in ' + seconds + '…</div>';
+  el.style.display = 'flex';
+  clearInterval(state._respawnInterval);
+  let remain = seconds;
+  state._respawnInterval = setInterval(function() {
+    remain -= 1;
+    const c = document.getElementById('respawnCount');
+    if (c) c.textContent = remain > 0 ? ('Respawning in ' + remain + '…') : 'Respawning…';
+    if (remain <= 0) clearInterval(state._respawnInterval);
+  }, 1000);
+}
+
+function hideRespawnOverlay() {
+  clearInterval(state._respawnInterval);
+  const el = document.getElementById('respawnOverlay');
+  if (el) el.style.display = 'none';
+}
+
+// Local player went down — the server will send a 'respawn' event shortly.
+function onDuelDeath() {
+  state.playerDead = true;
+  state.phase = 'dead';
+  state.velocityY = 0;
+  showRespawnOverlay(Math.ceil((state.duelRespawnMs || 3000) / 1000));
+}
+
+// Server respawned us — reset loadout and teleport to our home end (x/z come
+// from the server so both sides agree on the position).
+function onDuelRespawn(x, z) {
+  state.playerDead = false;
+  state.phase = 'playing';
+  state.hp = 100;
+  state.armor = 100;
+  state.ammo = { m4: CONFIG.weapons.m4.magSize, pistol: CONFIG.weapons.pistol.magSize };
+  state.reserveAmmo = { m4: 90, pistol: 45 };
+  state.velocityY = 0;
+  const sx = (typeof x === 'number') ? x : (state.mySpawn ? state.mySpawn.x : CONFIG.spawnPos.x);
+  const sz = (typeof z === 'number') ? z : (state.mySpawn ? state.mySpawn.z : CONFIG.spawnPos.z);
+  camera.position.set(sx, CONFIG.playerHeight, sz);
+  if (CONFIG.newPhysics) physInit();
+  hideRespawnOverlay();
+  if (typeof updateHUD === 'function') updateHUD();
+  updateDuelHUD();
+}
+
+function addKillFeed(text, good) {
+  const el = _duelEl('killFeed',
+    'position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:500;' +
+    'font-family:monospace;font-size:18px;font-weight:700;text-shadow:0 2px 5px #000;' +
+    'pointer-events:none;text-align:center;transition:opacity .4s;');
+  el.style.color = good ? '#7CFC00' : '#ff7a7a';
+  el.textContent = text;
+  el.style.opacity = '1';
+  clearTimeout(state._killFeedTO);
+  state._killFeedTO = setTimeout(function() { el.style.opacity = '0'; }, 2200);
+}
+
+// A 'kill' event: update the scoreboard and show a brief feed line.
+function applyKillEvent(evt) {
+  if (CONFIG.mode !== 'duel') return;
+  state.duelScore = state.duelScore || {};
+  if (evt.shooterKills !== undefined) state.duelScore[evt.shooter] = evt.shooterKills;
+  if (evt.victim !== undefined && evt.victimKills !== undefined) state.duelScore[evt.victim] = evt.victimKills;
+  updateDuelHUD();
+  if (evt.shooter === state.myId) addKillFeed('✓ You eliminated your opponent', true);
+  else if (evt.victim === state.myId) addKillFeed('✗ You were eliminated', false);
+}
+
+// A 'respawn' event: for us, reset+teleport; the opponent's visibility is driven
+// by the per-tick snapshot dead flag, so just clear our cached death state.
+function applyRespawnEvent(evt) {
+  if (evt.id === state.myId) { onDuelRespawn(evt.x, evt.z); return; }
+  const rp = (state.remotePlayers || {})[evt.id];
+  if (rp) { rp.dead = false; rp.hp = evt.hp || 100; if (rp.mesh) rp.mesh.visible = true; }
+}
+
+function showDuelOver(msg) {
+  const won = msg.winner === state.myId;
+  hideRespawnOverlay();
+  state.phase = 'gameover';
+  if (document.pointerLockElement) document.exitPointerLock();
+  const el = _duelEl('duelOver',
+    'position:fixed;top:0;left:0;width:100%;height:100%;z-index:1000;' +
+    'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
+    'background:rgba(0,0,0,0.88);font-family:monospace;');
+  const my = (msg.scores && msg.scores[state.myId]) || 0;
+  let opp = 0;
+  for (const id in (msg.scores || {})) if (id !== state.myId) opp = Math.max(opp, msg.scores[id]);
+  el.innerHTML =
+    '<div style="color:' + (won ? '#ffd700' : '#ff5a5a') + ';font-size:72px;font-weight:900;' +
+      'letter-spacing:8px;text-shadow:0 0 40px ' + (won ? '#ffd700' : '#900') + '">' +
+      (won ? 'VICTORY' : 'DEFEAT') + '</div>' +
+    '<div style="color:#fff;font-size:30px;margin-top:8px">' + my + ' — ' + opp + '</div>' +
+    '<button id="duelAgainBtn" style="margin-top:34px;padding:14px 40px;font-family:monospace;' +
+      'font-size:20px;font-weight:800;letter-spacing:2px;cursor:pointer;background:#ffd700;' +
+      'color:#111;border:none;border-radius:6px">PLAY AGAIN</button>';
+  el.style.display = 'flex';
+  const btn = document.getElementById('duelAgainBtn');
+  if (btn) btn.onclick = function() { location.reload(); };
 }
 
 // ── Send binary input packet to server ──
