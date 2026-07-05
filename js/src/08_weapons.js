@@ -243,19 +243,36 @@ function updateMuzzleFlash(dt) {
 // ═══════════════════════════════════════════════════════════
 // BULLET IMPACTS
 // ═══════════════════════════════════════════════════════════
+// ── Impact particle pool ──
+// Old code allocated 4–7 new Mesh + SphereGeometry + MeshBasicMaterial on every
+// bullet hit and scene.remove()+dispose()'d them on expiry — heavy GC + GPU churn
+// during sustained fire (~10 hits/s × 4–7 = 40–70 allocs/s), a top cause of the
+// "frames drop when I shoot" hitching. Now: one shared geometry + material and a
+// fixed ring pool of meshes toggled visible. No per-hit allocation, no add/remove.
+const _IMPACT_POOL = 64;
+const _impactGeo = new THREE.SphereGeometry(0.02, 4, 3);
+const _impactMat = new THREE.MeshBasicMaterial({ color: 0xccbb88 });
 const impactParticles = [];
+let _impactHead = 0;
+for (let i = 0; i < _IMPACT_POOL; i++) {
+  const p = new THREE.Mesh(_impactGeo, _impactMat);
+  p.visible = false;
+  p.userData = { vel: new THREE.Vector3(), life: 0 };
+  scene.add(p);
+  impactParticles.push(p);
+}
+
 function spawnImpact(pos, normal) {
-  for (let i = 0; i < 4 + Math.floor(Math.random() * 4); i++) {
-    const p = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02, 4, 3),
-      new THREE.MeshBasicMaterial({ color: 0xccbb88 })
-    );
+  const count = 4 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < count; i++) {
+    const p = impactParticles[_impactHead];
+    _impactHead = (_impactHead + 1) % _IMPACT_POOL; // ring: oldest recycled if saturated
     p.position.copy(pos);
     const dir = new THREE.Vector3((Math.random() - 0.5) * 2, Math.random() * 2, (Math.random() - 0.5) * 2)
       .add(normal.clone().multiplyScalar(2));
-    p.userData = { vel: dir.multiplyScalar(0.8 + Math.random() * 1.5), life: 0.25 + Math.random() * 0.3 };
-    scene.add(p);
-    impactParticles.push(p);
+    p.userData.vel.copy(dir.multiplyScalar(0.8 + Math.random() * 1.5));
+    p.userData.life = 0.25 + Math.random() * 0.3;
+    p.visible = true;
   }
 }
 

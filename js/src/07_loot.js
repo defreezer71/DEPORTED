@@ -315,20 +315,8 @@ if (CONFIG.mode === 'br') depotCorners.forEach(({ x, z }) => {
   group.updateMatrixWorld(true);
 });
 
-// ── Outer-ring scattered loot — 10 crates beyond the canal (BR only) ──
-if (CONFIG.mode === 'br') {
-  const outerLoot = [
-    [ 104,  34, 'ammo_m4'],
-    [  65,  89, 'armor'],
-    [   0, 110, 'health'],
-    [ -65,  89, 'ammo_pistol'],
-    [-104,  34, 'ammo_m4'],
-    [-104, -34, 'armor'],
-    [ -65, -89, 'health'],
-    [   0,-110, 'ammo_m4'],
-    [  65, -89, 'ammo_pistol'],
-    [ 104, -34, 'armor'],
-  ];
-  for (const [x, z, type] of outerLoot) spawnLoot(x, z, type);
-}
+// Scattered outer-ring loot removed — all loot now comes from the depot sheds
+// (the 3 Roman-temple depots above) only. spawnLoot() is kept as the floating-
+// pickup factory in case it's wanted later (e.g. bot-death drops); nothing calls
+// it now, so lootItems stays empty and the pickup loops simply no-op.
 // ═══════════════════════════════════════════════════════════

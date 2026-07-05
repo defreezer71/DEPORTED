@@ -812,8 +812,12 @@ const _dirtPatches = [];
   const grassMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
   // ── Place tufts on a jittered grid ──
+  // grassGrid drives ~90% of the map's triangle budget: at 0.55 the ~180k tufts
+  // (10 tris each) were ~1.8M tris on their own. Doubling the spacing to 1.1
+  // quarters the count (~450k tris). Tune for looks vs frames: 0.8 = lusher,
+  // 1.3 = leaner. (A distance-based cull could restore near-field density later.)
   const grassPlacements = [];
-  const grassGrid = 0.55;
+  const grassGrid = 1.1;
   for (let gx = -half; gx < half; gx += grassGrid) {
     for (let gz = -half; gz < half; gz += grassGrid) {
       const x = gx + (seededRand() - 0.5) * grassGrid * 0.9;
