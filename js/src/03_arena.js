@@ -54,7 +54,32 @@ const _containerMat = (() => {
   x.fillStyle = 'rgba(0,0,0,0.30)'; x.fillRect(0, 0, 128, 6); x.fillRect(0, 58, 128, 6); // rails
   return new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(c) });
 })();
-const _crateMat     = new THREE.MeshLambertMaterial({ color: A.crateColor });
+const _crateMat = (() => {
+  // Wooden crate skin — vertical planks with grain + gaps, a raised border frame with
+  // corner bolts, and a diagonal cross-brace board. One CanvasTexture on all 6 faces.
+  const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#7a5c34'; g.fillRect(0, 0, 128, 128);
+  const planks = 5, pw = 128 / planks;
+  for (let i = 0; i < planks; i++) {
+    g.fillStyle = 'rgba(' + (92 + Math.random() * 30 | 0) + ',' + (70 + Math.random() * 24 | 0) + ',' + (42 + Math.random() * 18 | 0) + ',0.55)';
+    g.fillRect(i * pw + 1, 0, pw - 2, 128);
+    g.strokeStyle = 'rgba(40,28,14,0.28)'; g.lineWidth = 1;
+    for (let k = 0; k < 3; k++) { const gx = i * pw + 3 + Math.random() * (pw - 6); g.beginPath(); g.moveTo(gx, 0); g.lineTo(gx + Math.random() * 4 - 2, 128); g.stroke(); }
+    g.fillStyle = 'rgba(18,11,4,0.55)'; g.fillRect(i * pw + pw - 1.5, 0, 1.5, 128);   // plank gap
+  }
+  g.lineWidth = 15; g.strokeStyle = '#5f4426';                                        // diagonal brace board
+  g.beginPath(); g.moveTo(16, 112); g.lineTo(112, 16); g.stroke();
+  g.strokeStyle = 'rgba(255,222,170,0.10)'; g.lineWidth = 2; g.beginPath(); g.moveTo(11, 107); g.lineTo(107, 11); g.stroke();
+  const fr = 12;                                                                       // border frame rails
+  g.fillStyle = '#5a4126';
+  g.fillRect(0, 0, 128, fr); g.fillRect(0, 128 - fr, 128, fr); g.fillRect(0, 0, fr, 128); g.fillRect(128 - fr, 0, fr, 128);
+  g.fillStyle = 'rgba(255,226,176,0.16)'; g.fillRect(0, 0, 128, 2); g.fillRect(0, 0, 2, 128); g.fillRect(0, fr - 2, 128, 2); g.fillRect(fr - 2, 0, 2, 128);
+  g.fillStyle = 'rgba(0,0,0,0.32)';       g.fillRect(0, 126, 128, 2); g.fillRect(126, 0, 2, 128); g.fillRect(0, 128 - fr, 128, 2); g.fillRect(128 - fr, 0, 2, 128);
+  g.fillStyle = '#241f18';                                                             // iron bolts at joints
+  for (const p of [[6, 6], [122, 6], [6, 122], [122, 122], [64, 6], [64, 122], [6, 64], [122, 64]]) { g.beginPath(); g.arc(p[0], p[1], 2.3, 0, 7); g.fill(); }
+  return new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(c) });
+})();
 
 const DEG = Math.PI / 180;
 
@@ -71,6 +96,142 @@ function addArenaBox(w, h, d, x, z, mat, rotYdeg = 0, yCenter = h / 2) {
   scene.add(m);
   collidables.push(m);
   targets.push(m);
+  return m;
+}
+
+// ── Aged limestone-block material (shared by both barrel-vault tunnels). Baked into
+// one CanvasTexture: warm base + running-bond courses with mortar shadow lines, per-
+// block tint variation, grime noise and top-down weathering streaks. RepeatWrapping
+// so tunnel UVs (arc-length × length, ~1.6 u/block) tile it. DoubleSide so the vault
+// shell lights from inside regardless of winding. Zero extra geometry — the block
+// look is entirely in the texture. ──
+const _stoneTex = (() => {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#a99a7d'; g.fillRect(0, 0, 256, 256);           // warm limestone base
+  for (let i = 0; i < 1600; i++) {                                // grime speckle
+    g.fillStyle = 'rgba(0,0,0,' + (Math.random() * 0.06) + ')';
+    g.beginPath(); g.arc(Math.random() * 256, Math.random() * 256, Math.random() * 2 + 0.4, 0, 7); g.fill();
+  }
+  const rows = 3, rh = 256 / rows, cols = 3, cw = 256 / cols;     // chunky voussoir-scale blocks
+  for (let r = 0; r < rows; r++) {
+    const off = (r % 2) ? cw / 2 : 0;                             // running bond
+    for (let ci = -1; ci < cols; ci++) {
+      const bx = ci * cw + off, by = r * rh;
+      g.fillStyle = 'rgba(' + (150 + Math.random() * 40 | 0) + ',' + (135 + Math.random() * 35 | 0) +
+                    ',' + (105 + Math.random() * 30 | 0) + ',' + (0.22 + Math.random() * 0.28) + ')';
+      g.fillRect(bx + 1.5, by + 1.5, cw - 3, rh - 3);            // per-block tint
+      g.strokeStyle = 'rgba(38,30,20,0.60)'; g.lineWidth = 2.5;
+      g.strokeRect(bx + 1.5, by + 1.5, cw - 3, rh - 3);          // mortar shadow
+      g.strokeStyle = 'rgba(255,246,224,0.14)'; g.lineWidth = 1; // top/left highlight
+      g.beginPath(); g.moveTo(bx + 3, by + rh - 3); g.lineTo(bx + 3, by + 3); g.lineTo(bx + cw - 3, by + 3); g.stroke();
+    }
+  }
+  for (let i = 0; i < 9; i++) {                                   // top-down weathering streaks
+    const x = Math.random() * 256, grd = g.createLinearGradient(x, 0, x, 256);
+    grd.addColorStop(0, 'rgba(18,14,9,0.20)'); grd.addColorStop(1, 'rgba(18,14,9,0)');
+    g.fillStyle = grd; g.fillRect(x, 0, 6 + Math.random() * 12, 256);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+})();
+// Unlit stone: the block look is all in the texture and depth is baked into vertex
+// colors (buildVaultTunnel), so we dodge the scene's green HemisphereLight ground-
+// bounce (0x2d7a0a) that would tint the vault's downward-facing inner ceiling.
+//   _stoneMat     — vertex-colored, for the vault mesh.
+//   _stoneFlatMat — plain (no per-vertex colors), for stone boxes (the tympanum).
+const _stoneMat     = new THREE.MeshBasicMaterial({ map: _stoneTex, vertexColors: true, side: THREE.DoubleSide });
+const _stoneFlatMat = new THREE.MeshBasicMaterial({ map: _stoneTex, side: THREE.DoubleSide });
+
+// ── Invisible thin collider box — movement only (collidables), NOT drawn and NOT a
+// bullet target. Used for the barrel-vault tunnels: an AABB collider can't be a
+// concave vault, so the visible vault mesh can't double as the mover-collider; these
+// simple boxes define the passable corridor and are occluded behind the vault. ──
+function addTunnelCollider(w, h, d, x, z, yCenter = h / 2) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), _tunnelMat);
+  m.position.set(x, yCenter, z);
+  m.visible = false;
+  m.updateMatrixWorld(true);
+  scene.add(m);
+  collidables.push(m);
+  return m;
+}
+
+// ── Roman barrel-vault tunnel — ONE merged BufferGeometry (1 draw call). Cross-
+// section: vertical side walls up to the springline (yS = H−R), then a semicircle of
+// radius R = W/2 over the top; extruded straight from the mouth to the back. Contains
+// the arch shell + a paved floor + the back cap (sealing the spawn). Renders + stops
+// bullets (pushed to `targets`); movement is handled by addTunnelCollider boxes. ──
+function buildVaultTunnel(zMouth, zBack, W, H, gapOuter, wallTop, mat) {
+  const R = W / 2, yS = H - R, NA = 12, BLK = 3.6;    // BLK = world units per texture tile
+  const prof = [];                                    // inner-surface profile, left→right, with arc-length s
+  let s = 0;
+  const add = (x, y) => {
+    if (prof.length) { const p = prof[prof.length - 1]; s += Math.hypot(x - p.x, y - p.y); }
+    prof.push({ x, y, s });
+  };
+  add(-R, 0); add(-R, yS);                            // left wall
+  for (let i = 1; i <= NA; i++) { const a = Math.PI - (i / NA) * Math.PI; add(R * Math.cos(a), yS + R * Math.sin(a)); }
+  add(R, 0);                                          // right wall (down to floor)
+
+  const N = prof.length, pos = [], uv = [], col = [], idx = [];
+  const warm = (b) => col.push(b, b * 0.98, b * 0.94);  // a hair warm
+  // Baked faux-shading: crown darker than floor, back darker than the bright mouth.
+  const shade = (y, near) => warm((1.0 - 0.42 * (y / H)) * (near ? 1.0 : 0.72));
+
+  // ── Arch shell (two rings: mouth, back) ──
+  for (let r = 0; r < 2; r++) {
+    const z = r === 0 ? zMouth : zBack;
+    for (let i = 0; i < N; i++) { pos.push(prof[i].x, prof[i].y, z); uv.push(prof[i].s / BLK, z / BLK); shade(prof[i].y, r === 0); }
+  }
+  for (let i = 0; i < N - 1; i++) idx.push(i, N + i, i + 1, i + 1, N + i, N + i + 1);
+
+  // ── Paved floor (just above the concourse) ──
+  const fb = pos.length / 3, fY = 0.02;
+  pos.push(-R, fY, zMouth, R, fY, zMouth, -R, fY, zBack, R, fY, zBack);
+  uv.push(-R / BLK, zMouth / BLK, R / BLK, zMouth / BLK, -R / BLK, zBack / BLK, R / BLK, zBack / BLK);
+  shade(0, true); shade(0, true); shade(0, false); shade(0, false);
+  idx.push(fb, fb + 2, fb + 1, fb + 1, fb + 2, fb + 3);
+
+  // ── Solid back cap — a flat stone wall sealing the spawn end (uniform dark, no
+  // gradient swirl); spans past the arch and is pulled a touch inward so it OCCLUDES
+  // the stand structure that used to poke through the old fan cap. ──
+  const zCap = zBack + Math.sign(zMouth - zBack) * 0.3, cb = pos.length / 3;
+  pos.push(-gapOuter, 0, zCap, gapOuter, 0, zCap, -gapOuter, wallTop, zCap, gapOuter, wallTop, zCap);
+  uv.push(-gapOuter / BLK, 0, gapOuter / BLK, 0, -gapOuter / BLK, wallTop / BLK, gapOuter / BLK, wallTop / BLK);
+  for (let k = 0; k < 4; k++) warm(0.5);
+  idx.push(cb, cb + 1, cb + 2, cb + 2, cb + 1, cb + 3);
+
+  // ── Mouth facade — fills the bowl-wall gap AROUND the arch (side strips + the band
+  // above the arch up to the wall top) so the stands aren't visible through the gap.
+  // Leaves the arched doorway itself open. ──
+  const face = (x0, x1, y0, y1) => {
+    const q = pos.length / 3;
+    pos.push(x0, y0, zMouth, x1, y0, zMouth, x0, y1, zMouth, x1, y1, zMouth);
+    uv.push(x0 / BLK, y0 / BLK, x1 / BLK, y0 / BLK, x0 / BLK, y1 / BLK, x1 / BLK, y1 / BLK);
+    for (let k = 0; k < 4; k++) warm(0.96);
+    idx.push(q, q + 1, q + 2, q + 2, q + 1, q + 3);
+  };
+  face(-gapOuter, -R, 0, wallTop);                    // left strip
+  face(R, gapOuter, 0, wallTop);                      // right strip
+  const arch = [], top = [];                          // band between the arch curve and the wall top
+  for (let i = 0; i <= NA; i++) {
+    const a = Math.PI - (i / NA) * Math.PI, x = R * Math.cos(a), y = yS + R * Math.sin(a);
+    let q = pos.length / 3; pos.push(x, y, zMouth);       uv.push(x / BLK, y / BLK);       warm(0.96); arch.push(q);
+    q = pos.length / 3;     pos.push(x, wallTop, zMouth); uv.push(x / BLK, wallTop / BLK); warm(0.96); top.push(q);
+  }
+  for (let i = 0; i < NA; i++) idx.push(arch[i], arch[i + 1], top[i], top[i], arch[i + 1], top[i + 1]);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  const m = new THREE.Mesh(geo, mat);
+  m.updateMatrixWorld(true);
+  scene.add(m);
+  targets.push(m);                                    // bullets stop on the vault; movement uses the boxes
   return m;
 }
 
@@ -185,23 +346,26 @@ function addArenaBox(w, h, d, x, z, mat, rotYdeg = 0, yCenter = h / 2) {
   }
 }
 
-// ── Tunnels — ENCLOSED black corridors (walls + ceiling) breaching the N/S
-// walls; the spawn sits at the back and the player walks the dark corridor out
-// into the bright bowl (the "walkout" reveal). ──
+// ── Tunnels — Roman STONE BARREL VAULTS breaching the N/S walls; the spawn sits at
+// the back and the player walks the vaulted corridor out into the bright bowl (the
+// "walkout" reveal). Each tunnel is ONE visible mesh (arch shell + floor + back cap,
+// buildVaultTunnel) that renders and stops bullets; movement is walled by invisible
+// thin boxes (an AABB collider can't be a concave vault). ──
 {
   const t = A.tunnel, b = A.bounds, T = 1;
   const gapHalf = t.width / 2;                       // 3
   for (const side of [-1, 1]) {                      // -1 = north (−z), +1 = south (+z)
-    const zWall  = side < 0 ? b.minZ : b.maxZ;       // ∓28
-    const zOuter = zWall + side * t.length;          // ∓42
+    const zWall  = side < 0 ? b.minZ : b.maxZ;       // ∓28  (mouth, at the bowl wall)
+    const zOuter = zWall + side * t.length;          // ∓42  (back, behind the spawn)
     const zMid   = (zWall + zOuter) / 2;             // ∓35
-    // Corridor side walls
-    addArenaBox(T, t.height, t.length, -(gapHalf + T / 2), zMid, _tunnelMat);
-    addArenaBox(T, t.height, t.length,  (gapHalf + T / 2), zMid, _tunnelMat);
-    // Back wall (end cap) sealing the tunnel behind the spawn
-    addArenaBox(t.width + T, t.height, T, 0, zOuter + side * (T / 2), _tunnelMat);
-    // Ceiling slab — encloses the corridor into a dark box
-    addArenaBox(t.width + T, 0.6, t.length, 0, zMid, _tunnelMat, 0, t.height + 0.3);
+    // Movement colliders (invisible) — side walls, ceiling, back cap
+    addTunnelCollider(T, t.height, t.length, -(gapHalf + T / 2), zMid);
+    addTunnelCollider(T, t.height, t.length,  (gapHalf + T / 2), zMid);
+    addTunnelCollider(t.width + T, t.height, T, 0, zOuter + side * (T / 2));
+    addTunnelCollider(t.width + T, 0.6, t.length, 0, zMid, t.height + 0.3);
+    // Visible barrel-vault skin (1 draw call) — mouth at the wall, cap at the back,
+    // facade filling the bowl-wall gap (gapHalf+T) up to the wall top
+    buildVaultTunnel(zWall, zOuter, t.width, t.height, gapHalf + T, A.wallHeight, _stoneMat);
   }
 }
 
@@ -225,13 +389,17 @@ function addArenaBox(w, h, d, x, z, mat, rotYdeg = 0, yCenter = h / 2) {
     out.computeVertexNormals();
     return out;
   }
-  // Invisible box collider at a world AABB → blocks movement + bullets, 0 draw
-  // calls (Box3.setFromObject and the bullet raycast both ignore .visible).
+  // Invisible box collider at a world AABB → blocks MOVEMENT only, 0 draw calls
+  // (Box3.setFromObject ignores .visible). Bullets are NOT raycast against these: a
+  // square AABB around the round dais (corners jut past the steps) and an oversized
+  // column around the thin figure would stop shots that visually miss. Bullets hit the
+  // visible marble/bronze meshes instead (pushed to `targets` below), so hit-reg
+  // matches exactly what's drawn.
   function addCollider(w, h, d, x, y, z) {
     const c = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), _monMat);
     c.visible = false; c.position.set(m.x + x, y, m.z + z);
     c.updateMatrixWorld(true);
-    scene.add(c); collidables.push(c); targets.push(c);
+    scene.add(c); collidables.push(c);
   }
 
   // ── Dais — concentric ziggurat steps (wide+short base → narrow summit),
@@ -295,22 +463,38 @@ function addArenaBox(w, h, d, x, z, mat, rotYdeg = 0, yCenter = h / 2) {
   }
   // Tilted armillary sphere held overhead — open bronze rings + polar axis.
   {
-    const sy = F + 8.5, R = 1.4, TILT = 0.4;
+    const R = 3.5, sy = F + 7.1 + R, TILT = 0.4;   // globe 2.5× larger; raised so its bottom still rests on the hands
     const ringAngles = [[Math.PI / 2, 0], [Math.PI / 2, 0.6], [0, 0], [0, Math.PI / 3], [0, (2 * Math.PI) / 3]];
     for (const [rx, ry] of ringAngles) {
-      const g = new THREE.TorusGeometry(R, 0.075, 6, 22);
+      const g = new THREE.TorusGeometry(R, 0.19, 6, 30);
       g.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, ry, TILT, 'XYZ')));
       g.translate(m.x, sy, m.z); bronze.push(g);
     }
-    const axis = new THREE.CylinderGeometry(0.07, 0.07, R * 2.4, 6);
+    const axis = new THREE.CylinderGeometry(0.17, 0.17, R * 2.4, 8);
     axis.applyMatrix4(new THREE.Matrix4().makeRotationZ(TILT)); axis.translate(m.x, sy, m.z);
     bronze.push(axis);
   }
 
-  scene.add(new THREE.Mesh(mergeGeos(marble), _monMat));   // dais + pedestal — 1 draw call
-  scene.add(new THREE.Mesh(mergeGeos(bronze), _bronze));   // whole figure + globe — 1 draw call
-  addCollider(3.4, pedH, 3.4, 0, m.height + pedH / 2, 0);  // pedestal core (blocks the summit)
-  addCollider(1.3, 6.0, 1.0, 0, F + 3.0, 0);               // body core (breaks the standing sightline)
+  // Visible meshes carry the bullet hitbox (raycast targets) so shots register on the
+  // exact round steps / thin figure the player sees — no phantom corner/column hits.
+  const daisMesh = new THREE.Mesh(mergeGeos(marble), _monMat);    // dais + pedestal — 1 draw call
+  scene.add(daisMesh);  targets.push(daisMesh);
+  // Scale the whole Atlas figure + globe 2× about the feet (F) — a towering statue;
+  // pedestal/dais unchanged. Baked into the geometry so the merged mesh stays at
+  // identity and the bullet raycast sees the true size.
+  {
+    const S = 2, sMat = new THREE.Matrix4()
+      .makeTranslation(m.x, F, m.z)
+      .multiply(new THREE.Matrix4().makeScale(S, S, S))
+      .multiply(new THREE.Matrix4().makeTranslation(-m.x, -F, -m.z));
+    for (const g of bronze) g.applyMatrix4(sMat);
+  }
+  const atlasMesh = new THREE.Mesh(mergeGeos(bronze), _bronze);   // whole figure + globe — 1 draw call
+  scene.add(atlasMesh); targets.push(atlasMesh);
+  // Invisible cores — MOVEMENT only (keep players out of the statue; the tall dais +
+  // pedestal meshes above already block the eye-level spawn-to-spawn sightline).
+  addCollider(3.4, pedH, 3.4, 0, m.height + pedH / 2, 0);  // pedestal core
+  addCollider(2.6, 12.0, 2.0, 0, F + 6.0, 0);              // body core (2× figure)
 }
 
 // ── Cover — containers (full standing cover) + crates (crouch cover). Each entry
@@ -616,7 +800,8 @@ for (const c of A.cover) {
       scene.add(beam);
       const tymH = beamBot - A.tunnel.height;
       if (tymH > 0.3) {
-        const tym = new THREE.Mesh(new THREE.BoxGeometry(2 * CX - 0.4, tymH, 0.6), _tunnelMat);
+        // White marble back wall for the decorative gallery (pillars added below).
+        const tym = new THREE.Mesh(new THREE.BoxGeometry(2 * CX - 0.4, tymH, 0.6), _gateMat);
         tym.position.set(0, A.tunnel.height + tymH / 2, zEnd + toCenter * 0.5);
         scene.add(tym);
       }
@@ -633,6 +818,39 @@ for (const c of A.cover) {
       swag.rotation.y = toCenter > 0 ? 0 : Math.PI;
       swag.renderOrder = 2;
       scene.add(swag);
+    }
+
+    // ── Decorative entrance gallery — a row of small marble pillars standing in FRONT
+    // of the white wall (the tympanum above). Purely ornamental: up at y≈6–12 and
+    // unreachable, so no colliders. InstancedMeshes span BOTH mouths (a few calls). ──
+    {
+      const GN = 6, gR = 0.30;                        // pillars per mouth, shaft radius
+      const gBot = A.tunnel.height + 0.15;            // sits just above the arch top
+      const gCapY = beamBot - 0.4;                    // capitals tucked under the beam
+      const gShaftH = Math.max(1.5, gCapY - gBot - 0.7);
+      const gShaftY = gBot + 0.35 + gShaftH / 2;
+      const spanX = 2 * CX - 1.8;                     // fit within the white wall's width
+      const total = GN * 2;
+      const gShaft = new THREE.InstancedMesh(new THREE.CylinderGeometry(gR * 0.9, gR, gShaftH, 12), _gateMat, total);
+      const gBase  = new THREE.InstancedMesh(new THREE.BoxGeometry(gR * 2.5, 0.30, gR * 2.5), _gateMat, total);
+      const gCap   = new THREE.InstancedMesh(new THREE.BoxGeometry(gR * 2.7, 0.35, gR * 2.7), _gateMat, total);
+      let gi = 0;
+      for (const zEnd of [A.bounds.minZ, A.bounds.maxZ]) {
+        const toCenter = -Math.sign(zEnd);
+        const gz = zEnd + toCenter * 1.05;            // in front of the white wall (wall at +0.5)
+        for (let k = 0; k < GN; k++) {
+          const gx = -spanX / 2 + (k / (GN - 1)) * spanX;
+          put(gBase,  gi, gx, gBot + 0.15, gz);
+          put(gShaft, gi, gx, gShaftY, gz);
+          put(gCap,   gi, gx, gCapY, gz);
+          gi++;
+        }
+        // Cross-beam sill (impost course) the pillars stand on — spans the wall width.
+        const sill = new THREE.Mesh(new THREE.BoxGeometry(2 * CX - 0.4, 0.55, 1.3), _gateMat);
+        sill.position.set(0, gBot - 0.275, zEnd + toCenter * 0.75);
+        scene.add(sill);
+      }
+      [gShaft, gBase, gCap].forEach(m => { m.instanceMatrix.needsUpdate = true; scene.add(m); });
     }
   }
 
@@ -658,6 +876,12 @@ if (typeof sunMesh !== 'undefined' && sunMesh) {
 // Dim + warm the ambient fill for dusk.
 const _amb = scene.children.find(o => o.isAmbientLight);
 if (_amb) { _amb.intensity = 0.33; _amb.color.setHex(0xffdcc0); }
+// Kill the island's grass-green ground-bounce: the HemisphereLight's ground color
+// (0x2d7a0a) tints every downward/shadowed face green. The arena floor is stone, so
+// re-tint the bounce warm and mute the sky half to a dusk indigo — arena only, so the
+// island keeps its grass bounce.
+const _hemi = scene.children.find(o => o.isHemisphereLight);
+if (_hemi) { _hemi.groundColor.setHex(0x6a5a3e); _hemi.color.setHex(0x3a4a6a); _hemi.intensity = 0.5; }
 // Re-tint the sky dome to a sunset gradient (deep indigo zenith → warm horizon glow).
 if (window.skyDome && window.skyDome.geometry && window.skyDome.geometry.attributes.color) {
   const sp = window.skyDome.geometry.attributes.position;
