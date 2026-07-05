@@ -24,7 +24,7 @@ const CONFIG = {
   prisonSize: 23,           // 15% larger
   prisonWallHeight: 10,
 
-  moveSpeed: 11.97,         // 5% slower
+  moveSpeed: 10.17,         // −15% from 11.97 (player-tuned)
   adsSpeedMult: 0.65,
   strafeSpeedMult: 0.80,    // Lateral (A/D) input scaled to 80% of forward speed
   jumpForce: 9,
@@ -166,6 +166,7 @@ const state = {
   moveForward: false, moveBack: false, moveLeft: false, moveRight: false,
   velocityY: 0, isGrounded: true,
   ads: false, crouching: false, smoothCameraHeight: 1.7,
+  sliding: false, slideCooldown: 0,
   currentWeapon: 'm4',
   ammo: { m4: 0, pistol: 0 },
   reserveAmmo: { m4: 0, pistol: 0 },

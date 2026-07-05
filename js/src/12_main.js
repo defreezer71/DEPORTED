@@ -473,13 +473,13 @@ function physicsStep(fixedDt) {
   let speed = state.ads ? CONFIG.moveSpeed * CONFIG.adsSpeedMult : CONFIG.moveSpeed;
   if (isSwimming)      speed *= 0.55;
   if (inCanal)         speed *= 1.5;
-  if (state.crouching) speed *= CONFIG.crouchSpeedMult;
+  if (state.crouching && !state.sliding) speed *= CONFIG.crouchSpeedMult;
 
   if (CONFIG.newPhysics) {
     // ═══════════════════════════════════════════════════
     // NEW PHYSICS — capsule sweep-and-slide (08b_physics.js)
     // ═══════════════════════════════════════════════════
-    physicsUpdate(fixedDt, smoothedMove, speed);
+    physicsUpdate(fixedDt, moveVec, speed);  // raw input — accel model does the smoothing
 
   } else {
     // ═══════════════════════════════════════════════════

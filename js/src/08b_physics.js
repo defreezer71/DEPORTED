@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════
 // PHYSICS — Capsule sweep-and-slide, fixed timestep
+// Velocity-based movement: ground accel/friction, air control, slide
 // Toggled by CONFIG.newPhysics in 01_config.js
 // ═══════════════════════════════════════════════════════════
 
@@ -8,13 +9,24 @@ const PHYS = {
   STEP_HEIGHT: 0.45,     // Max ledge auto-step (curbs, terrain lips)
   SKIN_WIDTH:  0.015,    // Stop just before surface to prevent tunneling
   MAX_ITER:    4,        // Max slide iterations per step (handles corners)
+  STEP_SMOOTH: 12.0,     // Camera-Y catch-up rate on stairs (higher = snappier, lower = floatier)
+
+  // ── Movement feel (Quake-family model) ──
+  GROUND_FRICTION:   9.0,   // Higher = stops faster. ~3 steps to stop
+  GROUND_ACCEL:      11.0,  // Higher = reaches max speed faster. ~4 steps to full
+  AIR_ACCEL:         1.4,   // Weak mid-air steering — momentum carries through jumps
+  SLIDE_BOOST:       1.35,  // Velocity multiplier on slide trigger
+  SLIDE_FRICTION:    0.22,  // Friction multiplier while sliding (low = long slide)
+  SLIDE_MIN_TRIGGER: 0.85,  // Must be moving at >= this fraction of moveSpeed to slide
+  SLIDE_COOLDOWN:    1.0,   // Seconds before another slide can trigger
 };
 
 let _physAccum = 0;     // Leftover time between fixed steps
+let _prevCrouch = false; // Edge-detect crouch press for slide trigger
 
 // Capsule state.
 //   pos = FEET position in world space (not eye/camera)
-//   vel = world velocity (XYZ)
+//   vel = world velocity (XYZ) — horizontal components now persistent
 //   grounded = true when standing on something
 const phys = {
   pos:      new THREE.Vector3(),
@@ -33,6 +45,10 @@ function physInit() {
   phys.vel.set(0, 0, 0);
   phys.grounded = true;
   _physAccum = 0;
+  _prevCrouch = false;
+  state.sliding = false;
+  state.slideCooldown = 0;
+  state.camFeetY = phys.pos.y;
 }
 
 // ── Sweep a 2D point (px,pz) moving by (dx,dz) against axis-aligned rect [x0,x1]x[z0,z1]
@@ -124,8 +140,10 @@ function _depenetrate(pos, radius, height) {
 
 // ── Horizontal sweep-and-slide ──
 // Moves pos.x/z by (deltaX, deltaZ), bouncing/sliding off colliders up to MAX_ITER times.
+// If `vel` is provided, the stored velocity is clipped against each wall normal hit —
+// this prevents pressure buildup against walls that would release as a lurch.
 // Returns the Y of any ledge we should step up onto (0 = no step needed).
-function _moveHorizontal(pos, deltaX, deltaZ, radius, height, stepHeight) {
+function _moveHorizontal(pos, deltaX, deltaZ, radius, height, stepHeight, vel) {
   let rx = deltaX, rz = deltaZ;
   let stepUpY = 0;
 
@@ -206,6 +224,15 @@ function _moveHorizontal(pos, deltaX, deltaZ, radius, height, stepHeight) {
     const dot = rx * hitNX + rz * hitNZ;
     rx -= dot * hitNX;
     rz -= dot * hitNZ;
+
+    // Clip stored velocity against the wall too — kills pressure buildup
+    if (vel) {
+      const vdot = vel.x * hitNX + vel.z * hitNZ;
+      if (vdot < 0) {
+        vel.x -= vdot * hitNX;
+        vel.z -= vdot * hitNZ;
+      }
+    }
   }
 
   return stepUpY;
@@ -221,12 +248,68 @@ function _physStep(fixedDt, inputDir, speed) {
     phys.vel.y -= CONFIG.gravity * fixedDt;
   }
 
-  // Horizontal movement
+  // ── Slide state machine ──
+  if (state.slideCooldown > 0) state.slideCooldown -= fixedDt;
+  const hSpeedNow = Math.sqrt(phys.vel.x * phys.vel.x + phys.vel.z * phys.vel.z);
+  if (!state.sliding) {
+    const crouchJustPressed = state.crouching && !_prevCrouch;
+    if (crouchJustPressed && phys.grounded && state.slideCooldown <= 0 &&
+        hSpeedNow >= CONFIG.moveSpeed * PHYS.SLIDE_MIN_TRIGGER) {
+      state.sliding = true;
+      phys.vel.x *= PHYS.SLIDE_BOOST;
+      phys.vel.z *= PHYS.SLIDE_BOOST;
+    }
+  } else {
+    const slideEnd = !state.crouching ||
+                     (phys.grounded && hSpeedNow < CONFIG.moveSpeed * CONFIG.crouchSpeedMult);
+    if (slideEnd) {
+      state.sliding = false;
+      state.slideCooldown = PHYS.SLIDE_COOLDOWN;
+    }
+  }
+  _prevCrouch = state.crouching;
+
+  // ── Horizontal velocity: friction then acceleration (Quake-family) ──
+  if (phys.grounded) {
+    const fric = PHYS.GROUND_FRICTION * (state.sliding ? PHYS.SLIDE_FRICTION : 1);
+    const hSpeed = Math.sqrt(phys.vel.x * phys.vel.x + phys.vel.z * phys.vel.z);
+    if (hSpeed > 1e-4) {
+      const drop  = hSpeed * fric * fixedDt;
+      const scale = Math.max(0, hSpeed - drop) / hSpeed;
+      phys.vel.x *= scale;
+      phys.vel.z *= scale;
+    } else {
+      phys.vel.x = 0;
+      phys.vel.z = 0;
+    }
+  }
+
+  const wishLen = Math.sqrt(inputDir.x * inputDir.x + inputDir.z * inputDir.z);
+  if (wishLen > 1e-6) {
+    const wdx = inputDir.x / wishLen;
+    const wdz = inputDir.z / wishLen;
+    const wishSpeed = speed * Math.min(1, wishLen);
+    // No steering during a grounded slide — the slide is a commitment
+    const accel = phys.grounded
+      ? (state.sliding ? 0 : PHYS.GROUND_ACCEL)
+      : PHYS.AIR_ACCEL;
+    if (accel > 0) {
+      const cur = phys.vel.x * wdx + phys.vel.z * wdz;
+      const add = wishSpeed - cur;
+      if (add > 0) {
+        const a = Math.min(accel * wishSpeed * fixedDt, add);
+        phys.vel.x += wdx * a;
+        phys.vel.z += wdz * a;
+      }
+    }
+  }
+
+  // Horizontal movement — displacement now comes from velocity, not input
   const stepUpY = _moveHorizontal(
     phys.pos,
-    inputDir.x * speed * fixedDt,
-    inputDir.z * speed * fixedDt,
-    radius, height, PHYS.STEP_HEIGHT
+    phys.vel.x * fixedDt,
+    phys.vel.z * fixedDt,
+    radius, height, PHYS.STEP_HEIGHT, phys.vel
   );
 
   // Vertical movement
@@ -326,13 +409,25 @@ function physicsUpdate(dt, inputDir, speed) {
     steps++;
   }
 
-  // Smooth camera height for crouch transition
+  // Smooth camera height for crouch transition — extra-fast drop while sliding
   const targetHeight = state.crouching ? CONFIG.crouchHeight : CONFIG.playerHeight;
-  const lerpRate = state.crouching ? 14 : 7;
+  const lerpRate = state.sliding ? 18 : (state.crouching ? 14 : 7);
   state.smoothCameraHeight += (targetHeight - state.smoothCameraHeight) * Math.min(1, dt * lerpRate);
 
-  // Sync camera to capsule (eye = feet + smooth height)
-  camera.position.set(phys.pos.x, phys.pos.y + state.smoothCameraHeight, phys.pos.z);
+  // Step smoothing — the physics feet position snaps up/down a full step in a single
+  // tick, which pops the camera on stairs. Lag a rendered feet-Y behind the true feet-Y
+  // so the camera glides. Airborne motion and anything bigger than a step (jumps, falls,
+  // teleports) are tracked exactly, so there's no input lag on real vertical movement.
+  if (state.camFeetY === undefined) state.camFeetY = phys.pos.y;
+  const feetDelta = phys.pos.y - state.camFeetY;
+  if (!phys.grounded || Math.abs(feetDelta) > PHYS.STEP_HEIGHT + 0.3) {
+    state.camFeetY = phys.pos.y;                                       // snap — real vertical motion
+  } else {
+    state.camFeetY += feetDelta * Math.min(1, dt * PHYS.STEP_SMOOTH);  // glide — step smoothing
+  }
+
+  // Sync camera to capsule (eye = smoothed feet + smooth crouch height)
+  camera.position.set(phys.pos.x, state.camFeetY + state.smoothCameraHeight, phys.pos.z);
 
   // Sync shared state so input.js / gameplay / HUD stay consistent
   state.isGrounded = phys.grounded;
