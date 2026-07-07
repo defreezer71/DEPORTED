@@ -321,13 +321,23 @@ wss.on('connection', ws => {
       };
       // Start 3-min fill timer when first player joins a waiting room
       if (room.phase === 'waiting' && !room.fillTimer && Object.keys(room.players).length === 1) {
-        room.fillEndsAt = Date.now() + 3 * 60 * 1000;
-        room.fillTimer = setTimeout(() => {
-          if (rooms[code] && rooms[code].phase === 'waiting') {
-            startRoomMatch(code);
-            console.log('[room ' + code + '] 3-min fill timer fired — auto-starting');
-          }
-        }, 3 * 60 * 1000);
+        const armFillTimer = () => {
+          room.fillEndsAt = Date.now() + 3 * 60 * 1000;
+          room.fillTimer = setTimeout(() => {
+            const r = rooms[code];
+            if (!r || r.phase !== 'waiting') return;
+            if (Object.keys(r.players).length >= 2) {
+              startRoomMatch(code);
+              console.log('[room ' + code + '] 3-min fill timer fired — auto-starting');
+            } else {
+              // Never start an unwinnable solo duel — re-arm and keep waiting.
+              console.log('[room ' + code + '] fill timer fired with 1 player — re-arming');
+              armFillTimer();
+              broadcastLobbyState(code);
+            }
+          }, 3 * 60 * 1000);
+        };
+        armFillTimer();
         console.log('[room ' + code + '] fill timer started');
       }
       ws.send(JSON.stringify({ type:'joined', id:myId, roomCode:code, phase:room.phase, isAuto,

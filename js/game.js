@@ -6980,6 +6980,9 @@ function connectToServer() {
   state.ws.onopen = () => {
     console.log('WS connected — waiting for player to click play');
     state.wsReady = true;
+    state.wsRetries = 0;
+    const statusEl = document.getElementById('lobbyStatus');
+    if (statusEl && state.inLobby) statusEl.textContent = 'Connected — joining lobby...';
     // In pvp mode, send join immediately on connect
     if (state.gameMode === 'pvp') sendJoin();
   };
@@ -7175,6 +7178,13 @@ function connectToServer() {
   state.ws.onclose = () => {
     console.log('WS disconnected — reconnecting in 3s');
     state.myId = null;
+    state.wsRetries = (state.wsRetries || 0) + 1;
+    const statusEl = document.getElementById('lobbyStatus');
+    if (statusEl && state.inLobby) {
+      statusEl.textContent = (state.wsRetries >= 2)
+        ? 'Waking up the server — this can take ~40s on first visit...'
+        : 'Connection lost — retrying...';
+    }
     setTimeout(connectToServer, 3000);
   };
 
@@ -7316,7 +7326,7 @@ function showDuelOver(msg) {
       'color:#111;border:none;border-radius:6px">PLAY AGAIN</button>';
   el.style.display = 'flex';
   const btn = document.getElementById('duelAgainBtn');
-  if (btn) btn.onclick = function() { location.reload(); };
+  if (btn) btn.onclick = function() { location.href = location.pathname + '?requeue=1'; };
 }
 
 // ── Send binary input packet to server ──
@@ -7363,3 +7373,16 @@ setInterval(() => {
 }, 2000);
 
 window.addEventListener('DOMContentLoaded', function() { setupChat(); });
+
+
+// -- Auto-requeue: PLAY AGAIN reloads with ?requeue=1 so the player lands
+// straight back in the PvP lobby instead of the main menu. Pointer lock may
+// be rejected (no user gesture after a reload) -- clicking the canvas re-locks
+// via the existing handler in 10_input.js.
+if (new URLSearchParams(location.search).has('requeue')) {
+  window.addEventListener('load', function() {
+    setTimeout(function() {
+      try { window.startPvPMatch(); } catch (e) { console.error('requeue failed:', e); }
+    }, 300);
+  });
+}
