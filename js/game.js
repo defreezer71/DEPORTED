@@ -5899,10 +5899,20 @@ function update() {
       rp.mesh.rotation.y += dy * Math.min(1, renderDt * 20);
     }
 
-    // Crouch — smoothly lower the whole group when opponent is crouching
-    const crouchTarget = rp.crouching ? -0.5 : 0;
-    rp.crouchY += (crouchTarget - rp.crouchY) * Math.min(1, renderDt * 10);
-    rp.mesh.position.y += rp.crouchY;
+    // Crouch — the transmitted Y is the opponent's eye height, which already
+    // drops when they crouch, so the group (and its hitboxes) needs NO extra
+    // lowering: the head hitbox rides the eye and the crouch anim lowers the
+    // body. We only track a smoothed eye height so the puppet's feet, computed
+    // below as eye − eyeHeight, stay planted on the ground instead of sinking.
+    // Use the crouch state AT RENDER TIME (from the bracketing snapshots), not
+    // the latest packet — the rendered eye Y is ~100ms behind (interp delay), so
+    // the latest flag would lead the body and pop the feet. Mirror the sender's
+    // asymmetric smoothing (08b_physics: rate 14 dropping into crouch, 7 rising)
+    // so eyeH tracks the transmitted eye and the feet stay welded to the floor.
+    const crouchNow = (alpha < 0.5 ? s0.crouch : s1.crouch) || false;
+    const eyeTarget = crouchNow ? CONFIG.crouchHeight : CONFIG.playerHeight;
+    if (rp.eyeH === undefined) rp.eyeH = eyeTarget;
+    rp.eyeH += (eyeTarget - rp.eyeH) * Math.min(1, renderDt * (crouchNow ? 14 : 7));
 
     // Animated character puppet (same rig/anims/gun fit as bots), driven by the
     // interpolated network state. The block mesh stays as hitbox + load fallback.
@@ -5925,9 +5935,10 @@ function update() {
         rp._speed = (rp._speed || 0) * 0.8 + sp * 0.2;
       }
       rp._lastPX = mp.x; rp._lastPZ = mp.z;
-      // Group origin is eye height; the rig is placed at the feet. Crouch dip is
-      // undone — the crouch animation lowers the body itself.
-      pu.pos.set(mp.x, mp.y - rp.crouchY - CONFIG.playerHeight, mp.z);
+      // Group origin is the opponent's eye; feet = eye − (smoothed) eye height,
+      // so they stay grounded whether standing or crouched (crouch lowers eye),
+      // and the crouch animation dips the torso/head from there.
+      pu.pos.set(mp.x, mp.y - rp.eyeH, mp.z);
       if (!rp.dead) pu.deadY = pu.pos.y;
       pu.alive = !rp.dead;
       // Hysteresis on the walk/idle switch so position jitter can't flicker it
@@ -5947,10 +5958,36 @@ function update() {
       // crouch hitbox is lower, and a standing visual over it would desync
       // what you see from what you can hit.
       const anim = !pu.alive ? 'death'
-        : rp.crouching ? (moving ? 'crouchWalk' : 'crouchIdle')
+        : crouchNow ? (moving ? 'crouchWalk' : 'crouchIdle')
+        : rp.reloading ? 'reload'
         : rp.shooting ? 'fire'
         : moving ? 'walk' : 'rifleIdle';
       _setBotAnim(pu, anim);
+      // Muzzle flash — attached to the puppet's gun mesh so it tracks the
+      // animated barrel. Created lazily once the gun exists; the light is kept
+      // permanently (intensity toggled) to avoid three.js shader recompiles.
+      if (pu.gunMesh && !pu._mf) {
+        pu._mf = new THREE.Sprite(new THREE.SpriteMaterial({ map: _getMuzzleTex(),
+          color: 0xffddaa, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+        pu._mf.position.set(0, 0, -0.69);   // just past the barrel tip (gun-local -z)
+        pu._mf.visible = false;
+        pu.gunMesh.add(pu._mf);
+        pu._mfl = new THREE.PointLight(0xffaa33, 0, 8);
+        pu._mfl.position.set(0, 0, -0.69);
+        pu.gunMesh.add(pu._mfl);
+      }
+      if (pu._mf) {
+        const on = !!rp.shooting && pu.alive && Math.random() < 0.8;
+        pu._mf.visible = on;
+        if (on) {
+          // gunMesh is scaled by charScale each frame; divide it out for a
+          // consistent world size, and spin the sprite for a per-frame flicker.
+          const s = (0.34 + Math.random() * 0.22) / (pu.gunMesh.scale.x || 1);
+          pu._mf.scale.set(s, s, 1);
+          pu._mf.material.rotation = Math.random() * Math.PI;
+        }
+        pu._mfl.intensity = on ? 3.2 : 0;
+      }
       updateCharacterVisual(pu, renderDt);
     }
   }
@@ -6777,6 +6814,34 @@ function createRemotePlayerMesh(id) {
   scene.add(group);
   return group;
 }
+
+// Shared starburst texture for muzzle flashes (built once): a white-hot core
+// over a few radial spikes, so it reads as a flash rather than a soft ball.
+let _muzzleTexCache = null;
+function _getMuzzleTex() {
+  if (_muzzleTexCache) return _muzzleTexCache;
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const ctx = c.getContext('2d'); const cx = S / 2, cy = S / 2;
+  ctx.globalCompositeOperation = 'lighter';
+  // Radial spikes (alternating long/short) under the core glow
+  ctx.strokeStyle = 'rgba(255,210,120,0.85)';
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const len = (i % 2 ? 0.28 : 0.46) * S;
+    ctx.lineWidth = i % 2 ? 2 : 4;
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len); ctx.stroke();
+  }
+  // Hot core glow on top
+  const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, S * 0.34);
+  g.addColorStop(0,    'rgba(255,255,255,1)');
+  g.addColorStop(0.18, 'rgba(255,245,200,0.95)');
+  g.addColorStop(0.45, 'rgba(255,180,60,0.7)');
+  g.addColorStop(1,    'rgba(255,120,0,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, S * 0.34, 0, Math.PI * 2); ctx.fill();
+  _muzzleTexCache = new THREE.CanvasTexture(c);
+  return _muzzleTexCache;
+}
 function removeRemotePlayer(id) {
   const rp = state.remotePlayers[id];
   if (!rp) return;
@@ -6807,6 +6872,7 @@ function updateRemotePlayers(playerList, serverT) {
     rp.crouching = p.crouch || false;
     rp.pistol = p.pistol || false;
     rp.shooting = p.shooting || false;
+    rp.reloading = p.reloading || false;
     rp.mesh.visible = !p.dead;
 
     rp.snapshots.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, crouch: p.crouch });
@@ -6963,14 +7029,17 @@ function unpackWorld(ab) {
     const x     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
     const y     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
     const z     = dv.getInt16(off, true) * _UNPACK_SCALE; off += 2;
-    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2), pistol: !!(flags & 4), shooting: !!(flags & 8) });
+    players.push({ id, hp, armor, yaw, x, y, z, dead: !!(flags & 1), crouch: !!(flags & 2), pistol: !!(flags & 4), shooting: !!(flags & 8), reloading: !!(flags & 16) });
   }
   return players;
 }
 
 function connectToServer() {
   // Local dev (page served from localhost) talks to the local server on 8081
-  const wsUrl = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  // Local dev: localhost AND private LAN IPs (a second test machine loading
+  // the page via 192.168.x.x must hit the same local server, not production).
+  const _isLocal = /^(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/.test(location.hostname);
+  const wsUrl = _isLocal
     ? 'ws://' + location.hostname + ':8081'
     : 'wss://deported.onrender.com';
   console.log('Connecting to ' + wsUrl);
@@ -7234,24 +7303,28 @@ function updateDuelHUD() {
   el.style.display = 'block';
 }
 
-function showRespawnOverlay(seconds) {
+function showRoundOverlay(seconds, won) {
   const el = _duelEl('respawnOverlay',
     'position:fixed;top:0;left:0;width:100%;height:100%;z-index:800;' +
     'display:flex;flex-direction:column;align-items:center;justify-content:center;' +
-    'background:rgba(70,0,0,0.45);font-family:monospace;pointer-events:none;');
+    'font-family:monospace;pointer-events:none;');
+  el.style.background = won ? 'rgba(0,40,0,0.35)' : 'rgba(70,0,0,0.45)';
   el.innerHTML =
-    '<div style="color:#ff5a5a;font-size:52px;font-weight:900;letter-spacing:6px;text-shadow:0 0 30px #900">DOWNED</div>' +
-    '<div id="respawnCount" style="color:#fff;font-size:22px;margin-top:16px">Respawning in ' + seconds + '…</div>';
+    '<div style="color:' + (won ? '#7CFC00' : '#ff5a5a') + ';font-size:52px;font-weight:900;' +
+      'letter-spacing:6px;text-shadow:0 0 30px ' + (won ? '#063' : '#900') + '">' +
+      (won ? 'ROUND WON' : 'ROUND LOST') + '</div>' +
+    '<div id="respawnCount" style="color:#fff;font-size:22px;margin-top:16px">Next round in ' + seconds + '…</div>';
   el.style.display = 'flex';
   clearInterval(state._respawnInterval);
   let remain = seconds;
   state._respawnInterval = setInterval(function() {
     remain -= 1;
     const c = document.getElementById('respawnCount');
-    if (c) c.textContent = remain > 0 ? ('Respawning in ' + remain + '…') : 'Respawning…';
+    if (c) c.textContent = remain > 0 ? ('Next round in ' + remain + '…') : 'FIGHT!';
     if (remain <= 0) clearInterval(state._respawnInterval);
   }, 1000);
 }
+function showRespawnOverlay(seconds) { showRoundOverlay(seconds, false); }
 
 function hideRespawnOverlay() {
   clearInterval(state._respawnInterval);
@@ -7305,8 +7378,15 @@ function applyKillEvent(evt) {
   if (evt.shooterKills !== undefined) state.duelScore[evt.shooter] = evt.shooterKills;
   if (evt.victim !== undefined && evt.victimKills !== undefined) state.duelScore[evt.victim] = evt.victimKills;
   updateDuelHUD();
-  if (evt.shooter === state.myId) addKillFeed('✓ You eliminated your opponent', true);
-  else if (evt.victim === state.myId) addKillFeed('✗ You were eliminated', false);
+  if (evt.shooter === state.myId) {
+    addKillFeed('✓ Round won', true);
+    // Round reset teleports BOTH players — show the winner the same countdown
+    // (skip if this kill just won the whole duel; showDuelOver handles that).
+    if ((state.duelScore[evt.shooter] || 0) < (state.duelWinKills || 2)) {
+      showRoundOverlay(Math.ceil((state.duelRespawnMs || 3000) / 1000), true);
+    }
+  }
+  else if (evt.victim === state.myId) addKillFeed('✗ Round lost', false);
 }
 
 // A 'respawn' event: for us, reset+teleport; the opponent's visibility is driven
@@ -7364,7 +7444,8 @@ function sendInputToServer() {
     (state.moveRight   ? 8  : 0) |
     (state.crouching   ? 16 : 0) |
     (state.currentWeapon === 'pistol' ? 32 : 0) |
-    (performance.now() < (state.shootingUntil || 0) ? 64 : 0);
+    (performance.now() < (state.shootingUntil || 0) ? 64 : 0) |
+    (state.reloading ? 128 : 0);
   _inputDV.setUint8(23, keys);
   state.ws.send(_inputBuf);
 }
@@ -7393,6 +7474,9 @@ window.addEventListener('DOMContentLoaded', function() { setupChat(); });
 // be rejected (no user gesture after a reload) -- clicking the canvas re-locks
 // via the existing handler in 10_input.js.
 if (new URLSearchParams(location.search).has('requeue')) {
+  // Consume the flag immediately — strip it from the address bar so a manual
+  // refresh returns to the main menu instead of re-triggering the auto-join.
+  history.replaceState(null, '', location.pathname);
   window.addEventListener('load', function() {
     setTimeout(function() {
       try { window.startPvPMatch(); } catch (e) { console.error('requeue failed:', e); }

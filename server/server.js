@@ -121,7 +121,7 @@ function packWorldSnapshot(room) {
     const id = (p.id || '').slice(0, 6);
     for (let i = 0; i < 6; i++) buf[off + i] = i < id.length ? id.charCodeAt(i) : 0;
     off += 6;
-    buf[off++] = (p.dead ? 1 : 0) | (p.crouch ? 2 : 0) | (p.pistol ? 4 : 0) | (p.shooting ? 8 : 0);
+    buf[off++] = (p.dead ? 1 : 0) | (p.crouch ? 2 : 0) | (p.pistol ? 4 : 0) | (p.shooting ? 8 : 0) | (p.reloading ? 16 : 0);
     buf[off++] = Math.max(0, Math.min(255, p.hp | 0));
     buf[off++] = Math.max(0, Math.min(255, (p.armor || 0) | 0));
     const yawNorm = ((p.yaw || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
@@ -230,26 +230,29 @@ function handleKill(room, shooter, victim, headshot) {
   console.log('[room ' + room.code + '] ' + shooter.id + ' killed ' + victim.id +
     ' (' + shooter.kills + '/' + DUEL_WIN_KILLS + ')');
   if (shooter.kills >= DUEL_WIN_KILLS) endDuel(room, shooter, victim);
-  else scheduleRespawn(room, victim);
+  else scheduleRoundReset(room);
 }
 
-function scheduleRespawn(room, victim) {
+function scheduleRoundReset(room) {
+  // Round-based flow: every kill ends the round. After the countdown BOTH
+  // players are reset to their home ends — no mid-round respawns, so there is
+  // nothing to spawn-camp.
   const code = room.code;
-  victim.respawnAt = Date.now() + DUEL_RESPAWN_MS;
+  for (const p of Object.values(room.players)) p.respawnAt = Date.now() + DUEL_RESPAWN_MS;
   setTimeout(() => {
     const r = rooms[code];
     if (!r || r.phase !== 'playing') return;   // room gone or match ended
-    const p = r.players[victim.id];
-    if (!p) return;                             // player left
-    const sp = p.spawn || DUEL_SPAWNS[p.slot || 0];
-    const a = Math.random() * Math.PI * 2, rr = Math.random() * 1.0;
-    p.x = sp.x + Math.cos(a) * rr; p.y = 0; p.z = sp.z + Math.sin(a) * rr;
-    p.hp = 100; p.armor = 100; p.dead = false; p.respawnAt = 0;
-    // Reset the movement-validation baseline + open a grace window so the
-    // client's respawn teleport back to spawn isn't flagged as speed-hacking.
-    p.lastMoveAt = svNow(); p.tpStrikes = 0; p.hist = [];
-    p.moveGraceUntil = svNow() + 1500;
-    r.events.push({ type: 'respawn', id: p.id, x: p.x, z: p.z, hp: p.hp, armor: p.armor });
+    for (const p of Object.values(r.players)) {
+      const sp = p.spawn || DUEL_SPAWNS[p.slot || 0];
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * 1.0;
+      p.x = sp.x + Math.cos(a) * rr; p.y = 0; p.z = sp.z + Math.sin(a) * rr;
+      p.hp = 100; p.armor = 100; p.dead = false; p.respawnAt = 0;
+      // Reset the movement-validation baseline + open a grace window so the
+      // round-start teleport back to spawn isn't flagged as speed-hacking.
+      p.lastMoveAt = svNow(); p.tpStrikes = 0; p.hist = [];
+      p.moveGraceUntil = svNow() + 1500;
+      r.events.push({ type: 'respawn', id: p.id, x: p.x, z: p.z, hp: p.hp, armor: p.armor });
+    }
   }, DUEL_RESPAWN_MS);
 }
 
@@ -281,6 +284,7 @@ wss.on('connection', ws => {
       player.crouch = !!(keys & 16);
       player.pistol = !!(keys & 32);
       player.shooting = !!(keys & 64);
+      player.reloading = !!(keys & 128);
       return;
     }
 
@@ -317,7 +321,7 @@ wss.on('connection', ws => {
         slot, spawn,
         x: spawn.x+Math.cos(a)*r, y: 0, z: spawn.z+Math.sin(a)*r,
         hp: 100, armor: DUEL ? 100 : 0, kills: 0, dead: false,
-        pistol: false, shooting: false, lastSeen: Date.now()
+        pistol: false, shooting: false, reloading: false, lastSeen: Date.now()
       };
       // Start 3-min fill timer when first player joins a waiting room
       if (room.phase === 'waiting' && !room.fillTimer && Object.keys(room.players).length === 1) {
