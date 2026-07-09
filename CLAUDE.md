@@ -24,7 +24,7 @@ The server defaults to port 8081 locally; on Render it uses `PORT=10000`.
 
 ## Architecture
 
-This is a browser-based Battle Royale FPS built on Three.js with a Node.js WebSocket server for multiplayer.
+This is a browser-based competitive FPS built on Three.js with a Node.js WebSocket server for multiplayer. The shipping build is a 1v1 arena duel (Roman coliseum map, first-to-2 kills, 3s respawn) — see the DUEL flag in server/server.js. The legacy island Battle Royale mode is retained behind that flag and in the git history but is not the current product.
 
 ### Client (`js/src/` — concatenated into `js/game.js`)
 
@@ -63,6 +63,6 @@ Client netcode (12_main.js): snapshots are stamped with server time; the client 
 
 WebSocket message types: `join`, `move`/`input`, `ready`, `shoot`, `chat` → `joined`, `lobbyState`, `startMatch`, binary world snapshot, `events`, `chat`.
 
-### Note on `src/` vs `js/src/`
+### Note on source location
 
-The repo root has both a `src/` and a `js/src/` directory with identically-named files. **`build.sh` reads from `js/src/`** — that is the authoritative source. The root `src/` appears to be an older/duplicate copy.
+**`build.sh` reads from `js/src/`** — that is the only source directory. (A stale duplicate `src/` at the repo root was deleted in July 2026; if it reappears, it is wrong.)
