@@ -1564,9 +1564,9 @@ window.startPvPMatch = function() {
   state.phase = "lobby";
   state.inLobby = true;
   camera.position.set(
-    CONFIG.spawnPos.x + (Math.random() - 0.5) * 8,
+    CONFIG.spawnPos.x + (Math.random() - 0.5) * 1.5,
     CONFIG.playerHeight,
-    CONFIG.spawnPos.z + (Math.random() - 0.5) * 8
+    CONFIG.spawnPos.z + (Math.random() - 0.5) * 1.5
   );
   // Reseed the capsule from the spawn camera — physics drives the camera, so
   // without this the capsule keeps its old position and the spawn is ignored.
@@ -2174,7 +2174,20 @@ function connectToServer() {
         state.fillEndsAt = msg.fillEndsAt || null;
         // Duel: remember the end (A/B) the server assigned us — the match-start
         // and respawn teleports seed the camera here so we don't desync.
-        if (msg.spawn) state.mySpawn = msg.spawn;
+        if (msg.spawn) {
+          state.mySpawn = msg.spawn;
+          // Warm up at our own end — without this both clients idle at spawn A
+          // and players stack in one tunnel until match start.
+          camera.position.set(
+            msg.spawn.x + (Math.random() - 0.5) * 1.5,
+            CONFIG.playerHeight,
+            msg.spawn.z + (Math.random() - 0.5) * 1.5
+          );
+          // facing is the +z/−z look direction into the arena (CONFIG.arena.spawns).
+          // Camera forward after yaw θ is (−sinθ,0,−cosθ): look +z ⇒ yaw=π, look −z ⇒ yaw=0.
+          if (typeof msg.spawn.facing === 'number') { state.yaw = (msg.spawn.facing > 0) ? Math.PI : 0; state.pitch = 0; }
+          if (CONFIG.newPhysics) physInit();
+        }
         if (msg.winKills)  state.duelWinKills  = msg.winKills;
         if (msg.respawnMs) state.duelRespawnMs = msg.respawnMs;
         showRoomCode(msg.roomCode);
