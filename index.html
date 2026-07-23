@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Battle Royale FPS — Phase 3: Full Game</title>
+<title>DEPORTED — 1v1 Arena Duel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
@@ -91,7 +91,7 @@
   .menu-btn-bot:hover { background: rgba(80,200,80,0.10) !important; border-color: rgba(80,200,80,0.7) !important; }
   .menu-btn-pvp { border-color: rgba(226,200,126,0.5); }
   .menu-btn-pvp:hover { background: rgba(226,200,126,0.09) !important; border-color: rgba(226,200,126,0.75) !important; }
-  .menu-btn-btc { cursor: default; pointer-events: none; }
+  .menu-btn-btc { cursor: pointer; }
   .menu-btn-sub { font-size: 11px; opacity: 0.6; font-weight: 400;
     text-transform: none; letter-spacing: 0; margin-left: 4px; }
 
@@ -599,7 +599,7 @@
         ⚔️ &nbsp; REAL PLAYERS
         <span class="menu-btn-sub">— Up to 21 · 3 Min Lobby</span>
       </button>
-      <button class="menu-btn menu-btn-btc">
+      <button class="menu-btn menu-btn-btc" onclick="event.stopPropagation();document.getElementById('mm-modal').style.setProperty('display','flex','important')">
         ₿ &nbsp; MONEY MATCH
         <span class="menu-btn-sub">— Coming Soon</span>
       </button>
@@ -767,5 +767,33 @@
   </div>
 </div>
 
+
+<!-- MONEY MATCH TEASER MODAL -->
+<div id="mm-modal" onclick="this.style.setProperty('display','none','important')"
+  style="display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.75);
+         align-items:center;justify-content:center;cursor:pointer;
+         font-family:'EB Garamond','Bembo',Georgia,serif">
+  <div onclick="event.stopPropagation()"
+    style="background:rgba(10,10,10,0.95);border:1px solid rgba(226,200,126,0.4);
+           padding:36px 48px 32px;max-width:560px;width:88%;cursor:default;
+           box-shadow:0 0 80px rgba(226,200,126,0.15);text-align:center">
+    <div style="font-size:44px;color:#e2c87e;letter-spacing:8px;font-weight:700;
+                text-shadow:0 0 30px rgba(226,200,126,0.5)">₿ MONEY MATCH</div>
+    <div style="color:#aaa;font-size:14px;letter-spacing:4px;text-transform:uppercase;
+                margin:6px 0 24px">1v1 duels &middot; Real stakes &middot; Winner takes the pot</div>
+    <div style="text-align:left;color:#ddd;font-size:16px;line-height:1.9;margin:0 auto 22px;max-width:440px">
+      <div>&#9876;&#65039;&nbsp;&nbsp;Skill-based 1v1 arena duels &mdash; no luck, no loot RNG</div>
+      <div>&#128737;&#65039;&nbsp;&nbsp;Entry earned through verified clean matches in Real Players</div>
+      <div>&#9889;&nbsp;&nbsp;Instant Bitcoin Lightning payouts &mdash; no account, no ID</div>
+      <div>&#128683;&nbsp;&nbsp;Confirmed cheating forfeits everything. Your record is your reputation.</div>
+    </div>
+    <div style="color:#e2c87e;font-size:15px;font-style:italic;margin-bottom:26px">
+      Every Real Players match you play now builds the record that gets you in.</div>
+    <button onclick="document.getElementById('mm-modal').style.setProperty('display','none','important')"
+      style="background:transparent;border:1px solid rgba(226,200,126,0.5);color:#e2c87e;
+             padding:9px 34px;font-size:15px;letter-spacing:3px;cursor:pointer;
+             font-family:inherit;text-transform:uppercase">Close</button>
+  </div>
+</div>
 </body>
 </html>
