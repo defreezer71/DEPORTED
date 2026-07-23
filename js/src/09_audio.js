@@ -27,6 +27,24 @@ function getMaster() {
   return masterCompressor;
 }
 
+// Shared short delay+feedback send, used only by bird() to give chirps a
+// sense of open-air distance instead of landing dry/synthetic on the ear.
+let _birdAir = null;
+function getBirdAir() {
+  const ctx = ensureAudio();
+  if (!_birdAir) {
+    const delay = ctx.createDelay(0.5);
+    delay.delayTime.value = 0.085;
+    const feedback = ctx.createGain(); feedback.gain.value = 0.22;
+    const wetGain = ctx.createGain(); wetGain.gain.value = 0.55;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3200;
+    delay.connect(feedback).connect(delay); // feedback loop
+    delay.connect(lp).connect(wetGain).connect(getMaster());
+    _birdAir = delay;
+  }
+  return _birdAir;
+}
+
 function playNoise(duration, volume, filterFreq, filterType) {
   const ctx = ensureAudio();
   const bufferSize = ctx.sampleRate * duration;
@@ -188,6 +206,8 @@ const SFX = {
     // Layer 4: Slide cycle
     setTimeout(() => playNoise(0.015, 0.08, 3200, 'highpass'), 55);
   },
+  // Reverted to the original timeline — the rescaled-to-reloadTime version
+  // (spread events across the full 1500/2200ms) tested worse than this.
   reload() {
     // Mag release click
     setTimeout(() => {
@@ -241,12 +261,42 @@ const SFX = {
   empty_click() {
     playTone(400, 0.03, 0.08, 'square');
   },
+  // Short synthesized vocal grunt on taking damage — a saw-tooth pitch-drop
+  // through a vocal-range bandpass (formant-ish), same procedural-only
+  // approach as the rest of this file (no audio assets).
+  hit_grunt() {
+    const ctx = ensureAudio();
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator(); osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150 + Math.random() * 25, t0);
+    osc.frequency.exponentialRampToValueAtTime(65, t0 + 0.15);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, t0);
+    g.gain.linearRampToValueAtTime(0.24, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.20);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 500; bp.Q.value = 1.1;
+    osc.connect(bp).connect(g).connect(getMaster());
+    osc.start(t0); osc.stop(t0 + 0.20);
+    playNoise(0.09, 0.09, 850, 'bandpass');
+  },
   footstep() {
-    // Varied footstep — alternates between two tones for left/right feel
+    // Was near-inaudible — pure noise bursts with no low-end weight got lost
+    // under gunfire/ambience. Added a real body-boom oscillator layer (like
+    // kill_chaching's thump) plus ~1.5x on the noise volumes.
+    const ctx = ensureAudio();
+    const t0 = ctx.currentTime;
+    const thump = ctx.createOscillator(); thump.type = 'sine';
+    thump.frequency.setValueAtTime(100 + Math.random() * 20, t0);
+    thump.frequency.exponentialRampToValueAtTime(46, t0 + 0.05);
+    const thumpG = ctx.createGain();
+    thumpG.gain.setValueAtTime(0.255, t0); // -15%
+    thumpG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
+    thump.connect(thumpG).connect(getMaster());
+    thump.start(t0); thump.stop(t0 + 0.09);
     const crush = 120 + Math.random() * 80;
-    playNoise(0.06, 0.22, crush, 'lowpass');
-    playNoise(0.03, 0.12, 180, 'lowpass');
-    setTimeout(() => playNoise(0.04, 0.08, 400, 'bandpass'), 20);
+    playNoise(0.07, 0.27, crush, 'lowpass');   // -15%
+    playNoise(0.035, 0.145, 180, 'lowpass');   // -15%
+    setTimeout(() => playNoise(0.045, 0.094, 400, 'bandpass'), 20); // -15%
   },
   water_damage() {
     playNoise(0.15, 0.04, 800, 'lowpass');
@@ -278,7 +328,14 @@ const SFX = {
   },
   bird() {
     const ctx = ensureAudio();
-    const species = Math.floor(Math.random() * 4);
+    // Weighted toward the two pleasant species (warbler/dove); the trill and
+    // long-whistle were the harshest/most piercing of the four and are now
+    // rarer as well as individually softened below.
+    const roll = Math.random();
+    const species = roll < 0.38 ? 0 : roll < 0.68 ? 2 : roll < 0.86 ? 1 : 3;
+    // Shared "open air" send — a short delay+feedback bus so bird calls read
+    // as distant/outdoor instead of dry synth tones landing right on the ear.
+    const air = getBirdAir();
     if (species === 0) {
       // Melodic tropical warbler — smooth FM chirps with natural envelope
       const base = 1800 + Math.random() * 600;
@@ -299,26 +356,30 @@ const SFX = {
           g.gain.linearRampToValueAtTime(0.032, t0 + 0.06);
           g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.11);
           osc.connect(g).connect(getMaster());
+          g.connect(air);
           osc.start(t0); osc.stop(t0 + 0.12);
         }, t);
       }
     } else if (species === 1) {
-      // Rapid staccato finch trill — natural rhythmic burst
-      const base = 2600 + Math.random() * 500;
+      // Rapid staccato finch trill — was the most piercing species (base up to
+      // 3100Hz, no filtering); lowered range + added a lowpass to take the edge off.
+      const base = 2100 + Math.random() * 400;
       const chirps = 6 + Math.floor(Math.random() * 5);
       for (let i = 0; i < chirps; i++) {
         setTimeout(() => {
           const ctx2 = ensureAudio();
           const t0 = ctx2.currentTime;
           const osc = ctx2.createOscillator(); osc.type = 'sine';
-          const f = base + (Math.random() - 0.5) * 300;
+          const f = base + (Math.random() - 0.5) * 250;
           osc.frequency.setValueAtTime(f, t0);
-          osc.frequency.linearRampToValueAtTime(f * 1.12, t0 + 0.025);
+          osc.frequency.linearRampToValueAtTime(f * 1.10, t0 + 0.025);
           const g = ctx2.createGain();
           g.gain.setValueAtTime(0, t0);
-          g.gain.linearRampToValueAtTime(0.038, t0 + 0.008);
+          g.gain.linearRampToValueAtTime(0.030, t0 + 0.008);
           g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.055);
-          osc.connect(g).connect(getMaster());
+          const lp = ctx2.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3400;
+          osc.connect(lp).connect(g).connect(getMaster());
+          g.connect(air);
           osc.start(t0); osc.stop(t0 + 0.06);
         }, i * 75 + Math.random() * 20);
       }
@@ -341,24 +402,29 @@ const SFX = {
           g.gain.setValueAtTime(0.038, t0 + 0.18);
           g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.32);
           osc.connect(g).connect(getMaster());
+          g.connect(air);
           osc.start(t0); osc.stop(t0 + 0.33);
         }, i * 400 + Math.random() * 60);
       }
     } else {
-      // Long descending whistle — like a jungle oriole
+      // Long descending whistle — was the other piercing species (started at
+      // 2600Hz, unfiltered); lowered the start pitch and added a lowpass so
+      // it reads as a mellow oriole call instead of a screech.
       const ctx2 = ensureAudio();
       const t0 = ctx2.currentTime;
       const osc = ctx2.createOscillator(); osc.type = 'sine';
-      const startF = 2200 + Math.random() * 400;
+      const startF = 1850 + Math.random() * 350;
       osc.frequency.setValueAtTime(startF, t0);
       osc.frequency.linearRampToValueAtTime(startF * 0.72, t0 + 0.35);
       osc.frequency.linearRampToValueAtTime(startF * 0.58, t0 + 0.6);
       const g = ctx2.createGain();
       g.gain.setValueAtTime(0, t0);
-      g.gain.linearRampToValueAtTime(0.048, t0 + 0.03);
-      g.gain.setValueAtTime(0.04, t0 + 0.3);
+      g.gain.linearRampToValueAtTime(0.040, t0 + 0.03);
+      g.gain.setValueAtTime(0.033, t0 + 0.3);
       g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.65);
-      osc.connect(g).connect(getMaster());
+      const lp = ctx2.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3000;
+      osc.connect(lp).connect(g).connect(getMaster());
+      g.connect(air);
       osc.start(t0); osc.stop(t0 + 0.66);
     }
   },

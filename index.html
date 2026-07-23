@@ -122,6 +122,22 @@
   #crosshair.weapon-pistol .ch-pistol { display: inline; }
 
 
+  #dmg-numbers { position: fixed; inset: 0; pointer-events: none; z-index: 55; }
+  .dmg-num {
+    position: absolute; opacity: 0; font-weight: 700;
+    font-family: 'EB Garamond', 'Bembo', Georgia, serif;
+    text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,0.6);
+    will-change: transform, opacity;
+  }
+  .dmg-num.body { color: #ffe9b0; font-size: 20px; }
+  .dmg-num.head { color: #ff5533; font-size: 27px; }
+  .dmg-num.pop  { animation: dmgfloat 0.65s ease-out forwards; }
+  @keyframes dmgfloat {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+    14%  { opacity: 1; transform: translate(-50%, -50%) translateY(-10px) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -50%) translateY(-52px) scale(1); }
+  }
+
   #hitmarker {
     position: fixed; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
@@ -642,6 +658,7 @@
   <div class="arm tl"></div><div class="arm tr"></div>
   <div class="arm bl"></div><div class="arm br"></div>
 </div>
+<div id="dmg-numbers"></div>
 <div id="muzzle-flash"></div>
 <div id="ads-vignette"></div>
 <div id="reload-msg">Reloading...</div>

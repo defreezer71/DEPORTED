@@ -24,7 +24,7 @@ const CONFIG = {
   prisonSize: 23,           // 15% larger
   prisonWallHeight: 10,
 
-  moveSpeed: 10.17,         // −15% from 11.97 (player-tuned)
+  moveSpeed: 8.64,          // −15% from 10.17 (player-tuned, second pass)
   adsSpeedMult: 0.65,
   strafeSpeedMult: 0.80,    // Lateral (A/D) input scaled to 80% of forward speed
   jumpForce: 9,
@@ -59,16 +59,16 @@ const CONFIG = {
 
   weapons: {
     m4: {
-      name: 'M4', magSize: 30, fireRate: 100,
+      name: 'M4', magSize: 30, fireRate: 130, auto: true,
       bodyDmg: 15, headDmg: 150,
-      recoilHip: 0.025, recoilAds: 0.012,
+      recoilHip: 0.020, recoilAds: 0.010,
       reloadTime: 2200, spread: 0.015, adsSpread: 0.0,
       range: 500,
     },
     pistol: {
       name: '1911', magSize: 15, fireRate: 180,
       bodyDmg: 15, headDmg: 150,
-      recoilHip: 0.035, recoilAds: 0.018,
+      recoilHip: 0.028, recoilAds: 0.014,
       reloadTime: 1500, spread: 0.025, adsSpread: 0.0,
       range: 400,
     }
@@ -190,7 +190,7 @@ const state = {
   ammo: { m4: 0, pistol: 0 },
   reserveAmmo: { m4: 0, pistol: 0 },
   hp: 100, armor: 0,
-  canFire: true, reloading: false, reloadPhase: null, switching: false, switchPhase: null,
+  canFire: true, firing: false, nextFireAt: 0, reloading: false, reloadPhase: null, switching: false, switchPhase: null,
   shootingUntil: 0,   // performance.now() deadline — keeps the network "shooting" flag up briefly per shot
 
   nearbyLoot: null,
@@ -3360,7 +3360,10 @@ function createWeaponModel(type) {
     add(Cy(0.002,0.004,0.018,4), metalShine, 0.15, 0.031,-0.210+pOff);  // tapered post
     add(B(0.064,0.052,0.072), glove,      0.15,-0.064, 0.002+pOff);
     add(B(0.014,0.048,0.068), gloveLight, 0.130,-0.062, 0.000+pOff);
-    add(B(0.052,0.044,0.148), skin,       0.130,-0.064, 0.085+pOff, 0,-0.08,0);
+    // Forearm — extended toward the camera from the original 0.148-long block
+    // (which left a visible gap once ADS pulls the pistol close to camera);
+    // far edge stays anchored at the hand, only the near edge reaches further.
+    add(B(0.058,0.050,0.22), skin,       0.130,-0.065, 0.12+pOff, 0,-0.08,0);
   }
 
   const wp = type === 'm4' ? {x:0.25,y:-0.22,z:-0.38} : {x:0.2,y:-0.2,z:-0.3};
@@ -3432,6 +3435,81 @@ function spawnImpact(pos, normal) {
     p.userData.life = 0.25 + Math.random() * 0.3;
     p.visible = true;
   }
+}
+
+// ── Bullet tracer pool ──
+// Same zero-allocation philosophy as the impact pool: one InstancedMesh (a
+// single draw call for every live tracer) + a fixed slot ring. A tracer is a
+// short bright streak racing from muzzle to impact — purely the visual read of
+// the shot line (Krunker-style); hitscan damage stays instant.
+const _TRACER_POOL = 24;
+const _TRACER_LEN = 7;       // streak length (world units)
+const _TRACER_SPEED = 360;   // visual travel speed (units/s)
+const _tracerGeo = new THREE.BoxGeometry(0.0245, 0.0245, 1); // unit-z, scaled to len per instance — -30% from prior pass
+const _tracerMat = new THREE.MeshBasicMaterial({
+  color: 0xffd9a0, blending: THREE.AdditiveBlending, transparent: true,
+  opacity: 0.294, depthWrite: false, // -30% from prior pass
+});
+const tracerMesh = new THREE.InstancedMesh(_tracerGeo, _tracerMat, _TRACER_POOL);
+tracerMesh.frustumCulled = false; // instances span the arena; stale instanced bounds would cull them
+scene.add(tracerMesh);
+const _tracers = [];
+for (let i = 0; i < _TRACER_POOL; i++) {
+  _tracers.push({ active: false, from: new THREE.Vector3(), dir: new THREE.Vector3(), dist: 0, traveled: 0 });
+}
+let _tracerHead = 0, _tracerLive = 0;
+const _trTmp = new THREE.Object3D();                    // matrix scratch — no per-frame allocation
+const _trZero = new THREE.Matrix4().makeScale(0, 0, 0); // hides an inactive slot
+const _trVec = new THREE.Vector3();
+for (let i = 0; i < _TRACER_POOL; i++) tracerMesh.setMatrixAt(i, _trZero); // all hidden at boot
+
+function spawnTracer(from, to) {
+  _trVec.copy(to).sub(from);
+  const d = _trVec.length();
+  if (d < 2) return; // point-blank — no visible line to draw (checked BEFORE touching a slot)
+  const t = _tracers[_tracerHead];
+  _tracerHead = (_tracerHead + 1) % _TRACER_POOL;
+  t.from.copy(from);
+  t.dir.copy(_trVec).divideScalar(d);
+  t.dist = d;
+  t.traveled = 0;
+  if (!t.active) _tracerLive++;
+  t.active = true;
+}
+
+// Remote shots know only origin + direction — clamp the streak against static
+// world geometry so it doesn't sail through cover. One raycast per remote shot
+// (≤10/s), negligible.
+const _trRay = new THREE.Raycaster();
+function spawnTracerRay(from, dir, maxDist) {
+  _trRay.set(from, dir);
+  _trRay.far = maxDist;
+  const hits = _trRay.intersectObjects(targets, false);
+  _trVec.copy(dir).multiplyScalar(hits.length > 0 ? hits[0].distance : maxDist).add(from);
+  spawnTracer(from, _trVec);
+}
+
+function updateTracers(dt) {
+  if (_tracerLive === 0) return; // nothing in flight — skip the matrix upload
+  for (let i = 0; i < _TRACER_POOL; i++) {
+    const t = _tracers[i];
+    if (!t.active) { tracerMesh.setMatrixAt(i, _trZero); continue; }
+    t.traveled += _TRACER_SPEED * dt;
+    // Done once the TAIL (traveled − LEN, unclamped) passes the end point. The
+    // old check compared the wall-clamped tail against dist, which could never
+    // trigger for shots shorter than the streak length — immortal tracers on
+    // every close-range hit.
+    if (t.traveled - _TRACER_LEN >= t.dist) { t.active = false; _tracerLive--; tracerMesh.setMatrixAt(i, _trZero); continue; }
+    const head = Math.min(t.traveled, t.dist);
+    const tail = Math.max(t.traveled - _TRACER_LEN, 0);
+    _trTmp.position.copy(t.dir).multiplyScalar((head + tail) / 2).add(t.from);
+    _trVec.copy(_trTmp.position).add(t.dir);
+    _trTmp.lookAt(_trVec);
+    _trTmp.scale.set(1, 1, Math.max(head - tail, 0.1));
+    _trTmp.updateMatrix();
+    tracerMesh.setMatrixAt(i, _trTmp.matrix);
+  }
+  tracerMesh.instanceMatrix.needsUpdate = true;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3974,6 +4052,24 @@ function getMaster() {
   return masterCompressor;
 }
 
+// Shared short delay+feedback send, used only by bird() to give chirps a
+// sense of open-air distance instead of landing dry/synthetic on the ear.
+let _birdAir = null;
+function getBirdAir() {
+  const ctx = ensureAudio();
+  if (!_birdAir) {
+    const delay = ctx.createDelay(0.5);
+    delay.delayTime.value = 0.085;
+    const feedback = ctx.createGain(); feedback.gain.value = 0.22;
+    const wetGain = ctx.createGain(); wetGain.gain.value = 0.55;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3200;
+    delay.connect(feedback).connect(delay); // feedback loop
+    delay.connect(lp).connect(wetGain).connect(getMaster());
+    _birdAir = delay;
+  }
+  return _birdAir;
+}
+
 function playNoise(duration, volume, filterFreq, filterType) {
   const ctx = ensureAudio();
   const bufferSize = ctx.sampleRate * duration;
@@ -4135,6 +4231,8 @@ const SFX = {
     // Layer 4: Slide cycle
     setTimeout(() => playNoise(0.015, 0.08, 3200, 'highpass'), 55);
   },
+  // Reverted to the original timeline — the rescaled-to-reloadTime version
+  // (spread events across the full 1500/2200ms) tested worse than this.
   reload() {
     // Mag release click
     setTimeout(() => {
@@ -4188,12 +4286,42 @@ const SFX = {
   empty_click() {
     playTone(400, 0.03, 0.08, 'square');
   },
+  // Short synthesized vocal grunt on taking damage — a saw-tooth pitch-drop
+  // through a vocal-range bandpass (formant-ish), same procedural-only
+  // approach as the rest of this file (no audio assets).
+  hit_grunt() {
+    const ctx = ensureAudio();
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator(); osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150 + Math.random() * 25, t0);
+    osc.frequency.exponentialRampToValueAtTime(65, t0 + 0.15);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0, t0);
+    g.gain.linearRampToValueAtTime(0.24, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.20);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 500; bp.Q.value = 1.1;
+    osc.connect(bp).connect(g).connect(getMaster());
+    osc.start(t0); osc.stop(t0 + 0.20);
+    playNoise(0.09, 0.09, 850, 'bandpass');
+  },
   footstep() {
-    // Varied footstep — alternates between two tones for left/right feel
+    // Was near-inaudible — pure noise bursts with no low-end weight got lost
+    // under gunfire/ambience. Added a real body-boom oscillator layer (like
+    // kill_chaching's thump) plus ~1.5x on the noise volumes.
+    const ctx = ensureAudio();
+    const t0 = ctx.currentTime;
+    const thump = ctx.createOscillator(); thump.type = 'sine';
+    thump.frequency.setValueAtTime(100 + Math.random() * 20, t0);
+    thump.frequency.exponentialRampToValueAtTime(46, t0 + 0.05);
+    const thumpG = ctx.createGain();
+    thumpG.gain.setValueAtTime(0.255, t0); // -15%
+    thumpG.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
+    thump.connect(thumpG).connect(getMaster());
+    thump.start(t0); thump.stop(t0 + 0.09);
     const crush = 120 + Math.random() * 80;
-    playNoise(0.06, 0.22, crush, 'lowpass');
-    playNoise(0.03, 0.12, 180, 'lowpass');
-    setTimeout(() => playNoise(0.04, 0.08, 400, 'bandpass'), 20);
+    playNoise(0.07, 0.27, crush, 'lowpass');   // -15%
+    playNoise(0.035, 0.145, 180, 'lowpass');   // -15%
+    setTimeout(() => playNoise(0.045, 0.094, 400, 'bandpass'), 20); // -15%
   },
   water_damage() {
     playNoise(0.15, 0.04, 800, 'lowpass');
@@ -4225,7 +4353,14 @@ const SFX = {
   },
   bird() {
     const ctx = ensureAudio();
-    const species = Math.floor(Math.random() * 4);
+    // Weighted toward the two pleasant species (warbler/dove); the trill and
+    // long-whistle were the harshest/most piercing of the four and are now
+    // rarer as well as individually softened below.
+    const roll = Math.random();
+    const species = roll < 0.38 ? 0 : roll < 0.68 ? 2 : roll < 0.86 ? 1 : 3;
+    // Shared "open air" send — a short delay+feedback bus so bird calls read
+    // as distant/outdoor instead of dry synth tones landing right on the ear.
+    const air = getBirdAir();
     if (species === 0) {
       // Melodic tropical warbler — smooth FM chirps with natural envelope
       const base = 1800 + Math.random() * 600;
@@ -4246,26 +4381,30 @@ const SFX = {
           g.gain.linearRampToValueAtTime(0.032, t0 + 0.06);
           g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.11);
           osc.connect(g).connect(getMaster());
+          g.connect(air);
           osc.start(t0); osc.stop(t0 + 0.12);
         }, t);
       }
     } else if (species === 1) {
-      // Rapid staccato finch trill — natural rhythmic burst
-      const base = 2600 + Math.random() * 500;
+      // Rapid staccato finch trill — was the most piercing species (base up to
+      // 3100Hz, no filtering); lowered range + added a lowpass to take the edge off.
+      const base = 2100 + Math.random() * 400;
       const chirps = 6 + Math.floor(Math.random() * 5);
       for (let i = 0; i < chirps; i++) {
         setTimeout(() => {
           const ctx2 = ensureAudio();
           const t0 = ctx2.currentTime;
           const osc = ctx2.createOscillator(); osc.type = 'sine';
-          const f = base + (Math.random() - 0.5) * 300;
+          const f = base + (Math.random() - 0.5) * 250;
           osc.frequency.setValueAtTime(f, t0);
-          osc.frequency.linearRampToValueAtTime(f * 1.12, t0 + 0.025);
+          osc.frequency.linearRampToValueAtTime(f * 1.10, t0 + 0.025);
           const g = ctx2.createGain();
           g.gain.setValueAtTime(0, t0);
-          g.gain.linearRampToValueAtTime(0.038, t0 + 0.008);
+          g.gain.linearRampToValueAtTime(0.030, t0 + 0.008);
           g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.055);
-          osc.connect(g).connect(getMaster());
+          const lp = ctx2.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3400;
+          osc.connect(lp).connect(g).connect(getMaster());
+          g.connect(air);
           osc.start(t0); osc.stop(t0 + 0.06);
         }, i * 75 + Math.random() * 20);
       }
@@ -4288,24 +4427,29 @@ const SFX = {
           g.gain.setValueAtTime(0.038, t0 + 0.18);
           g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.32);
           osc.connect(g).connect(getMaster());
+          g.connect(air);
           osc.start(t0); osc.stop(t0 + 0.33);
         }, i * 400 + Math.random() * 60);
       }
     } else {
-      // Long descending whistle — like a jungle oriole
+      // Long descending whistle — was the other piercing species (started at
+      // 2600Hz, unfiltered); lowered the start pitch and added a lowpass so
+      // it reads as a mellow oriole call instead of a screech.
       const ctx2 = ensureAudio();
       const t0 = ctx2.currentTime;
       const osc = ctx2.createOscillator(); osc.type = 'sine';
-      const startF = 2200 + Math.random() * 400;
+      const startF = 1850 + Math.random() * 350;
       osc.frequency.setValueAtTime(startF, t0);
       osc.frequency.linearRampToValueAtTime(startF * 0.72, t0 + 0.35);
       osc.frequency.linearRampToValueAtTime(startF * 0.58, t0 + 0.6);
       const g = ctx2.createGain();
       g.gain.setValueAtTime(0, t0);
-      g.gain.linearRampToValueAtTime(0.048, t0 + 0.03);
-      g.gain.setValueAtTime(0.04, t0 + 0.3);
+      g.gain.linearRampToValueAtTime(0.040, t0 + 0.03);
+      g.gain.setValueAtTime(0.033, t0 + 0.3);
       g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.65);
-      osc.connect(g).connect(getMaster());
+      const lp = ctx2.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3000;
+      osc.connect(lp).connect(g).connect(getMaster());
+      g.connect(air);
       osc.start(t0); osc.stop(t0 + 0.66);
     }
   },
@@ -4498,6 +4642,7 @@ renderer.domElement.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   state.locked = !!document.pointerLockElement;
+  if (!state.locked) state.firing = false; // never leave the trigger stuck after unlock
   // In lobby or pvp mode — never show main menu overlay on ESC
   if (state.inLobby || state.gameMode === 'pvp') {
     overlay.classList.add('hidden');
@@ -4566,10 +4711,11 @@ document.addEventListener('keyup', (e) => {
 
 document.addEventListener('mousedown', (e) => {
   if (!state.locked) return;
-  if (e.button === 0) shoot();
+  if (e.button === 0) { state.firing = true; shoot(); } // fire now; auto weapons keep going via the update loop
   if (e.button === 2) { state.ads = true; crosshair.style.display = 'none'; adsVignette.classList.add('active'); }
 });
 document.addEventListener('mouseup', (e) => {
+  if (e.button === 0) state.firing = false;
   if (e.button === 2) { state.ads = false; crosshair.style.display = ''; adsVignette.classList.remove('active'); }
 });
 document.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -4613,6 +4759,7 @@ function applyHitEvent(evt) {
     if (evt.hp !== undefined)    state.hp    = evt.hp;
     else state.hp = Math.max(0, state.hp - evt.damage);
     if (evt.armor !== undefined) state.armor = evt.armor;
+    SFX.hit_grunt();
     if (state.hp <= 0 && evt.shooter) {
       state.killCamShooterId = evt.shooter;
       state.killCamBotIndex = -1;
@@ -4641,25 +4788,60 @@ function sendShoot(targetId, damage, headshot) {
   }
 }
 
+// ── Floating damage numbers ── pooled DOM spans; CSS keyframes do the whole
+// rise/fade so there's zero per-frame JS. Screen position is captured at hit
+// time (Krunker-style — numbers don't track the target afterwards).
+const _DMG_POOL = 12;
+const _dmgEls = [];
+let _dmgHead = 0;
+const _dmgProj = new THREE.Vector3();
+function showDamageNumber(dmg, isHead, worldPos) {
+  const host = document.getElementById('dmg-numbers');
+  if (!host) return;
+  _dmgProj.copy(worldPos).project(camera);
+  if (_dmgProj.z > 1) return; // behind the camera
+  let el = _dmgEls[_dmgHead];
+  if (!el) { el = document.createElement('div'); host.appendChild(el); _dmgEls[_dmgHead] = el; }
+  _dmgHead = (_dmgHead + 1) % _DMG_POOL;
+  el.textContent = dmg;
+  el.className = 'dmg-num ' + (isHead ? 'head' : 'body');
+  el.style.left = ((_dmgProj.x * 0.5 + 0.5) * window.innerWidth + (Math.random() - 0.5) * 28) + 'px';
+  el.style.top  = ((-_dmgProj.y * 0.5 + 0.5) * window.innerHeight - 8) + 'px';
+  void el.offsetWidth; // restart the CSS animation when a slot recycles
+  el.classList.add('pop');
+}
+
 // SHOOTING — First shot accurate, spread accumulates with rapid fire
 // ═══════════════════════════════════════════════════════════
 const raycaster = new THREE.Raycaster();
-let hitmarkerTimeout = null, muzzleTimeout = null, crosshairResetTimeout = null;
+let hitmarkerTimeout = null, crosshairResetTimeout = null;
 let spreadAccum = 0;        // Accumulated spread from rapid fire
+let burstShots = 0;         // Consecutive shots in the current burst (resets after 400ms pause)
 let lastShotTime = 0;
 
 function shoot() {
   if (!state.canFire || state.reloading || state.playerDead || (state.phase !== 'playing' && !state.inLobby)) return;
+  const now = performance.now();
+  // Cadence gate — timestamp-based, not setTimeout (which drifts ±5-15ms/shot
+  // and made sustained fire rhythm mushy). state.canFire is now purely the
+  // reload/switch gate; fire rate lives here.
+  if (now < (state.nextFireAt || 0)) return;
   const wep = CONFIG.weapons[state.currentWeapon];
   if (state.ammo[state.currentWeapon] <= 0) {
+    state.nextFireAt = now + 250; // throttle empty-click spam under held trigger
     SFX.empty_click();
     reload();
     return;
   }
 
+  // Slot accumulator: while firing continuously, schedule from the previous slot
+  // so cadence averages exactly fireRate regardless of frame timing; after a
+  // pause, restart from now.
+  const sched = state.nextFireAt || 0;
+  state.nextFireAt = (now - sched < wep.fireRate) ? sched + wep.fireRate : now + wep.fireRate;
+
   state.ammo[state.currentWeapon]--;
   state.shotsFired++;
-  state.canFire = false;
   // Hold the network shooting flag up briefly so remote clients see a firing
   // stance across click gaps (rapid fire keeps refreshing it).
   state.shootingUntil = performance.now() + 450;
@@ -4670,19 +4852,20 @@ function shoot() {
   if (isM4) { SFX.gunshot_m4(); showMuzzleFlash(); }
   else SFX.gunshot_pistol();
 
-  // Spread accumulation: resets if enough time has passed since last shot
-  const now = performance.now();
+  // Burst model: the first 6 shots of a burst fly true (ADS = laser), then
+  // scatter ramps in per shot AND the recoil climb below steepens — sustained
+  // fire drifts upward and blooms, so bursts win at range, spray wins up close.
+  // A 400ms pause resets the burst.
   const timeSinceLast = now - lastShotTime;
-  if (timeSinceLast > 400) {
-    spreadAccum = 0; // Reset — this shot is a "first shot", perfectly accurate if ADS
-  } else {
-    spreadAccum = Math.min(spreadAccum + 0.008, 0.04); // Build up spread
-  }
+  if (timeSinceLast > 400) burstShots = 0;
+  burstShots++;
   lastShotTime = now;
+  const overBurst = Math.max(0, burstShots - 6);
+  spreadAccum = Math.min(overBurst * 0.0045, 0.022);
 
-  // Spread: base weapon spread + accumulated rapid-fire spread — captured BEFORE recoil
+  // Spread: base weapon spread + burst bloom (ADS stays tighter) — captured BEFORE recoil
   const baseSpread = state.ads ? wep.adsSpread : wep.spread;
-  const totalSpread = baseSpread + spreadAccum;
+  const totalSpread = baseSpread + spreadAccum * (state.ads ? 0.55 : 1);
   const dir = new THREE.Vector3(
     (Math.random() - 0.5) * totalSpread,
     (Math.random() - 0.5) * totalSpread,
@@ -4691,29 +4874,20 @@ function shoot() {
   dir.applyQuaternion(camera.quaternion); // Use pre-recoil direction
   const shotOrigin = camera.position.clone();
 
-  // Recoil (camera kick) — applied AFTER capturing shot direction
+  // Recoil (camera kick) — applied AFTER capturing shot direction. The climb
+  // multiplier grows over the burst (×1 → ×~2 by shot 12): early shots kick
+  // gently, a long spray walks the muzzle up and must be pulled down.
   const recoil = state.ads ? wep.recoilAds : wep.recoilHip;
-  state.pitch += recoil * (0.7 + Math.random() * 0.3);
+  const climb = 1 + Math.min(burstShots - 1, 11) * 0.09;
+  state.pitch += recoil * climb * (0.7 + Math.random() * 0.3);
   state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
-  state.yaw += (Math.random() - 0.5) * recoil * 0.3;
+  state.yaw += (Math.random() - 0.5) * recoil * (0.3 + (climb - 1) * 0.3);
 
   weaponGroup.position.z += 0.06;
   weaponGroup.rotation.x -= 0.08;
 
-  // Project barrel tip to screen coords for muzzle flash — M4 only
-  if (isM4) {
-    const localTip = new THREE.Vector3(0.03, -0.01, -0.925);
-    const worldTip = localTip.clone().applyMatrix4(weaponGroup.matrixWorld);
-    const ndc = worldTip.clone().project(camera);
-    const sx = ( ndc.x * 0.5 + 0.5) * window.innerWidth;
-    const sy = (-ndc.y * 0.5 + 0.5) * window.innerHeight;
-    muzzleFlash.style.left = sx + 'px';
-    muzzleFlash.style.top  = sy + 'px';
-    muzzleFlash.style.transform = `translate(-50%,-50%) rotate(${Math.random()*360}deg)`;
-    muzzleFlash.classList.add('flash');
-    clearTimeout(muzzleTimeout);
-    muzzleTimeout = setTimeout(() => muzzleFlash.classList.remove('flash'), 55);
-  }
+  // (Old screen-projected DOM #muzzle-flash removed — the 3D muzzleFlashGroup
+  // on the barrel, shown via showMuzzleFlash(), is the only local flash now.)
 
   crosshair.classList.add('fired');
   clearTimeout(crosshairResetTimeout);
@@ -4751,22 +4925,24 @@ function shoot() {
   const paneHits = raycaster.intersectObjects(windowPanes, false);
   const paneDist = paneHits.length > 0 ? paneHits[0].distance : Infinity;
 
+  let shotEnd = null; // where the bullet visually stopped — feeds the tracer
+
   if (intersects.length > 0) {
     const hit = intersects[0];
     if (paneDist < hit.distance) {
       // Shot stopped by window glass
+      shotEnd = paneHits[0].point;
       spawnImpact(paneHits[0].point, paneHits[0].face ? paneHits[0].face.normal : new THREE.Vector3(0, 1, 0));
     } else if (blockDist !== null && blockDist < hit.distance) {
       // Shot stopped by volcano terrain
-      spawnImpact(
-        new THREE.Vector3(shotOrigin.x + dir.x * blockDist, shotOrigin.y + dir.y * blockDist, shotOrigin.z + dir.z * blockDist),
-        new THREE.Vector3(0, 1, 0)
-      );
+      shotEnd = new THREE.Vector3(shotOrigin.x + dir.x * blockDist, shotOrigin.y + dir.y * blockDist, shotOrigin.z + dir.z * blockDist);
+      spawnImpact(shotEnd, new THREE.Vector3(0, 1, 0));
     } else {
       const isBotHit = hit.object.userData.botIndex !== undefined;
       const isHead = hit.object.userData.isHead === true;
       const dmg = isHead ? wep.headDmg : wep.bodyDmg;
 
+      shotEnd = hit.point;
       spawnImpact(hit.point, hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0));
 
       const bot = isBotHit ? findBotByMesh(hit.object) : null;
@@ -4780,6 +4956,7 @@ function shoot() {
         else SFX.hitmarker();
 
         state.shotsHit++;
+        showDamageNumber(dmg, isHead, hit.point);
         const wasAlive = bot.alive;
         damageBot(bot, dmg, isHead);
         if (wasAlive && !bot.alive) SFX.kill_chaching();
@@ -4793,6 +4970,7 @@ function shoot() {
           hitmarkerTimeout = setTimeout(() => hitmarker.classList.remove('show'), 120);
           if (isHead) SFX.headshot(); else SFX.hitmarker();
           state.shotsHit++;
+          showDamageNumber(dmg, isHead, hit.point);
           // No friendly fire during warmup lobby — hitmarker shows but no damage sent
           if (!state.inLobby) sendShoot(remoteHit.id, dmg, isHead);
         }
@@ -4800,11 +4978,24 @@ function shoot() {
     }
   } else if (paneDist < Infinity) {
     // Shot hit window glass with no target behind it
+    shotEnd = paneHits[0].point;
     spawnImpact(paneHits[0].point, paneHits[0].face ? paneHits[0].face.normal : new THREE.Vector3(0, 1, 0));
   }
 
+  // Tracer — from the true barrel tip, transformed through the actual weapon
+  // geometry (not a generic camera-relative guess, which is why the pistol's
+  // tracer used to launch from the side of the model instead of the muzzle).
+  // Pistol tip = the barrel crown mesh in createWeaponModel (08_weapons.js):
+  // x=0.15,y=0.004 matches the barrel cylinders; z=-0.567-0.006 is the crown's
+  // front face (half its 0.012 height beyond the cylinder's center).
+  const muzzle = (isM4
+    ? new THREE.Vector3(0.03, -0.01, -0.925)
+    : new THREE.Vector3(0.15, 0.004, -0.573)
+  ).applyMatrix4(weaponGroup.matrixWorld);
+  if (!shotEnd) shotEnd = shotOrigin.clone().addScaledVector(dir, raycaster.far);
+  spawnTracer(muzzle, shotEnd);
+
   updateHUD();
-  setTimeout(() => { state.canFire = true; }, wep.fireRate);
 }
 
 function switchWeapon(toWeapon) {
@@ -5569,6 +5760,9 @@ function physicsStep(fixedDt) {
 // the fixed-timestep accumulator above. Everything here uses
 // renderDt — visual smoothing, UI, bots, particles, rendering.
 // ═══════════════════════════════════════════════════════════
+// Scratch vectors for remote-tracer barrel math — never allocated in the loop
+const _rtA = new THREE.Vector3(), _rtB = new THREE.Vector3();
+
 function update() {
   requestAnimationFrame(update);
   const renderDt = Math.min(clock.getDelta(), 0.05);
@@ -5606,6 +5800,13 @@ function update() {
   while (physicsAccumulator >= FIXED_DT) {
     physicsStep(FIXED_DT);
     physicsAccumulator -= FIXED_DT;
+  }
+
+  // Hold-to-fire: auto weapons re-trigger from the frame loop; shoot() itself
+  // gates cadence via state.nextFireAt, so frame rate never changes fire rate.
+  if (state.firing) {
+    if (!state.locked) state.firing = false;
+    else if ((CONFIG.weapons[state.currentWeapon] || {}).auto) shoot();
   }
 
   // Canal boost HUD
@@ -5821,20 +6022,7 @@ function update() {
         const prevT = t - renderDt;
         for (const st of state.killCamShotTimes) {
           if (st > prevT && st <= t) {
-            showMuzzleFlash();
-            // CSS muzzle flash — project barrel tip from weapon-camera view space manually
-            // weaponGroup is a child of weaponCamera, so .matrix puts tip in view space directly
-            const _mfTip = new THREE.Vector3(0.03, -0.01, -0.925).applyMatrix4(weaponGroup.matrix);
-            const _mfF = 1 / Math.tan(camera.fov * Math.PI / 360);
-            const _mfZ = Math.max(0.001, -_mfTip.z);
-            const _mfSx = (_mfTip.x * _mfF / (camera.aspect || 1) / _mfZ * 0.5 + 0.5) * window.innerWidth;
-            const _mfSy = (-_mfTip.y * _mfF / _mfZ * 0.5 + 0.5) * window.innerHeight;
-            muzzleFlash.style.left = _mfSx + 'px';
-            muzzleFlash.style.top  = _mfSy + 'px';
-            muzzleFlash.style.transform = `translate(-50%,-50%) rotate(${Math.random()*360}deg)`;
-            muzzleFlash.classList.add('flash');
-            clearTimeout(muzzleTimeout);
-            muzzleTimeout = setTimeout(() => muzzleFlash.classList.remove('flash'), 55);
+            showMuzzleFlash(); // 3D barrel flash only (old CSS #muzzle-flash starburst removed)
             // Hitmarker — red tint on kill shot (last in the list), white otherwise
             const _isKillShot = st === state.killCamShotTimes[state.killCamShotTimes.length - 1];
             hitmarker.style.filter = _isKillShot ? 'hue-rotate(200deg) brightness(2)' : 'none';
@@ -5976,9 +6164,12 @@ function update() {
   if (!state.playerDead && !state.killCamActive) updateBots(renderDt);
 
   // Snapshot interpolation — render each remote player slightly in the past on the
-  // server's clock, interpolating between two real snapshots. The delay adapts to
-  // measured arrival jitter (60–150ms); brief gaps are covered by extrapolation.
-  const INTERP_DELAY = Math.min(150, Math.max(60, (state._snapJitter || 25) * 3));
+  // server's clock, interpolating between two real snapshots. Delay = one mean
+  // snapshot gap + a jitter cushion: clean connections sit at the 45ms floor
+  // (was hard-pinned at 60), jittery ones rise smoothly toward 150. Brief gaps
+  // are covered by extrapolation.
+  const INTERP_DELAY = Math.min(150, Math.max(45,
+    (state._snapGapMean || 17) + (state._snapJitter || 4) * 4 + 12));
   const renderTime = Date.now() + (state.clockOffset || 0) - INTERP_DELAY;
   state.renderServerTime = renderTime; // shooter's view time — sent with shots for lag comp
 
@@ -6111,6 +6302,16 @@ function update() {
           const s = (0.34 + Math.random() * 0.22) / (pu.gunMesh.scale.x || 1);
           pu._mf.scale.set(s, s, 1);
           pu._mf.material.rotation = Math.random() * Math.PI;
+          // Tracer along the gun's aim, from the same barrel tip as the flash.
+          // Yaw-accurate; pitch isn't in the snapshot (flat-arena approximation).
+          // Rate-limited to the M4 cadence so the flicker doesn't multi-spawn.
+          const nowT = performance.now();
+          if (!rp._lastTracerAt || nowT - rp._lastTracerAt > 120) {
+            rp._lastTracerAt = nowT;
+            _rtA.set(0, 0, -0.69).applyMatrix4(pu.gunMesh.matrixWorld);
+            _rtB.set(0, 0, -1.69).applyMatrix4(pu.gunMesh.matrixWorld).sub(_rtA).normalize();
+            spawnTracerRay(_rtA, _rtB, 90);
+          }
         }
         pu._mfl.intensity = on ? 3.2 : 0;
       }
@@ -6499,6 +6700,8 @@ function update() {
   weaponCamera.quaternion.copy(camera.quaternion);
   weaponCamera.fov = camera.fov;
   weaponCamera.updateProjectionMatrix();
+
+  updateTracers(renderDt); // bullet tracer streaks (pooled InstancedMesh, 08_weapons)
 
   // Impact particles (pooled — deactivate on expiry; never remove/dispose)
   for (let i = 0; i < impactParticles.length; i++) {
@@ -7202,10 +7405,16 @@ function connectToServer() {
         state.clockOffset = (state.clockOffset === undefined)
           ? maxOff : state.clockOffset + (maxOff - state.clockOffset) * 0.1;
 
-        // Adaptive interpolation delay from snapshot arrival jitter
+        // Adaptive interpolation delay — track the mean snapshot gap and the
+        // true jitter (mean |deviation| from that gap) as separate EMAs. The
+        // old code fed the mean gap itself in as "jitter" (~16.7ms at 60Hz),
+        // which pinned INTERP_DELAY at its floor and never responded to actual
+        // network conditions.
         if (state._lastSnapArrival) {
           const gap = arrival - state._lastSnapArrival;
-          state._snapJitter = (state._snapJitter || 20) * 0.95 + gap * 0.05;
+          state._snapGapMean = (state._snapGapMean || 17) * 0.95 + gap * 0.05;
+          const dev = Math.abs(gap - state._snapGapMean);
+          state._snapJitter = (state._snapJitter === undefined ? 4 : state._snapJitter) * 0.95 + dev * 0.05;
         }
         state._lastSnapArrival = arrival;
 

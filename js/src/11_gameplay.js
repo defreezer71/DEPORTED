@@ -36,6 +36,7 @@ function applyHitEvent(evt) {
     if (evt.hp !== undefined)    state.hp    = evt.hp;
     else state.hp = Math.max(0, state.hp - evt.damage);
     if (evt.armor !== undefined) state.armor = evt.armor;
+    SFX.hit_grunt();
     if (state.hp <= 0 && evt.shooter) {
       state.killCamShooterId = evt.shooter;
       state.killCamBotIndex = -1;
@@ -64,25 +65,60 @@ function sendShoot(targetId, damage, headshot) {
   }
 }
 
+// ── Floating damage numbers ── pooled DOM spans; CSS keyframes do the whole
+// rise/fade so there's zero per-frame JS. Screen position is captured at hit
+// time (Krunker-style — numbers don't track the target afterwards).
+const _DMG_POOL = 12;
+const _dmgEls = [];
+let _dmgHead = 0;
+const _dmgProj = new THREE.Vector3();
+function showDamageNumber(dmg, isHead, worldPos) {
+  const host = document.getElementById('dmg-numbers');
+  if (!host) return;
+  _dmgProj.copy(worldPos).project(camera);
+  if (_dmgProj.z > 1) return; // behind the camera
+  let el = _dmgEls[_dmgHead];
+  if (!el) { el = document.createElement('div'); host.appendChild(el); _dmgEls[_dmgHead] = el; }
+  _dmgHead = (_dmgHead + 1) % _DMG_POOL;
+  el.textContent = dmg;
+  el.className = 'dmg-num ' + (isHead ? 'head' : 'body');
+  el.style.left = ((_dmgProj.x * 0.5 + 0.5) * window.innerWidth + (Math.random() - 0.5) * 28) + 'px';
+  el.style.top  = ((-_dmgProj.y * 0.5 + 0.5) * window.innerHeight - 8) + 'px';
+  void el.offsetWidth; // restart the CSS animation when a slot recycles
+  el.classList.add('pop');
+}
+
 // SHOOTING — First shot accurate, spread accumulates with rapid fire
 // ═══════════════════════════════════════════════════════════
 const raycaster = new THREE.Raycaster();
-let hitmarkerTimeout = null, muzzleTimeout = null, crosshairResetTimeout = null;
+let hitmarkerTimeout = null, crosshairResetTimeout = null;
 let spreadAccum = 0;        // Accumulated spread from rapid fire
+let burstShots = 0;         // Consecutive shots in the current burst (resets after 400ms pause)
 let lastShotTime = 0;
 
 function shoot() {
   if (!state.canFire || state.reloading || state.playerDead || (state.phase !== 'playing' && !state.inLobby)) return;
+  const now = performance.now();
+  // Cadence gate — timestamp-based, not setTimeout (which drifts ±5-15ms/shot
+  // and made sustained fire rhythm mushy). state.canFire is now purely the
+  // reload/switch gate; fire rate lives here.
+  if (now < (state.nextFireAt || 0)) return;
   const wep = CONFIG.weapons[state.currentWeapon];
   if (state.ammo[state.currentWeapon] <= 0) {
+    state.nextFireAt = now + 250; // throttle empty-click spam under held trigger
     SFX.empty_click();
     reload();
     return;
   }
 
+  // Slot accumulator: while firing continuously, schedule from the previous slot
+  // so cadence averages exactly fireRate regardless of frame timing; after a
+  // pause, restart from now.
+  const sched = state.nextFireAt || 0;
+  state.nextFireAt = (now - sched < wep.fireRate) ? sched + wep.fireRate : now + wep.fireRate;
+
   state.ammo[state.currentWeapon]--;
   state.shotsFired++;
-  state.canFire = false;
   // Hold the network shooting flag up briefly so remote clients see a firing
   // stance across click gaps (rapid fire keeps refreshing it).
   state.shootingUntil = performance.now() + 450;
@@ -93,19 +129,20 @@ function shoot() {
   if (isM4) { SFX.gunshot_m4(); showMuzzleFlash(); }
   else SFX.gunshot_pistol();
 
-  // Spread accumulation: resets if enough time has passed since last shot
-  const now = performance.now();
+  // Burst model: the first 6 shots of a burst fly true (ADS = laser), then
+  // scatter ramps in per shot AND the recoil climb below steepens — sustained
+  // fire drifts upward and blooms, so bursts win at range, spray wins up close.
+  // A 400ms pause resets the burst.
   const timeSinceLast = now - lastShotTime;
-  if (timeSinceLast > 400) {
-    spreadAccum = 0; // Reset — this shot is a "first shot", perfectly accurate if ADS
-  } else {
-    spreadAccum = Math.min(spreadAccum + 0.008, 0.04); // Build up spread
-  }
+  if (timeSinceLast > 400) burstShots = 0;
+  burstShots++;
   lastShotTime = now;
+  const overBurst = Math.max(0, burstShots - 6);
+  spreadAccum = Math.min(overBurst * 0.0045, 0.022);
 
-  // Spread: base weapon spread + accumulated rapid-fire spread — captured BEFORE recoil
+  // Spread: base weapon spread + burst bloom (ADS stays tighter) — captured BEFORE recoil
   const baseSpread = state.ads ? wep.adsSpread : wep.spread;
-  const totalSpread = baseSpread + spreadAccum;
+  const totalSpread = baseSpread + spreadAccum * (state.ads ? 0.55 : 1);
   const dir = new THREE.Vector3(
     (Math.random() - 0.5) * totalSpread,
     (Math.random() - 0.5) * totalSpread,
@@ -114,29 +151,20 @@ function shoot() {
   dir.applyQuaternion(camera.quaternion); // Use pre-recoil direction
   const shotOrigin = camera.position.clone();
 
-  // Recoil (camera kick) — applied AFTER capturing shot direction
+  // Recoil (camera kick) — applied AFTER capturing shot direction. The climb
+  // multiplier grows over the burst (×1 → ×~2 by shot 12): early shots kick
+  // gently, a long spray walks the muzzle up and must be pulled down.
   const recoil = state.ads ? wep.recoilAds : wep.recoilHip;
-  state.pitch += recoil * (0.7 + Math.random() * 0.3);
+  const climb = 1 + Math.min(burstShots - 1, 11) * 0.09;
+  state.pitch += recoil * climb * (0.7 + Math.random() * 0.3);
   state.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, state.pitch));
-  state.yaw += (Math.random() - 0.5) * recoil * 0.3;
+  state.yaw += (Math.random() - 0.5) * recoil * (0.3 + (climb - 1) * 0.3);
 
   weaponGroup.position.z += 0.06;
   weaponGroup.rotation.x -= 0.08;
 
-  // Project barrel tip to screen coords for muzzle flash — M4 only
-  if (isM4) {
-    const localTip = new THREE.Vector3(0.03, -0.01, -0.925);
-    const worldTip = localTip.clone().applyMatrix4(weaponGroup.matrixWorld);
-    const ndc = worldTip.clone().project(camera);
-    const sx = ( ndc.x * 0.5 + 0.5) * window.innerWidth;
-    const sy = (-ndc.y * 0.5 + 0.5) * window.innerHeight;
-    muzzleFlash.style.left = sx + 'px';
-    muzzleFlash.style.top  = sy + 'px';
-    muzzleFlash.style.transform = `translate(-50%,-50%) rotate(${Math.random()*360}deg)`;
-    muzzleFlash.classList.add('flash');
-    clearTimeout(muzzleTimeout);
-    muzzleTimeout = setTimeout(() => muzzleFlash.classList.remove('flash'), 55);
-  }
+  // (Old screen-projected DOM #muzzle-flash removed — the 3D muzzleFlashGroup
+  // on the barrel, shown via showMuzzleFlash(), is the only local flash now.)
 
   crosshair.classList.add('fired');
   clearTimeout(crosshairResetTimeout);
@@ -174,22 +202,24 @@ function shoot() {
   const paneHits = raycaster.intersectObjects(windowPanes, false);
   const paneDist = paneHits.length > 0 ? paneHits[0].distance : Infinity;
 
+  let shotEnd = null; // where the bullet visually stopped — feeds the tracer
+
   if (intersects.length > 0) {
     const hit = intersects[0];
     if (paneDist < hit.distance) {
       // Shot stopped by window glass
+      shotEnd = paneHits[0].point;
       spawnImpact(paneHits[0].point, paneHits[0].face ? paneHits[0].face.normal : new THREE.Vector3(0, 1, 0));
     } else if (blockDist !== null && blockDist < hit.distance) {
       // Shot stopped by volcano terrain
-      spawnImpact(
-        new THREE.Vector3(shotOrigin.x + dir.x * blockDist, shotOrigin.y + dir.y * blockDist, shotOrigin.z + dir.z * blockDist),
-        new THREE.Vector3(0, 1, 0)
-      );
+      shotEnd = new THREE.Vector3(shotOrigin.x + dir.x * blockDist, shotOrigin.y + dir.y * blockDist, shotOrigin.z + dir.z * blockDist);
+      spawnImpact(shotEnd, new THREE.Vector3(0, 1, 0));
     } else {
       const isBotHit = hit.object.userData.botIndex !== undefined;
       const isHead = hit.object.userData.isHead === true;
       const dmg = isHead ? wep.headDmg : wep.bodyDmg;
 
+      shotEnd = hit.point;
       spawnImpact(hit.point, hit.face ? hit.face.normal : new THREE.Vector3(0, 1, 0));
 
       const bot = isBotHit ? findBotByMesh(hit.object) : null;
@@ -203,6 +233,7 @@ function shoot() {
         else SFX.hitmarker();
 
         state.shotsHit++;
+        showDamageNumber(dmg, isHead, hit.point);
         const wasAlive = bot.alive;
         damageBot(bot, dmg, isHead);
         if (wasAlive && !bot.alive) SFX.kill_chaching();
@@ -216,6 +247,7 @@ function shoot() {
           hitmarkerTimeout = setTimeout(() => hitmarker.classList.remove('show'), 120);
           if (isHead) SFX.headshot(); else SFX.hitmarker();
           state.shotsHit++;
+          showDamageNumber(dmg, isHead, hit.point);
           // No friendly fire during warmup lobby — hitmarker shows but no damage sent
           if (!state.inLobby) sendShoot(remoteHit.id, dmg, isHead);
         }
@@ -223,11 +255,24 @@ function shoot() {
     }
   } else if (paneDist < Infinity) {
     // Shot hit window glass with no target behind it
+    shotEnd = paneHits[0].point;
     spawnImpact(paneHits[0].point, paneHits[0].face ? paneHits[0].face.normal : new THREE.Vector3(0, 1, 0));
   }
 
+  // Tracer — from the true barrel tip, transformed through the actual weapon
+  // geometry (not a generic camera-relative guess, which is why the pistol's
+  // tracer used to launch from the side of the model instead of the muzzle).
+  // Pistol tip = the barrel crown mesh in createWeaponModel (08_weapons.js):
+  // x=0.15,y=0.004 matches the barrel cylinders; z=-0.567-0.006 is the crown's
+  // front face (half its 0.012 height beyond the cylinder's center).
+  const muzzle = (isM4
+    ? new THREE.Vector3(0.03, -0.01, -0.925)
+    : new THREE.Vector3(0.15, 0.004, -0.573)
+  ).applyMatrix4(weaponGroup.matrixWorld);
+  if (!shotEnd) shotEnd = shotOrigin.clone().addScaledVector(dir, raycaster.far);
+  spawnTracer(muzzle, shotEnd);
+
   updateHUD();
-  setTimeout(() => { state.canFire = true; }, wep.fireRate);
 }
 
 function switchWeapon(toWeapon) {

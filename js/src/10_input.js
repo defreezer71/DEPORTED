@@ -102,6 +102,7 @@ renderer.domElement.addEventListener('click', () => {
 });
 document.addEventListener('pointerlockchange', () => {
   state.locked = !!document.pointerLockElement;
+  if (!state.locked) state.firing = false; // never leave the trigger stuck after unlock
   // In lobby or pvp mode — never show main menu overlay on ESC
   if (state.inLobby || state.gameMode === 'pvp') {
     overlay.classList.add('hidden');
@@ -170,10 +171,11 @@ document.addEventListener('keyup', (e) => {
 
 document.addEventListener('mousedown', (e) => {
   if (!state.locked) return;
-  if (e.button === 0) shoot();
+  if (e.button === 0) { state.firing = true; shoot(); } // fire now; auto weapons keep going via the update loop
   if (e.button === 2) { state.ads = true; crosshair.style.display = 'none'; adsVignette.classList.add('active'); }
 });
 document.addEventListener('mouseup', (e) => {
+  if (e.button === 0) state.firing = false;
   if (e.button === 2) { state.ads = false; crosshair.style.display = ''; adsVignette.classList.remove('active'); }
 });
 document.addEventListener('contextmenu', (e) => e.preventDefault());

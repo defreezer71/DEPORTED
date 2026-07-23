@@ -577,6 +577,9 @@ function physicsStep(fixedDt) {
 // the fixed-timestep accumulator above. Everything here uses
 // renderDt — visual smoothing, UI, bots, particles, rendering.
 // ═══════════════════════════════════════════════════════════
+// Scratch vectors for remote-tracer barrel math — never allocated in the loop
+const _rtA = new THREE.Vector3(), _rtB = new THREE.Vector3();
+
 function update() {
   requestAnimationFrame(update);
   const renderDt = Math.min(clock.getDelta(), 0.05);
@@ -614,6 +617,13 @@ function update() {
   while (physicsAccumulator >= FIXED_DT) {
     physicsStep(FIXED_DT);
     physicsAccumulator -= FIXED_DT;
+  }
+
+  // Hold-to-fire: auto weapons re-trigger from the frame loop; shoot() itself
+  // gates cadence via state.nextFireAt, so frame rate never changes fire rate.
+  if (state.firing) {
+    if (!state.locked) state.firing = false;
+    else if ((CONFIG.weapons[state.currentWeapon] || {}).auto) shoot();
   }
 
   // Canal boost HUD
@@ -829,20 +839,7 @@ function update() {
         const prevT = t - renderDt;
         for (const st of state.killCamShotTimes) {
           if (st > prevT && st <= t) {
-            showMuzzleFlash();
-            // CSS muzzle flash — project barrel tip from weapon-camera view space manually
-            // weaponGroup is a child of weaponCamera, so .matrix puts tip in view space directly
-            const _mfTip = new THREE.Vector3(0.03, -0.01, -0.925).applyMatrix4(weaponGroup.matrix);
-            const _mfF = 1 / Math.tan(camera.fov * Math.PI / 360);
-            const _mfZ = Math.max(0.001, -_mfTip.z);
-            const _mfSx = (_mfTip.x * _mfF / (camera.aspect || 1) / _mfZ * 0.5 + 0.5) * window.innerWidth;
-            const _mfSy = (-_mfTip.y * _mfF / _mfZ * 0.5 + 0.5) * window.innerHeight;
-            muzzleFlash.style.left = _mfSx + 'px';
-            muzzleFlash.style.top  = _mfSy + 'px';
-            muzzleFlash.style.transform = `translate(-50%,-50%) rotate(${Math.random()*360}deg)`;
-            muzzleFlash.classList.add('flash');
-            clearTimeout(muzzleTimeout);
-            muzzleTimeout = setTimeout(() => muzzleFlash.classList.remove('flash'), 55);
+            showMuzzleFlash(); // 3D barrel flash only (old CSS #muzzle-flash starburst removed)
             // Hitmarker — red tint on kill shot (last in the list), white otherwise
             const _isKillShot = st === state.killCamShotTimes[state.killCamShotTimes.length - 1];
             hitmarker.style.filter = _isKillShot ? 'hue-rotate(200deg) brightness(2)' : 'none';
@@ -984,9 +981,12 @@ function update() {
   if (!state.playerDead && !state.killCamActive) updateBots(renderDt);
 
   // Snapshot interpolation — render each remote player slightly in the past on the
-  // server's clock, interpolating between two real snapshots. The delay adapts to
-  // measured arrival jitter (60–150ms); brief gaps are covered by extrapolation.
-  const INTERP_DELAY = Math.min(150, Math.max(60, (state._snapJitter || 25) * 3));
+  // server's clock, interpolating between two real snapshots. Delay = one mean
+  // snapshot gap + a jitter cushion: clean connections sit at the 45ms floor
+  // (was hard-pinned at 60), jittery ones rise smoothly toward 150. Brief gaps
+  // are covered by extrapolation.
+  const INTERP_DELAY = Math.min(150, Math.max(45,
+    (state._snapGapMean || 17) + (state._snapJitter || 4) * 4 + 12));
   const renderTime = Date.now() + (state.clockOffset || 0) - INTERP_DELAY;
   state.renderServerTime = renderTime; // shooter's view time — sent with shots for lag comp
 
@@ -1119,6 +1119,16 @@ function update() {
           const s = (0.34 + Math.random() * 0.22) / (pu.gunMesh.scale.x || 1);
           pu._mf.scale.set(s, s, 1);
           pu._mf.material.rotation = Math.random() * Math.PI;
+          // Tracer along the gun's aim, from the same barrel tip as the flash.
+          // Yaw-accurate; pitch isn't in the snapshot (flat-arena approximation).
+          // Rate-limited to the M4 cadence so the flicker doesn't multi-spawn.
+          const nowT = performance.now();
+          if (!rp._lastTracerAt || nowT - rp._lastTracerAt > 120) {
+            rp._lastTracerAt = nowT;
+            _rtA.set(0, 0, -0.69).applyMatrix4(pu.gunMesh.matrixWorld);
+            _rtB.set(0, 0, -1.69).applyMatrix4(pu.gunMesh.matrixWorld).sub(_rtA).normalize();
+            spawnTracerRay(_rtA, _rtB, 90);
+          }
         }
         pu._mfl.intensity = on ? 3.2 : 0;
       }
@@ -1507,6 +1517,8 @@ function update() {
   weaponCamera.quaternion.copy(camera.quaternion);
   weaponCamera.fov = camera.fov;
   weaponCamera.updateProjectionMatrix();
+
+  updateTracers(renderDt); // bullet tracer streaks (pooled InstancedMesh, 08_weapons)
 
   // Impact particles (pooled — deactivate on expiry; never remove/dispose)
   for (let i = 0; i < impactParticles.length; i++) {
@@ -2210,10 +2222,16 @@ function connectToServer() {
         state.clockOffset = (state.clockOffset === undefined)
           ? maxOff : state.clockOffset + (maxOff - state.clockOffset) * 0.1;
 
-        // Adaptive interpolation delay from snapshot arrival jitter
+        // Adaptive interpolation delay — track the mean snapshot gap and the
+        // true jitter (mean |deviation| from that gap) as separate EMAs. The
+        // old code fed the mean gap itself in as "jitter" (~16.7ms at 60Hz),
+        // which pinned INTERP_DELAY at its floor and never responded to actual
+        // network conditions.
         if (state._lastSnapArrival) {
           const gap = arrival - state._lastSnapArrival;
-          state._snapJitter = (state._snapJitter || 20) * 0.95 + gap * 0.05;
+          state._snapGapMean = (state._snapGapMean || 17) * 0.95 + gap * 0.05;
+          const dev = Math.abs(gap - state._snapGapMean);
+          state._snapJitter = (state._snapJitter === undefined ? 4 : state._snapJitter) * 0.95 + dev * 0.05;
         }
         state._lastSnapArrival = arrival;
 

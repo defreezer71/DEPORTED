@@ -24,7 +24,7 @@ const CONFIG = {
   prisonSize: 23,           // 15% larger
   prisonWallHeight: 10,
 
-  moveSpeed: 10.17,         // −15% from 11.97 (player-tuned)
+  moveSpeed: 8.64,          // −15% from 10.17 (player-tuned, second pass)
   adsSpeedMult: 0.65,
   strafeSpeedMult: 0.80,    // Lateral (A/D) input scaled to 80% of forward speed
   jumpForce: 9,
@@ -59,16 +59,16 @@ const CONFIG = {
 
   weapons: {
     m4: {
-      name: 'M4', magSize: 30, fireRate: 100,
+      name: 'M4', magSize: 30, fireRate: 130, auto: true,
       bodyDmg: 15, headDmg: 150,
-      recoilHip: 0.025, recoilAds: 0.012,
+      recoilHip: 0.020, recoilAds: 0.010,
       reloadTime: 2200, spread: 0.015, adsSpread: 0.0,
       range: 500,
     },
     pistol: {
       name: '1911', magSize: 15, fireRate: 180,
       bodyDmg: 15, headDmg: 150,
-      recoilHip: 0.035, recoilAds: 0.018,
+      recoilHip: 0.028, recoilAds: 0.014,
       reloadTime: 1500, spread: 0.025, adsSpread: 0.0,
       range: 400,
     }
@@ -190,7 +190,7 @@ const state = {
   ammo: { m4: 0, pistol: 0 },
   reserveAmmo: { m4: 0, pistol: 0 },
   hp: 100, armor: 0,
-  canFire: true, reloading: false, reloadPhase: null, switching: false, switchPhase: null,
+  canFire: true, firing: false, nextFireAt: 0, reloading: false, reloadPhase: null, switching: false, switchPhase: null,
   shootingUntil: 0,   // performance.now() deadline — keeps the network "shooting" flag up briefly per shot
 
   nearbyLoot: null,

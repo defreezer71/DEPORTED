@@ -202,7 +202,10 @@ function createWeaponModel(type) {
     add(Cy(0.002,0.004,0.018,4), metalShine, 0.15, 0.031,-0.210+pOff);  // tapered post
     add(B(0.064,0.052,0.072), glove,      0.15,-0.064, 0.002+pOff);
     add(B(0.014,0.048,0.068), gloveLight, 0.130,-0.062, 0.000+pOff);
-    add(B(0.052,0.044,0.148), skin,       0.130,-0.064, 0.085+pOff, 0,-0.08,0);
+    // Forearm — extended toward the camera from the original 0.148-long block
+    // (which left a visible gap once ADS pulls the pistol close to camera);
+    // far edge stays anchored at the hand, only the near edge reaches further.
+    add(B(0.058,0.050,0.22), skin,       0.130,-0.065, 0.12+pOff, 0,-0.08,0);
   }
 
   const wp = type === 'm4' ? {x:0.25,y:-0.22,z:-0.38} : {x:0.2,y:-0.2,z:-0.3};
@@ -274,6 +277,81 @@ function spawnImpact(pos, normal) {
     p.userData.life = 0.25 + Math.random() * 0.3;
     p.visible = true;
   }
+}
+
+// ── Bullet tracer pool ──
+// Same zero-allocation philosophy as the impact pool: one InstancedMesh (a
+// single draw call for every live tracer) + a fixed slot ring. A tracer is a
+// short bright streak racing from muzzle to impact — purely the visual read of
+// the shot line (Krunker-style); hitscan damage stays instant.
+const _TRACER_POOL = 24;
+const _TRACER_LEN = 7;       // streak length (world units)
+const _TRACER_SPEED = 360;   // visual travel speed (units/s)
+const _tracerGeo = new THREE.BoxGeometry(0.0245, 0.0245, 1); // unit-z, scaled to len per instance — -30% from prior pass
+const _tracerMat = new THREE.MeshBasicMaterial({
+  color: 0xffd9a0, blending: THREE.AdditiveBlending, transparent: true,
+  opacity: 0.294, depthWrite: false, // -30% from prior pass
+});
+const tracerMesh = new THREE.InstancedMesh(_tracerGeo, _tracerMat, _TRACER_POOL);
+tracerMesh.frustumCulled = false; // instances span the arena; stale instanced bounds would cull them
+scene.add(tracerMesh);
+const _tracers = [];
+for (let i = 0; i < _TRACER_POOL; i++) {
+  _tracers.push({ active: false, from: new THREE.Vector3(), dir: new THREE.Vector3(), dist: 0, traveled: 0 });
+}
+let _tracerHead = 0, _tracerLive = 0;
+const _trTmp = new THREE.Object3D();                    // matrix scratch — no per-frame allocation
+const _trZero = new THREE.Matrix4().makeScale(0, 0, 0); // hides an inactive slot
+const _trVec = new THREE.Vector3();
+for (let i = 0; i < _TRACER_POOL; i++) tracerMesh.setMatrixAt(i, _trZero); // all hidden at boot
+
+function spawnTracer(from, to) {
+  _trVec.copy(to).sub(from);
+  const d = _trVec.length();
+  if (d < 2) return; // point-blank — no visible line to draw (checked BEFORE touching a slot)
+  const t = _tracers[_tracerHead];
+  _tracerHead = (_tracerHead + 1) % _TRACER_POOL;
+  t.from.copy(from);
+  t.dir.copy(_trVec).divideScalar(d);
+  t.dist = d;
+  t.traveled = 0;
+  if (!t.active) _tracerLive++;
+  t.active = true;
+}
+
+// Remote shots know only origin + direction — clamp the streak against static
+// world geometry so it doesn't sail through cover. One raycast per remote shot
+// (≤10/s), negligible.
+const _trRay = new THREE.Raycaster();
+function spawnTracerRay(from, dir, maxDist) {
+  _trRay.set(from, dir);
+  _trRay.far = maxDist;
+  const hits = _trRay.intersectObjects(targets, false);
+  _trVec.copy(dir).multiplyScalar(hits.length > 0 ? hits[0].distance : maxDist).add(from);
+  spawnTracer(from, _trVec);
+}
+
+function updateTracers(dt) {
+  if (_tracerLive === 0) return; // nothing in flight — skip the matrix upload
+  for (let i = 0; i < _TRACER_POOL; i++) {
+    const t = _tracers[i];
+    if (!t.active) { tracerMesh.setMatrixAt(i, _trZero); continue; }
+    t.traveled += _TRACER_SPEED * dt;
+    // Done once the TAIL (traveled − LEN, unclamped) passes the end point. The
+    // old check compared the wall-clamped tail against dist, which could never
+    // trigger for shots shorter than the streak length — immortal tracers on
+    // every close-range hit.
+    if (t.traveled - _TRACER_LEN >= t.dist) { t.active = false; _tracerLive--; tracerMesh.setMatrixAt(i, _trZero); continue; }
+    const head = Math.min(t.traveled, t.dist);
+    const tail = Math.max(t.traveled - _TRACER_LEN, 0);
+    _trTmp.position.copy(t.dir).multiplyScalar((head + tail) / 2).add(t.from);
+    _trVec.copy(_trTmp.position).add(t.dir);
+    _trTmp.lookAt(_trVec);
+    _trTmp.scale.set(1, 1, Math.max(head - tail, 0.1));
+    _trTmp.updateMatrix();
+    tracerMesh.setMatrixAt(i, _trTmp.matrix);
+  }
+  tracerMesh.instanceMatrix.needsUpdate = true;
 }
 
 // ═══════════════════════════════════════════════════════════
