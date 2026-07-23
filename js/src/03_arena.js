@@ -571,14 +571,59 @@ for (const c of A.cover) {
   const _standDark  = new THREE.MeshLambertMaterial({ color: 0xCEC5AE }); // subtle tier contrast
   const _corniceMat = new THREE.MeshLambertMaterial({ color: 0xD6CDB6 });
   const _gateMat    = new THREE.MeshLambertMaterial({ color: 0xE6DECB }); // Capitol marble
-  const _concMat    = new THREE.MeshLambertMaterial({ color: 0x3a3934 }); // dark stone concourse
 
-  // ── Stone concourse under everything (fills behind the podium + tunnels) ──
+  // ── Dusk plain — one huge warm ground disc that fills under the whole arena AND
+  // rings the coliseum out to the horizon, so the arena sits in an open landscape
+  // instead of on a floating dark square (this replaces the old 170×170 concourse:
+  // a round disc leaves no straight edge to catch the eye). A radial vertex gradient
+  // holds a dark stone tone under the stands (r<~144u), warms to sunlit dust in the
+  // mid-ring, then fades to the fog-horizon tone at the rim; the disc is wide enough
+  // (r≈1200) that its edge is fully swallowed by fog. Unlit (Basic) so the low sunset
+  // sun can't flatten it to near-black. ──
   {
-    const c = new THREE.Mesh(new THREE.PlaneGeometry(170, 170), _concMat);
-    c.rotation.x = -Math.PI / 2;
-    c.position.y = -0.04;
-    scene.add(c);
+    const R = 1200, geo = new THREE.CircleGeometry(R, 96);
+    const pos = geo.attributes.position, cols = new Float32Array(pos.count * 3);
+    const cInner = new THREE.Color(0x39322a);  // dark stone under the stands (was the concourse)
+    const cMid   = new THREE.Color(0x7a5c3c);  // warm sunlit dust
+    const cRim   = new THREE.Color(0x3a2a22);  // fog-horizon tone (matches the warmed fog)
+    const tmp = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const r = Math.hypot(pos.getX(i), pos.getY(i)) / R;   // 0 center → 1 rim
+      if (r < 0.12)      tmp.copy(cInner);
+      else if (r < 0.5)  tmp.copy(cInner).lerp(cMid, (r - 0.12) / 0.38);
+      else               tmp.copy(cMid).lerp(cRim, (r - 0.5) / 0.5);
+      cols[i * 3] = tmp.r; cols[i * 3 + 1] = tmp.g; cols[i * 3 + 2] = tmp.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    const plain = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+    plain.rotation.x = -Math.PI / 2;
+    plain.position.y = -0.05;    // just beneath the paved arena floor
+    plain.renderOrder = -1;
+    scene.add(plain);
+  }
+
+  // ── Distant city ring — a dark modern skyline encircling the coliseum out near
+  // the fog line, so the arena reads as a stadium dropped into a city (DEPORTED's
+  // satire). Heavy fog at r≈470-830 means detail is irrelevant — pure silhouettes.
+  // One InstancedMesh, built once with a fixed seed (stable skyline): ~1 draw call. ──
+  {
+    const N = 90, cityGeo = new THREE.BoxGeometry(1, 1, 1);
+    const city = new THREE.InstancedMesh(cityGeo, new THREE.MeshBasicMaterial({ color: 0x2b2a33 }), N);
+    let seed = 1337; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < N; i++) {
+      const th = (i / N) * Math.PI * 2 + (rnd() - 0.5) * 0.06;
+      const rad = 470 + rnd() * 360;                       // 470–830u out
+      const w = 18 + rnd() * 46, d = 18 + rnd() * 46;
+      const h = 34 + rnd() * rnd() * 190;                  // mostly low blocks, a few towers
+      const px = Math.cos(th) * rad, pz = Math.sin(th) * rad;
+      _dummy.position.set(px, h / 2, pz);                  // base on the plain
+      _dummy.rotation.set(0, faceCenter(px, pz), 0);
+      _dummy.scale.set(w, h, d);
+      _dummy.updateMatrix();
+      city.setMatrixAt(i, _dummy.matrix);
+    }
+    city.instanceMatrix.needsUpdate = true;
+    scene.add(city);
   }
 
   // ── Tiered arcade stands — concentric elliptical rings of blocky "arch" bays
@@ -637,6 +682,77 @@ for (const c of A.cover) {
       cor.instanceMatrix.needsUpdate = true;
       scene.add(cor);
     }
+  }
+
+  // ── Roman arcade facade + foundation — the exterior is a proper Colosseum front:
+  // two storeys of round-arched bays with engaged piers, a horizontal string course
+  // between them and a plain attic on top, all rooted on a wider base plinth so the
+  // building sits in the ground instead of floating. Arched bays are ExtrudeGeometry
+  // (real round openings, not painted) instanced around the ellipse; the flat courses
+  // reuse the box-band ring. A dark backing drum makes the arches read as deep shadow.
+  // Everything instanced — a handful of draw calls, no textures. ──
+  {
+    const RXF = 64, RZF = 76, NB = 44, PW = 2.1, D = 2.4;  // facade radii, bay count, pier width, depth
+    const unit = new THREE.BoxGeometry(1, 1, 1);
+
+    // Flat protruding ring (plinth / string course / cornice / attic / backing).
+    const band = (rx, rz, yb, yt, thick, mat) => {
+      const N = 72, m = new THREE.InstancedMesh(unit, mat, N);
+      const w = (ellipseCirc(rx, rz) / N) * 1.2;   // ~20% overlap → seamless ring
+      for (let i = 0; i < N; i++) {
+        const th = (i / N) * Math.PI * 2, px = Math.cos(th) * rx, pz = Math.sin(th) * rz;
+        _dummy.position.set(px, (yb + yt) / 2, pz);
+        _dummy.rotation.set(0, faceCenter(px, pz), 0);
+        _dummy.scale.set(w, yt - yb, thick);
+        _dummy.updateMatrix();
+        m.setMatrixAt(i, _dummy.matrix);
+      }
+      m.instanceMatrix.needsUpdate = true;
+      scene.add(m);
+    };
+
+    // One arcade bay: a solid stone panel with a round-topped opening cut through it.
+    const archBay = (LH, springH) => {
+      const chord = ellipseCirc(RXF, RZF) / NB, BW = chord * 1.06, ow = BW - 2 * PW;
+      const s = new THREE.Shape();
+      s.moveTo(-BW / 2, 0); s.lineTo(BW / 2, 0); s.lineTo(BW / 2, LH);
+      s.lineTo(-BW / 2, LH); s.lineTo(-BW / 2, 0);
+      const h = new THREE.Path();
+      h.moveTo(-ow / 2, 0); h.lineTo(-ow / 2, springH);
+      h.absarc(0, springH, ow / 2, Math.PI, 0, true);    // semicircle over the top
+      h.lineTo(ow / 2, 0); h.lineTo(-ow / 2, 0);
+      s.holes.push(h);
+      const g = new THREE.ExtrudeGeometry(s, { depth: D, bevelEnabled: false, curveSegments: 8 });
+      g.translate(0, 0, -D / 2);                          // centre depth on the ellipse
+      return g;
+    };
+    // Instance an arcade-bay geometry around the ellipse at a given base height.
+    const arcadeRing = (geo, baseY, mat) => {
+      const m = new THREE.InstancedMesh(geo, mat, NB);
+      for (let i = 0; i < NB; i++) {
+        const th = (i / NB) * Math.PI * 2, px = Math.cos(th) * RXF, pz = Math.sin(th) * RZF;
+        _dummy.position.set(px, baseY, pz);
+        _dummy.rotation.set(0, faceCenter(px, pz), 0);
+        _dummy.scale.set(1, 1, 1);
+        _dummy.updateMatrix();
+        m.setMatrixAt(i, _dummy.matrix);
+      }
+      m.instanceMatrix.needsUpdate = true;
+      scene.add(m);
+    };
+
+    const _facadeMat = new THREE.MeshLambertMaterial({ color: 0xC9BE9F }); // weathered marble
+    const _plinthMat = new THREE.MeshLambertMaterial({ color: 0x8f836a }); // darker foundation stone
+    const _backMat   = new THREE.MeshLambertMaterial({ color: 0x2b2820 }); // deep shadow behind arches
+
+    band(62.4, 74.4,  0,    49,   2.0, _backMat);      // dark backing drum → arches read as shadow
+    arcadeRing(archBay(19, 12),  4,  _facadeMat);      // storey 1 arches — y 4–23
+    band(65.0, 77.0, 22.5, 25.0, 2.9, _facadeMat);     // string course between the storeys
+    arcadeRing(archBay(17, 11), 25, _facadeMat);       // storey 2 arches — y 25–42
+    band(65.0, 77.0, 41.5, 44.0, 2.9, _facadeMat);     // upper string course
+    band(64.3, 76.3, 44.0, 48.0, 2.5, _facadeMat);     // plain attic storey
+    band(66.5, 78.5,  0,    4.2,  3.4, _plinthMat);    // base plinth — wider ledge at the ground
+    band(64.6, 76.6, 47.5, 50.5, 3.2, _corniceMat);    // crowning cornice
   }
 
   // ── Blind arcade on the podium — the walls enclosing the fight get a Roman
@@ -898,6 +1014,10 @@ if (_amb) { _amb.intensity = 0.33; _amb.color.setHex(0xffdcc0); }
 // island keeps its grass bounce.
 const _hemi = scene.children.find(o => o.isHemisphereLight);
 if (_hemi) { _hemi.groundColor.setHex(0x6a5a3e); _hemi.color.setHex(0x3a4a6a); _hemi.intensity = 0.5; }
+// Warm the fog from the island's daytime blue to a dusk brown so the ground plain
+// dissolves into a golden horizon. Fog only tints scene geometry — the sky dome is
+// fog:false, so the carefully-tuned horizon glow is untouched.
+if (scene.fog) scene.fog.color.setHex(0x3a2a22);
 // Re-tint the sky dome to a sunset gradient (deep indigo zenith → warm horizon glow).
 if (window.skyDome && window.skyDome.geometry && window.skyDome.geometry.attributes.color) {
   const sp = window.skyDome.geometry.attributes.position;

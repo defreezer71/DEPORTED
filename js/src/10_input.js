@@ -26,7 +26,7 @@ state.pitch = 0;
 
 // ── Drone camera for menu background ──
 const droneCamera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 1, 1200);
-const droneClock = { angle: 0, height: 95, radius: 108 };
+const droneClock = { angle: 0, height: 95, radius: 156 };
 const overlayCanvas = document.getElementById('overlay-canvas');
 overlayCanvas.width = window.innerWidth;
 overlayCanvas.height = window.innerHeight;
@@ -43,12 +43,13 @@ function updateDroneCamera(dt) {
   const cx = Math.cos(droneClock.angle) * droneClock.radius;
   const cz = Math.sin(droneClock.angle) * droneClock.radius;
   // Gentle altitude drift
-  droneClock.height = 88 + Math.sin(droneClock.angle * 0.7) * 12;
+  droneClock.height = 90 + Math.sin(droneClock.angle * 0.7) * 8;
   droneCamera.position.set(cx, droneClock.height, cz);
-  // Look toward island center at a lower angle — more cinematic horizon view
+  // Aim near the arena rim (y≈50), not the floor — a gentler downward pitch keeps the
+  // city skyline on the horizon in frame instead of tilting it off the top edge.
   droneCamera.lookAt(
     Math.sin(droneClock.angle * 1.3) * 20,
-    14,
+    50,
     Math.cos(droneClock.angle * 0.9) * 20
   );
 }

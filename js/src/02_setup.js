@@ -142,10 +142,15 @@ const sunMesh = new THREE.Mesh(
 );
 sunMesh.position.set(210, 367, -157);
 sunMesh.renderOrder = 0;
+// The visible sun DISC lives on layer 1: the in-game camera enables layer 1 (below) so
+// the sun still shows in play, but the menu drone camera stays on layer 0 and never
+// orbits into a giant sun. The sun LIGHT is a separate object — lighting is unchanged.
+sunMesh.layers.set(1);
 scene.add(sunMesh);
 
 const camera = new THREE.PerspectiveCamera(CONFIG.normalFov, window.innerWidth / window.innerHeight, 0.1, 2000);
 camera.position.set(CONFIG.spawnPos.x, CONFIG.playerHeight, CONFIG.spawnPos.z);
+camera.layers.enable(1);   // see the sun disc (layer 1); the menu drone camera does not
 const weaponScene = new THREE.Scene();
 const weaponAmbient = new THREE.AmbientLight(0xffffff, 0.8);
 weaponScene.add(weaponAmbient);
