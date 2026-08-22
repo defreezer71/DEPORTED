@@ -1,5 +1,13 @@
+const http = require('http');
+const crypto = require('crypto');
 const WebSocket = require('ws');
-const wss = new WebSocket.Server({ port: process.env.PORT || 8081 });
+const oracle = require('./oracle');
+
+// Plain http.Server so oracle's public GET endpoints share the same port the
+// WS upgrade lives on (Render only exposes one port per service).
+const httpServer = http.createServer(oracle.httpHandler);
+const wss = new WebSocket.Server({ server: httpServer });
+httpServer.listen(process.env.PORT || 8081);
 
 const rooms = {};
 
@@ -152,8 +160,20 @@ function tickRoom(code) {
 function removePlayer(code, id) {
   const room = rooms[code];
   if (!room || !room.players[id]) return;
+  const leaving = room.players[id];
   delete room.players[id];
   room.readySet.delete(id);
+
+  // Forfeit: a mid-match disconnect (close, error, or the 10s stale-lastSeen
+  // eviction in tickRoom — all three funnel through here) with exactly one
+  // opponent left is a win for the connected player. Gated to phase==='playing'
+  // so leaving the lobby or a countdown you haven't lost yet isn't a "win" —
+  // there's no score to void before the match has actually started.
+  if (DUEL && room.phase === 'playing') {
+    const remaining = Object.values(room.players);
+    if (remaining.length === 1) endDuel(room, remaining[0], leaving);
+  }
+
   if (Object.keys(room.players).length === 0) {
     clearInterval(room.tick);
     delete rooms[code];
@@ -202,8 +222,20 @@ function startRoomMatch(code) {
     p.lastMoveAt = svNow(); p.tpStrikes = 0; p.hist = [];
     p.moveGraceUntil = svNow() + 6000;
   }
+  // Oracle: real PvP matches only (bot-practice rooms never call startRoomMatch
+  // at all — they take the isAuto/countdown path below — so this is already
+  // implicitly gated to human-vs-human).
+  if (!room.isAuto) {
+    room.matchId = crypto.randomUUID();
+    try {
+      oracle.announceMatch(room.matchId, Object.keys(room.players));
+    } catch (err) {
+      console.error('[room ' + code + '] oracle.announceMatch failed:', err.message);
+    }
+  }
+
   const startAt = Date.now() + 2500;
-  broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt });
+  broadcastToRoom(code, { type: 'startMatch', roomCode: code, startAt, matchId: room.matchId });
   setTimeout(() => { if (rooms[code]) rooms[code].phase = 'playing'; }, 5000);
 }
 
@@ -258,10 +290,19 @@ function scheduleRoundReset(room) {
 
 function endDuel(room, winner, loser) {
   room.phase = 'ended';
-  const scores = {};
-  for (const p of Object.values(room.players)) scores[p.id] = p.kills || 0;
-  broadcastToRoom(room.code, { type: 'duelOver', winner: winner.id, loser: loser.id, scores });
+  // Built from winner/loser directly, not room.players — a forfeit (see
+  // removePlayer) calls this after the loser has already been removed from
+  // the room, so reading room.players here would drop their score.
+  const scores = { [winner.id]: winner.kills || 0, [loser.id]: loser.kills || 0 };
+  broadcastToRoom(room.code, { type: 'duelOver', winner: winner.id, loser: loser.id, scores, matchId: room.matchId });
   console.log('[room ' + room.code + '] duel over — winner ' + winner.id);
+  if (room.matchId) {
+    try {
+      oracle.attestMatch(room.matchId, winner.id);
+    } catch (err) {
+      console.error('[room ' + room.code + '] oracle.attestMatch failed:', err.message);
+    }
+  }
 }
 
 wss.on('connection', ws => {

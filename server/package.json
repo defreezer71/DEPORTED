@@ -8,6 +8,8 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "better-sqlite3": "^13.0.3",
     "uuid": "^9.0.0",
     "ws": "^8.16.0"
   },
